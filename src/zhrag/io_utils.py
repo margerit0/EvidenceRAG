@@ -32,6 +32,7 @@ from typing import Any
 import yaml
 
 __all__ = [
+    "append_jsonl",
     "read_json",
     "read_jsonl",
     "read_text",
@@ -85,6 +86,30 @@ def write_jsonl(path: str | Path, rows: Iterable[dict[str, Any]]) -> int:
     p.parent.mkdir(parents=True, exist_ok=True)
     n = 0
     with open(p, "w", encoding=ENCODING, newline="\n") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+            n += 1
+    return n
+
+
+def append_jsonl(path: str | Path, rows: Iterable[dict[str, Any]]) -> int:
+    """Append rows to a JSONL file, creating it if absent.
+
+    This exists so an incrementally-built cache costs O(new rows) per flush
+    rather than O(all rows). Rewriting the whole file after every batch is
+    trivially crash-safe and fine for small files, but an embedding cache holds
+    thousands of 4,096-float rows: re-serialising all of them on each of ~115
+    batches spends more time in :func:`json.dumps` than in the network call it
+    is checkpointing.
+
+    Readers must therefore tolerate duplicate keys. The convention in this
+    codebase is last-write-wins, which :func:`read_jsonl` gives naturally when
+    the caller builds a dict.
+    """
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    n = 0
+    with open(p, "a", encoding=ENCODING, newline="\n") as fh:
         for row in rows:
             fh.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
             n += 1

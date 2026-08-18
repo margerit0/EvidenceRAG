@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from zhrag.io_utils import (
+    append_jsonl,
     read_json,
     read_jsonl,
     read_text,
@@ -23,6 +24,43 @@ from zhrag.io_utils import (
 from zhrag.tokens import cjk_ratio, estimate_tokens
 
 CHINESE = "向量搜索：使用 `tiup cluster deploy` 部署 TiDB 集群。—— 全角标点／测试"
+
+
+class TestAppendJsonl:
+    """append_jsonl backs the incremental embedding cache; see io_utils."""
+
+    def test_creates_the_file_when_absent(self, tmp_path: Path) -> None:
+        p = tmp_path / "nested" / "cache.jsonl"
+        assert append_jsonl(p, [{"id": "a"}]) == 1
+        assert [r["id"] for r in read_jsonl(p)] == ["a"]
+
+    def test_appends_rather_than_truncating(self, tmp_path: Path) -> None:
+        p = tmp_path / "cache.jsonl"
+        append_jsonl(p, [{"id": "a"}, {"id": "b"}])
+        append_jsonl(p, [{"id": "c"}])
+        assert [r["id"] for r in read_jsonl(p)] == ["a", "b", "c"]
+
+    def test_duplicate_keys_resolve_last_write_wins(self, tmp_path: Path) -> None:
+        # The cache flushes per batch and a resumed run may re-emit a key. The
+        # documented contract is that the later row wins once a caller folds the
+        # stream into a dict -- verify that rather than assume it.
+        p = tmp_path / "cache.jsonl"
+        append_jsonl(p, [{"id": "a", "v": 1}])
+        append_jsonl(p, [{"id": "a", "v": 2}])
+        assert {r["id"]: r["v"] for r in read_jsonl(p)} == {"a": 2}
+
+    def test_line_endings_stay_lf(self, tmp_path: Path) -> None:
+        # Same guarantee write_jsonl makes; an appending writer opens the file
+        # separately and would re-introduce CRLF on Windows if newline= is lost.
+        p = tmp_path / "cache.jsonl"
+        append_jsonl(p, [{"id": "a"}])
+        append_jsonl(p, [{"id": "b"}])
+        assert b"\r\n" not in p.read_bytes()
+
+    def test_chinese_is_not_escaped(self, tmp_path: Path) -> None:
+        p = tmp_path / "cache.jsonl"
+        append_jsonl(p, [{"text": CHINESE}])
+        assert CHINESE in p.read_text(encoding="utf-8")
 
 
 class TestTextRoundTrip:

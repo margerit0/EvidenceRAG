@@ -1894,6 +1894,7 @@ name = "zhrag"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "numpy" },
     { name = "pyyaml" },
 ]
 
@@ -1917,6 +1918,7 @@ requires-dist = [
     { name = "bert-score", marker = "extra == 'verify'", specifier = "==0.3.13" },
     { name = "jieba", marker = "extra == 'verify'", specifier = ">=0.42.1" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.11" },
+    { name = "numpy", specifier = ">=2.5.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },

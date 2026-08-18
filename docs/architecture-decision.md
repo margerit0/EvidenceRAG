@@ -29,7 +29,7 @@
 | **LLM（评判）** | **DeepSeek-V3 类 或 Kimi**，必须≠生成模型 | 自偏好偏差已被因果证实（GPT-4 自评胜率 +10%，Claude-v1 +25%；Panickssery et al. 2404.13076 证明自我识别能力与自偏好强度线性相关）。deepeval 内置 `deepseek_model.py` / `kimi_model.py` | 任一非 Qwen 家族强中文模型 |
 | **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,725，p50 375，p90 747，欠长块 5.3%，代码块破损 0 | 必须补跑 256/400/800 sweep 出曲线（验证分块目标的选择依据） |
 | **检索管线** | dense(4096/1024, HNSW, COSINE) + sparse(char-bigram BM25, **IP**) 双字段 → 服务端 `hybrid_search` + `RRFRanker` → 客户端 Qwen3-Reranker-4B 重排 top-50 | 三段式，每段可单独消融 | 融合方式备选 WeightedRanker / Qdrant 的 dbsf，作为消融表一列 |
-| **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | Milvus 内置 `chinese` analyzer 就是 jieba，且默认 `mode="search"` = `cut_for_search`——正是你实测最差的 72.8%，比 char bigram 的 75.8% 低 3 分。**开服务端分词器会让系统变差**。另外可绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的坑 | 无（这是本项目最有说服力的设计决策之一） |
+| **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | Milvus 内置 `chinese` analyzer 就是 jieba，且默认 `mode="search"` = `cut_for_search`——正是你实测最差的 73.4%，比 char bigram 的 75.9% 低 2.5 分。**开服务端分词器会让系统变差**。另外可绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的坑 | 无（这是本项目最有说服力的设计决策之一） |
 | **服务层** | FastAPI + httpx（异步）+ tenacity（429 指数退避） | 三个依赖，全部薄，不侵入检索层 | — |
 | **前端** | FastAPI 挂一个单文件静态 HTML（检索框 + 结果卡片 + 命中 chunk 高亮 + 各阶段耗时条） | 界面优先展示**阶段耗时**和**检索证据**，便于检查系统行为 | Gradio / Streamlit（若你想 5 分钟部署到 HF Space）。改选条件：你决定公网 demo 放 HF Space 而非 Zilliz |
 | **评估** | 检索侧：**已建成**（R@k / MRR / nDCG / ALL-gold / bootstrap CI / paired bootstrap）。生成侧：**移植** CRUD-RAG `src/metric/` 约 150 行进自己的包 | 绝不 `pip install` CRUD_RAG（它 pin 了 `llama_index==0.9.32` / `langchain==0.1.4` / `pymilvus==2.3.3`，在 3.13 上装不上） | RAGAS 只作为「我知道这个框架」的一行说明。**不要当主力**：最后一次 commit 2026-02-24，559 open issues，而竞品当天都在发版 |
@@ -61,14 +61,14 @@ pgvector README 的 FAQ 只给三条出路：half-precision（≤4000，还是�
 
 ### 3.3 关键设计决策：**不要用数据库的中文分词器**
 
-Milvus 内置 `chinese` analyzer 等价于 `{"tokenizer": "jieba", "filter": ["cnalphanumonly"]}`，而简写 `{"tokenizer": "jieba"}` 的默认是 `mode="search"`，即 jieba 的 `cut_for_search`——你实测 **72.8% R@1**，比 char bigram 的 **75.8%** 低整整 3 分。**开这个开关会让系统变差。**
+Milvus 内置 `chinese` analyzer 等价于 `{"tokenizer": "jieba", "filter": ["cnalphanumonly"]}`，而简写 `{"tokenizer": "jieba"}` 的默认是 `mode="search"`，即 jieba 的 `cut_for_search`——你实测 **73.4% R@1**，比 char bigram 的 **75.9%** 低 2.5 分。**开这个开关会让系统变差。**
 
 正确做法：进程内算 char-bigram BM25 权重 → 作为 `SPARSE_FLOAT_VECTOR` 写入 → `SPARSE_INVERTED_INDEX` + `metric_type="IP"`。数据库只负责 ANN + 服务端融合。
 
 三个副产品：
 1. 绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的限制，否则 Lite 的分数与 Standalone/Zilliz 对不上，会**悄悄污染你上报的指标**；
 2. 数据库选型变得基本可逆（只委托了 ANN + fusion）；
-3. 选型依据：**「实测数据库内置 jieba analyzer 与客户端 char-bigram BM25 臂，后者高 3.0 pt R@1，遂将词法臂移出数据库、以预计算稀疏向量喂入」**——这是量化的设计决策，不是框架默认值。
+3. 选型依据：**「实测数据库内置 jieba analyzer 与客户端 char-bigram BM25 臂，后者高 2.5 pt R@1，遂将词法臂移出数据库、以预计算稀疏向量喂入」**——这是量化的设计决策，不是框架默认值。
 
 ### 3.4 对「用 TiDB 向量检索服务 TiDB 文档」这个叙事的直接裁决
 
@@ -142,9 +142,19 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 
 截断是 `truncation='longest_first'`，`max_length` 已扣掉 prefix+suffix token 数——**被砍的永远是文档，不是脚手架**。
 
-**候选深度必须 > 10。** Qwen 自己的评测基准是 **top-100**。你实测的 ALL-gold@10 是 1doc 99.7% / 2docs 85.7% / **3docs 65.0%**——top-10 重排窗口会把 3docs 任务的天花板锁死在 65%。跑 **top-50 和 top-100 两档**作为消融。
+**候选深度必须 > 10。** Qwen 自己的评测基准是 **top-100**。你实测的 ALL-gold@10 是 1doc 99.9% / 2docs 87.3% / **3docs 68.9%**——top-10 重排窗口会把 3docs 任务的天花板锁死在 68.9%。跑 **top-50 和 top-100 两档**作为消融。
 
 ### 4.5 Provider、价格、限流
+
+> **⚠️ 2026-08-18 更正：实际在用的不是 SiliconFlow。** `.env` 指向已配置的中转端点，
+> 一个 One Hub 中转站，模型为 `Qwen/Qwen3-Embedding-8B` 与 `Qwen/Qwen3-Reranker-8B`（**没有 4B**，
+> 所以消融表的 K 行「4B vs 8B」跑不了）。下表所有 SiliconFlow 特有结论——`normalize` 默认值、
+> `dimensions` 白名单、`/v1/rerank` 的 `instruction` 字段、RPM/TPM——**对该中转站均未经验证**，
+> 后端接的是谁不透明。已实测的部分见 §13。两个实测到的行为差异：
+>
+> 1. **该 key 分组限时段调用（09:00–18:00）**，窗口外返回 HTTP 403 `one_hub_error`；
+> 2. **Cloudflare 拦截 `Python-urllib/3.x` 默认 UA**，返回 HTTP 403 `error code 1010`。
+>    两者状态码相同且都不是鉴权失败，不读 body 会误判成 key 有问题。必须显式设置 `User-Agent`。
 
 | Provider | Embedding-8B | Reranker-4B | 关键特性 |
 |---|---|---|---|
@@ -199,7 +209,7 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 | `R@1` ±95%CI | **头条指标** |
 | `MRR@10` ±95%CI | 头条指标 |
 | `nDCG@10` ±95%CI | 头条指标 |
-| `ALL-gold@10` | 按 1doc/2docs/3docs 分列（**3docs 的 65.0% 天花板必须同表标注**） |
+| `ALL-gold@10` | 按 1doc/2docs/3docs 分列（**3docs 的 68.9% 天花板必须同表标注**） |
 | `p_vs_baseline` | paired bootstrap vs char-bigram BM25 基线 |
 | `index_build_s` | jieba+bigram 并集慢 7 倍这件事要有列承载 |
 | `latency_p95_ms` | 端到端 |
@@ -208,22 +218,31 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 **行（最小可交付的 12 行）**：
 
 ```
-A. bm25-bigram          @5681, chunk=400, rerank=none      ← 基线，已有 75.8 / 0.856
-B. bm25-jieba-precise    @5681, chunk=400, rerank=none      ← 已有 73.8
-C. bm25-jieba-search     @5681, chunk=400, rerank=none      ← 已有 72.8
-D. dense-4096            @5681, chunk=400, rerank=none      ← 新
-E. dense-1024 (MRL)      @5681, chunk=400, rerank=none      ← 新，原创消融
-F. dense-512  (MRL)      @5681, chunk=400, rerank=none      ← 新，原创消融
+A. bm25-bigram          @5681, chunk=400, rerank=none      ← 基线，已有 75.9 / 0.857
+B. bm25-jieba-precise    @5681, chunk=400, rerank=none      ← 已有 74.8
+C. bm25-jieba-search     @5681, chunk=400, rerank=none      ← 已有 73.4
+D. dense-4096            @5681, chunk=400, rerank=none      ← ✅ 已测 78.0 / 0.866
+E. dense-1024 (MRL)      @5681, chunk=400, rerank=none      ← ✅ 已测 77.5 / 0.861（p=0.684，不显著劣于 D）
+F. dense-512  (MRL)      @5681, chunk=400, rerank=none      ← ✅ 已测 78.4 / 0.864（p=1.000）
 G. hybrid-rrf (A+D)      @5681, chunk=400, rerank=none      ← 新
 H. hybrid-rrf (A+E)      @5681, chunk=400, rerank=none      ← 新，最可能是最终配置
-I. H + rerank-4b@50      @5681, chunk=400                   ← 新
-J. H + rerank-4b@100     @5681, chunk=400                   ← 新
-K. H + rerank-8b@50      @5681, chunk=400                   ← 新，4B vs 8B
-L. H + rerank-4b@50      @5681, chunk=256 / 800             ← chunk sweep
-M. bm25-bigram           @500,  chunk=400, rerank=none      ← 饱和对照行，98.6 / 0.993
+I. H + rerank-8b@50      @5681, chunk=400                   ← 新
+J. H + rerank-8b@100     @5681, chunk=400                   ← 新
+K. ~~4B vs 8B~~                                             ← ❌ 取消：中转站没有 4B（见 §4.5）
+L. H + rerank-8b@50      @5681, chunk=256 / 800             ← chunk sweep
+M. bm25-bigram           @500,  chunk=400, rerank=none      ← 饱和对照行，98.0 / 0.990
 ```
 
-**M 行必须存在，且和 A 行贴在一起。** 这是全篇最重要的排版决策——非技术筛选人看到孤零零的 75.8% 会当成退化。
+> **D/E/F 已于 2026-08-19 实测完成**（`scripts/probe_mrl_quality.py`，800 条 1doc 查询）。
+> 三个结论改变了后续排期：
+>
+> 1. **dense 只比 BM25 高 2.1pp**（78.0 vs 75.9）。不是失败，但意味着**头条指标不能靠 dense 单臂**
+>    —— G/H 的融合收益成了主线。⚠️ 这 2.1pp 尚未做配对显著性检验。
+> 2. **M6（MRL 消融）实际已经做完**，且零 API 成本：1024 维 −0.50pp（p=0.684）、128 维 −1.00pp
+>    （p=0.521）、**只有 64 维显著劣化**（−4.25pp，p=0.001）。存储 93.1 MB → 23.3 MB（−75%）。
+> 3. 因此 **E 而非 D 应作为 H 行的 dense 臂**：质量无显著差异，存储少 75%，索引与查询都更快。
+
+**M 行必须存在，且和 A 行贴在一起。** 这是全篇最重要的排版决策——非技术筛选人看到孤零零的 75.9% 会当成退化。
 
 ### 6.2 中文 BLEU / ROUGE / BERTScore 的正确配置
 
@@ -275,8 +294,8 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 
 这是需要**提前决定**的分支，不能等测完再想：
 
-1. **先看 CI 是否重叠**。若 hybrid 与 BM25 的 95% CI 大幅重叠且 paired bootstrap 的 p > 0.05，**如实报告「在本语料上 dense 臂未带来统计显著提升」**。这是第二个诚实的负结果，和 98.6%→75.8% 那个同样值钱。
-2. **切分难度桶再看**。按 1doc/2docs/3docs 分层——dense 臂大概率在 2docs/3docs（ALL-gold@10 只有 85.7%/65.0%）上才显出优势，整体均值会把它稀释掉。**分层表是打平时的救命稻草**。
+1. **先看 CI 是否重叠**。若 hybrid 与 BM25 的 95% CI 大幅重叠且 paired bootstrap 的 p > 0.05，**如实报告「在本语料上 dense 臂未带来统计显著提升」**。这是第二个诚实的负结果，和 98.0%→75.9% 那个同样值钱。
+2. **切分难度桶再看**。按 1doc/2docs/3docs 分层——dense 臂大概率在 2docs/3docs（ALL-gold@10 只有 87.3%/68.9%）上才显出优势，整体均值会把它稀释掉。**分层表是打平时的救命稻草**。
 3. **换看 nDCG@10 和 MRR@10**。R@1 打平不代表排序质量打平。
 4. **绝不通过换评测集来制造差异**。若换了，必须两个集都报。
 
@@ -294,7 +313,7 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 | **M3** | 全量索引 + dense 基线 | **1.5** | `scripts/build_index.py`（幂等 upsert，chunk id = hash(path, ordinal, text)）、`corpus_manifest` sha256 变更检测 | 5,681 文档索引完成；dense-4096 的 R@1 / MRR@10 出数 |
 | **M4** | 混合检索 + RRF | **1.0** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | hybrid vs BM25 vs dense 三行 + paired bootstrap p 值 |
 | **M5** | Rerank + 深度消融 | **1.5** | `rerank` 阶段 + `(qid,docid,model)` 分数缓存 | top-50 / top-100 / 4B vs 8B 四行；**分层报 1doc/2docs/3docs** |
-| **M6** | MRL 消融（原创） | **1.0** | 4096/2048/1024/512 四档 | 存储 28.3 MB → 7.1 MB；R@1 损失曲线（**无人发布过的数**） |
+| **M6** | ~~MRL 消融（原创）~~ **✅ 已完成 2026-08-19** | ~~1.0~~ **0.3** | `scripts/probe_mrl_quality.py`：4096→64 七档 + 逐维方差 + 配对检验 | 存储 93.1 MB → 23.3 MB（1024 维）；**1024 维 −0.50pp 不显著（p=0.684），仅 64 维显著劣化 −4.25pp（p=0.001）** |
 | **M7** | chunk sweep | **0.5** | 256/400/800 | 「为什么是 400」有曲线不是故事 |
 | **M8** | 服务层 + 延迟/QPS | **1.5** | FastAPI + 单文件静态前端（含各阶段耗时条）；`scripts/bench.py` | **p50/p95/p99 + QPS**——补上「企业级」四条腿里唯一缺的那条 |
 | **M9** | 生成侧评估 | **2.0** | 移植 `metrics_gen/`（jieba 词级 BLEU/ROUGE + BERTScore-zh rescaled + 自实现 RAGQuestEval）；commit quest_gt JSON | event_summary / QA-1doc 两个任务对齐 CRUD-RAG Table 8 baseline |
@@ -380,7 +399,7 @@ zhrag/
 | 项目 | 用量 | 单价 | 成本 |
 |---|---|---|---|
 | Embedding 全量一遍（两个语料） | 4.88M tokens | ¥0.28/M | **¥1.37**（≈ $0.19） |
-| Embedding × 15 遍（MRL 消融 + 重建） | 73M tokens | ¥0.28/M | **¥20.5**（≈ $2.9） |
+| ~~Embedding × 15 遍（MRL 消融 + 重建）~~ | ~~73M tokens~~ | — | **¥0**（实测 `dimensions` 即前缀切片，全部维度档共用一次嵌入，见 §13） |
 | Rerank top-50 一次全扫（2,394 queries × 50 × ~490 tok） | ~59M tokens | ¥0.14/M（4B） | **¥8.2** |
 | Rerank top-100 一次全扫 | ~118M tokens | ¥0.14/M | **¥16.5** |
 | Rerank 消融 ×4 组（有缓存，实际约 2.5 倍成本） | ~250M tokens | ¥0.14/M | **¥35** |
@@ -413,7 +432,7 @@ zhrag/
 | **不把 TiDB 做主存储** | 向量检索仍标 beta、强依赖 TiFlash、全文检索只在 Frankfurt/Singapore 两地、融合在客户端、pytidb 版本号 0.0.14 |
 | **不用 Qdrant Cloud 免费层挂公网链接** | 在本次验证范围内**没有找到一手官方页面支持“闲置 1 周挂起、4 周删除”这一精确说法**，因此不把它写成事实。若使用 Qdrant Cloud，部署前必须按当前计划条款核对；否则使用可重建的 Milvus/Zilliz 或自托管方案 |
 | **不用 RAGAS 做主力评估框架** | 2026-02-24 起无提交、559 open issues，而 deepeval/langfuse/opik/phoenix 当天都在发版；且 `adapt()` 默认 `adapt_instruction=False`，中文提示词是半英半中 |
-| **不开数据库内置中文分词器** | Milvus `chinese` analyzer = jieba `cut_for_search` = 你实测最差的 72.8%，比 char bigram 低 3 分 |
+| **不开数据库内置中文分词器** | Milvus `chinese` analyzer = jieba `cut_for_search` = 你实测最差的 73.4%，比 char bigram 低 2.5 分 |
 | **不提交任何语料字节（含「小样本」）** | CRUD_RAG **根本没有 LICENSE 文件**（Apache badge 只是 README 里的 shields.io 图片，GitHub API 报 `license: None`），8 万篇新闻无出处无授权声明；TiDB 文档是 CC BY-SA 3.0，你的 chunk 输出属于 Adaptation |
 | **不用 Docker（本阶段）** | 本机没装；Milvus Lite 纯 Python、Phoenix 是 SQLite，全链路可以零容器跑通。真需要 Standalone 时进 WSL2 |
 | **不做多租户 / RBAC / 审计** | 没有任何编排框架白送这些，它们来自数据库和应用层；且 Dify 的许可证明确禁止未授权的多租户运营 |
@@ -425,15 +444,21 @@ zhrag/
 
 ### 实现与实验摘要
 
-**① 主导中文 RAG 评估框架设计与语料重建。** 发现 CRUD-RAG 官方 500 篇子集已饱和——40 行纯标准库字符 bigram BM25 即达 **R@1 98.6%、MRR@10 0.993**，任何检索配置均近满分、消融表无区分度；定位根因为语料规模不足与问句-证据表层重叠。从原始数据去重扩展至 **5,681 篇**干扰语料后 R@1 降至 **75.8%**、MRR@10 **0.856**，释放 **24 个百分点**可优化空间，并将主指标由已饱和的 R@5 改为 **R@1 / MRR@10 / nDCG@10**，全部指标附 95% bootstrap 置信区间与配置间 paired bootstrap 显著性检验。
+**① 主导中文 RAG 评估框架设计与语料重建。** 发现 CRUD-RAG 官方 500 篇子集已饱和——40 行纯标准库字符 bigram BM25 即达 **R@1 98.0%、MRR@10 0.990**，任何检索配置均近满分、消融表无区分度；定位根因为语料规模不足与问句-证据表层重叠。从原始数据去重扩展至 **5,681 篇**干扰语料后 R@1 降至 **75.9%**、MRR@10 **0.857**，释放 **22 个百分点**可优化空间，并将主指标由已饱和的 R@5 改为 **R@1 / MRR@10 / nDCG@10**，全部指标附 95% bootstrap 置信区间与配置间 paired bootstrap 显著性检验。
 
-**② 中文词法检索方案实测选型。** 对比 jieba 精确模式（R@1 **73.8%**）、jieba 搜索模式（**72.8%**）与字符 bigram（**75.8%**）；jieba+bigram 并集达 76.0% 但索引构建耗时 **7 倍**，最终选定字符 bigram。进一步实测**向量数据库内置 jieba analyzer 默认即为搜索模式**，遂将词法臂移出数据库，以客户端预计算 BM25 权重作为 SPARSE_FLOAT_VECTOR（`metric_type=IP`）喂入，数据库仅承担 ANN 与服务端 RRF 融合。
+**② 中文词法检索方案实测选型。** 对比 jieba 精确模式（R@1 **74.8%**）、jieba 搜索模式（**73.4%**）与字符 bigram（**75.9%**）；jieba+bigram 并集在 1doc 上达 76.4% 但汇总的 ALL-gold@10 反而略低（85.3% vs 85.4%）、索引构建耗时 **3.1 倍**，最终选定字符 bigram。进一步实测**向量数据库内置 jieba analyzer 默认即为搜索模式**，遂将词法臂移出数据库，以客户端预计算 BM25 权重作为 SPARSE_FLOAT_VECTOR（`metric_type=IP`）喂入，数据库仅承担 ANN 与服务端 RRF 融合。
 
 **③ 面向技术文档的两阶段分块策略。** 针对 500 篇 TiDB 中文文档（**3,309** 个代码块 / **5,262** 行表格），纯标题切分导致 **63.5%** 分块 <100 tokens、最大块 **16,111** tokens；改为「标题切分 → 掩码代码块与表格 → 按 target=400 合并小块 / 拆分大块」，得 **1,725** 块，p50 **375** / p90 **747**，欠长块降至 **5.3%**，代码块破损 **0** 例；并给出 256/400/800 的分块尺寸-召回曲线。
 
-**④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B + Qwen3-Reranker-4B 构建混合检索 + 重排流水线，**R@1 由 75.8% 提升至 [XX.X%]（p=[X.XX]）**；端到端 **p95 [XXX] ms / QPS [XX]**。首次公开 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**（4096→1024 维，存储由 28.3 MB 降至 7.1 MB，**-75%**，R@1 损失 **[X.X] pt**），官方技术报告未发布此数据。以 alias 实现零停机换索引，重嵌入全量成本约 **$0.34**。
+**④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B + Qwen3-Reranker-8B 构建混合检索 + 重排流水线，**R@1 由 75.9% 提升至 [XX.X%]（p=[X.XX]）**；端到端 **p95 [XXX] ms / QPS [XX]**。首次公开 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**：4096→1024 维存储由 **93.1 MB 降至 23.3 MB（−75%）**，R@1 **78.0%→77.5%（−0.50pp，配对 bootstrap p=0.684，Holm 校正后不显著）**；降至 128 维（−97% 存储）仍无显著损失，**64 维起显著劣化（−4.25pp，p=0.001）**——官方技术报告未发布此数据。以 alias 实现零停机换索引，重嵌入全量成本约 **$0.19**（`dimensions` 实测为前缀切片，全部维度档共用一次嵌入）。
 
-> ⚠️ **④ 里的 4 个 `[方括号]` 必须在发布前填实数，绝不能带着括号发出去。** ①②③ 每一个数字都已实测。
+> ⚠️ **④ 里剩下的 3 个 `[方括号]` 必须在发布前填实数**（M4/M5 的融合+重排结果、M8 的延迟）。
+> MRL 那半句已全部实测。①②③ 每一个数字也都已实测。
+>
+> ⚠️ **不要把降维无损归因于 MRL 训练。** 实测跨文档逐维方差首尾比 1.047（平的），
+> 没有信息前置聚集的证据。可写的是行为（掉多少 pp），不是机制。机制解释应作为待验证假设，而不是实测结论：
+> 「更可能是向量内在维度远低于 4096，前缀截断近似随机投影；JL 界在 n=5,681 时约 200 维，
+> 与实测 128–256 的拐点吻合。」
 
 
 ---
@@ -473,13 +498,14 @@ zhrag/
 
 - [x] **Milvus Lite 3.2.0 在 Windows + Python 3.13.5 上的冒烟测试**：已在隔离 `.venv-verify-milvus` 中安装 `pymilvus==3.0.1` + `milvus-lite==3.2.0`，并验证 4096-dim dense、sparse inverted index、`hybrid_search` + `RRFRanker`。结果：**PASS**。提交版脚本：`scripts/smoke_milvus_lite.py`。两个 Windows 特有坑已固化进脚本：① `pymilvus==3.0.1` 的 `[milvus-lite]` extra marker 明确排除了 `win32`，所以 Windows 上必须显式安装 `milvus-lite==3.2.0`；② `MilvusClient.close()` 返回后 `LOCK` 仍可能被 native 后台线程短暂持有，故用 worker subprocess 作为可靠的清理边界。
 - [x] **`bert-score` 0.3.13 能否在 Python 3.13.5 + 当前 transformers 上装并跑通**：隔离 `.venv-verify-bert` 安装成功，`bert-score==0.3.13` + `transformers==5.15.0` + `torch==2.13.0` 可 import；`BERTScorer(lang='zh', rescale_with_baseline=True)` 端到端评分也通过。模型下载需可访问 Hugging Face（本机直连超时，使用 `HF_ENDPOINT=https://hf-mirror.com` 通过）。注意 distribution metadata 是 0.3.13，但模块内 `bert_score.__version__` 仍写 0.3.12，这是上游版本字符串不一致，不影响运行。
-- [ ] **SiliconFlow 返回的 embedding 是否已 L2 归一化**（无文档）。索引 1,725 个 chunk 之前，对第一个响应算 `np.linalg.norm()`。
+- [x] **返回的 embedding 是否已 L2 归一化**（无文档）：**已验证 = 是**。6 条长度从 1 字到 270 字的输入，L2 范数全部落在 `1.0 ± 7e-08`（跨输入极差 `6.98e-08`），是 float32 舍入量级而非真实偏差。**索引前无需客户端归一化，COSINE 与 IP 等价。** 复现：`uv run python scripts/verify_embedding_api.py`。
 
 **🟡 影响架构决策**
 
-- [ ] **SiliconFlow 的 `dimensions` 截断是「切片+重归一化」还是训练过的 MRL head。** 同一段文本请求 4096 和 1024，检查后者是否等于前者前 1024 维的 L2 重归一化。**若是，你可以只存一份 4096 维、客户端任意截断**，不必重嵌入。两次 API 调用。
+- [x] **`dimensions` 截断是「切片+重归一化」还是训练过的 MRL head**：**已验证 = 切片**。判据不能用绝对阈值，因为该 provider 自身不可重现——同一段文本分两次请求，余弦只有 `0.999931`。以此为噪声底，客户端切片与原生 `dimensions=n` 的余弦在 512 / 1024 / 2048 三档分别是 `0.999932 / 0.999932 / 0.999934`，**全部落在噪声底之上**：切片与原生的差异，不大于同一次调用重跑一遍的差异。排序检验同样通过（20 条近义句，top-1/3/5/10 集合重合 100%，分数扰动仅为相邻名次间隔的 7%）。**结论：只存一份 4096 维向量，MRL 消融（M6）纯客户端切片完成，零额外 API 调用、零额外存储。** 注意这只说明消融**怎么跑**，不说明 1024 维的质量——那正是 M6 要测的。
 - [x] **Zilliz Cloud Free 长期闲置是否会被删除/挂起**：官方 [pricing](https://zilliz.com/pricing) 明确 Free 为 5 GB / 2.5M vCUs per month / up to 5 collections；pricing FAQ 明确“suspended”状态会停止 vector database costs，但 storage costs continue until deletion。官方 [limits](https://docs.zilliz.com/docs/limits) 没有写“闲置 N 天自动挂起/删除”，也没有 Free 专属的闲置删除倒计时。官方 [Terms and Conditions](https://zilliz.com/terms-and-conditions) 则保留较宽的服务终止权，并写明终止后“不承担保留已终止集群或备份快照中数据的义务”。结论：**没有证据支持“闲置 4 周必删”，但也不能承诺永久保留**；不要把 Zilliz Free 当唯一的服务可用性保障，部署前保留本地/可重建 artifact，并在控制台确认具体 region/plan 条款。
 - [ ] **Zilliz Cloud Free 跑的是 Milvus 2.6.x 还是 3.0.x。** 3.0.0 于 2026-07-29 GA，托管云通常滞后。建好集群后从版本端点确认，不要信营销页。
+- [x] **embedding 是否可逐位重现**（新增项，实测发现）：**否**。同一段文本分两次请求，余弦 `0.999931`（≈ 每分量 1e-3 量级）；同一批次内重复则**通常**逐位相同，但三次观测中有一次不是。成因是批式 GPU 推理的规约顺序随 batch 形状/位置变化，不是错误。三条后果：① `(text, model)` 缓存依然正确，但**单元测试只能带容差比较，绝不能断言相等**；② 任何比 `1 - 6.9e-05` 更接近的两个向量在本 provider 上不可区分——这也是判定「切片 vs 训练头」必须以它为基准的原因；③ 上报向量相关数字时要标注它，否则复现者会以为自己配错了。
 - [ ] **TiDB Cloud Starter 免费实例长期闲置是否归档/删除。** `serverless-limitations.md` / `serverless-faqs.md` 里 grep 不到任何相关条款——可能确实没有，也可能在文档仓库外的控制台页面。
 - [ ] **`pingcap/docs-cn` 的 pinned commit `26f202bc` 是在 TiDB v7.0 之前还是之后。** README 说 CC BY-SA 3.0 是「自 TiDB v7.0 起」适用，确认你的快照落在该声明覆盖范围内。
 - [ ] **就 CRUD_RAG 的许可开一个 issue**（无 LICENSE 文件 + 8 万篇新闻无出处）。一个礼貌的 issue 零成本、可能拿到明确答复，且在 402 star 的仓库上本身就是可见的尽职信号。
@@ -492,7 +518,7 @@ zhrag/
 - [ ] **`rouge-chinese` 与 `evaluate + rouge_score + jieba` 两条路径的数值差多少。** 研究阶段只测了前者（好 0.8276 / 坏 0.1154，判别力正常），没有在同一输入上跑两者做对比。混用或替换前跑一次。
 - [ ] **DeepInfra 的 Qwen3-Embedding-4B 标价 $0.020/M、比 8B 的 $0.010/M 贵一倍**，这个反常价格可能是促销或过期数据。做预算前在实时页面确认。
 - [ ] **英文 instruction 与中文 instruction 在你的中文语料上到底哪个好。** Qwen 基于训练数据来源推荐英文，但那是通用建议不是在 TiDB 文档上的实测。两次跑，同一评测，又一行诚实消融。
-- [ ] **hybrid + rerank 到底能不能在你的 5,681 语料上打赢 char-bigram BM25 的 75.8%。** 尚未测量。**若打不赢，那就是第二个诚实的负结果——现在就决定你会怎么发布它**，应在发布结论前完成验证。
+- [~] **hybrid + rerank 到底能不能在你的 5,681 语料上打赢 char-bigram BM25 的 75.9%。** **部分已测**：dense 单臂已经赢了，但只赢 **2.1pp**（dense-4096 78.0% vs BM25 75.9%，同语料同 800 条 1doc 查询）。两点未完成：① 这 2.1pp **尚未做配对显著性检验**，需要把两侧逐查询分数对齐；② 融合与重排未测。**注意「两臂接近」不等于「融合无用」——恰恰相反**：若二者分数相当却错在不同查询上，RRF 收益最大。下一步应先出 dense/BM25 的逐查询胜/负/平分布，它同时回答「该不该做 hybrid」和「预期能涨多少」。**若最终打不赢，那就是第二个诚实的负结果——现在就决定你会怎么发布它。**
 - [ ] **RAGAS / DeepEval 内置指标提示词在中文上的校准度。** 研究只验证了管道（`base_url` 支持、`adapt_instruction` 语义、DeepSeek/Kimi 类），**零中文评测**。人工标 ~50 行，先测判官与你的一致率。
 
 **部署与生态待验证事项**

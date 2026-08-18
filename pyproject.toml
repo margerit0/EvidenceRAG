@@ -5,6 +5,7 @@ description = "Enterprise Chinese RAG with a reproducible CRUD-RAG evaluation ha
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "numpy>=2.5.2",
     "pyyaml>=6.0.2",
 ]
 
