@@ -1,0 +1,24 @@
+{
+    "dataset":  "CRUD-RAG",
+    "source_repository":  "https://github.com/IAAR-Shanghai/CRUD_RAG",
+    "source_file":  "data/crud_split/split_merged.json",
+    "source_url":  "https://raw.githubusercontent.com/IAAR-Shanghai/CRUD_RAG/main/data/crud_split/split_merged.json",
+    "language":  "zh-CN",
+    "task":  "question_answering_1doc",
+    "selection":  {
+                      "eligible_records":  798,
+                      "selected_records":  500,
+                      "corpus_documents":  500,
+                      "ordering":  "ascending SHA-256(ID) score",
+                      "filters":  [
+                                      "non-empty ID/news1/question/answer",
+                                      "news1 length 500..8000 characters"
+                                  ]
+                  },
+    "files":  [
+                  "corpus/corpus.jsonl",
+                  "eval/qa_1doc.jsonl",
+                  "raw/split_merged.json"
+              ],
+    "generated_at_utc":  "2026-08-15T13:28:54.6760530Z"
+}

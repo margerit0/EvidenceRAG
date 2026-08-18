@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same branch; a portfolio repo does not need to
+# burn minutes finishing a build nobody will read.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The windows-latest leg is not redundant. This project's corpora are
+        # Chinese, and on a non-UTF-8 Windows install a bare open() raises
+        # UnicodeDecodeError on the project's own files. Linux runners default
+        # to UTF-8, so a Linux-only matrix goes green while the author's machine
+        # fails. See src/zhrag/io_utils.py.
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install project
+        run: uv sync --extra dev --python ${{ matrix.python }}
+
+      # Deliberately NOT setting PYTHONUTF8 or PYTHONIOENCODING anywhere in this
+      # workflow. Setting either one would make the Windows leg pass trivially
+      # and stop testing the thing it exists to test.
+      - name: Report default encoding
+        shell: bash
+        run: |
+          uv run python -c "
+          import sys, locale
+          enc = locale.getpreferredencoding(False)
+          print(f'preferred={enc} utf8_mode={sys.flags.utf8_mode} '
+                f'stdout={sys.stdout.encoding} fs={sys.getfilesystemencoding()}')
+          "
+
+      # If a future runner image starts defaulting to UTF-8, this leg silently
+      # stops being a regression test. Surface that instead of pretending.
+      - name: Verify the Windows leg still tests a non-UTF-8 default
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          enc=$(uv run python -c "import locale; print(locale.getpreferredencoding(False))")
+          echo "runner default encoding: $enc"
+          case "$enc" in
+            UTF-8|utf-8|utf8)
+              echo "::warning::windows-latest now defaults to $enc, so this leg no longer \
+          reproduces the cp936/cp1252 failure mode it was added for. The ruff PLW1514 rule \
+          is now the only guard against bare open()." ;;
+            *)
+              echo "OK: non-UTF-8 default ($enc) -- bare open() on Chinese files would fail here." ;;
+          esac
+
+      - name: Lint
+        run: uv run ruff check src tests scripts
+
+      - name: Format check
+        run: uv run ruff format --check src tests scripts
+
+      - name: Type check
+        run: uv run mypy
+
+      # Tests are hermetic: every fixture is in-memory or tmp_path, so no corpus
+      # download and no API key is required. Scripts under scripts/ do need the
+      # corpora and are therefore not run here.
+      - name: Test
+        run: uv run pytest

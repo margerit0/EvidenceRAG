@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv-verify-*/
+*.egg-info/
+dist/
+build/
+
+# Tooling
+.pytest_cache/
+.pytest_tmp/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Secrets
+.env
+.env.local
+
+# Corpora are NOT committed -- reproduce them with the download/build scripts.
+# See README "数据来源与许可".
+crud-rag-subset/raw/
+crud-rag-subset/corpus/
+crud-rag-subset/eval/
+tidb-rag-curated/documents/
+
+# Build artifacts of the ingestion pipeline
+data/
+indexes/
+runs/
+*.duckdb
+*.sqlite
+
+# Scratch files written by research subagents during the design phase.
+# Harvested for their findings (see README); kept out of the repo.
+.research_tmp/
+.venv-research/
+_research_*.py
+_enc_test.txt
+
+# Derived evaluation corpus -- rebuild with scripts/build_eval_corpus.py
+crud-rag-subset/eval-expanded/
+
+# Claude Code local state and research scratch
+.claude/
+
+# Milvus Lite databases (smoke tests, local indexes)
+*.db/
+*-smoke.db/
+
+# Local historical document snapshot
+/docs/README.legacy.md

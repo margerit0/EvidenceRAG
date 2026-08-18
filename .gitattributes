@@ -1,0 +1,20 @@
+# Line endings are normalised to LF in the repository regardless of the
+# contributor's platform. Without this, git on Windows (core.autocrlf=true)
+# rewrites every file to CRLF on checkout, which contradicts
+# `zhrag.io_utils.write_text(newline="\n")` and the LF assertion in
+# tests/test_io_utils.py.
+* text=auto eol=lf
+
+# PowerShell downloaders are executed by Windows PowerShell; keep CRLF so they
+# behave identically whether cloned on Windows or edited on Linux.
+*.ps1 text eol=crlf
+
+# Never touch these.
+*.png binary
+*.jpg binary
+*.gz  binary
+*.db  binary
+
+# Corpus artefacts are gitignored, but mark them so a stray `git add -f`
+# cannot mangle Chinese text through an unwanted filter.
+*.jsonl -text

@@ -1,0 +1,70 @@
+{
+    "dataset":  "TiDB Chinese RAG curated corpus",
+    "source_repository":  "https://github.com/pingcap/docs-cn",
+    "source_commit":  "26f202bcb1b314ca21f63bdb931f3c90426a14a1",
+    "total_documents":  500,
+    "downloaded_this_run":  0,
+    "reused_this_run":  500,
+    "total_bytes":  5727207,
+    "integrity":  "Every file matched the Git tree blob SHA-1 and expected byte size; SHA-256 recorded in corpus_manifest.jsonl.",
+    "collections":  [
+                        {
+                            "collection":  "core_ops",
+                            "documents":  206,
+                            "bytes":  2057225
+                        },
+                        {
+                            "collection":  "dev_reference",
+                            "documents":  244,
+                            "bytes":  2176171
+                        },
+                        {
+                            "collection":  "temporal_releases",
+                            "documents":  50,
+                            "bytes":  1493811
+                        }
+                    ],
+    "themes":  [
+                   {
+                       "theme":  "ai_vector_functions",
+                       "documents":  35
+                   },
+                   {
+                       "theme":  "backup_import",
+                       "documents":  35
+                   },
+                   {
+                       "theme":  "best_practices_faq_benchmark",
+                       "documents":  25
+                   },
+                   {
+                       "theme":  "deploy_config_tiup",
+                       "documents":  75
+                   },
+                   {
+                       "theme":  "develop_app",
+                       "documents":  55
+                   },
+                   {
+                       "theme":  "ecosystem_components",
+                       "documents":  45
+                   },
+                   {
+                       "theme":  "fallback_evergreen",
+                       "documents":  19
+                   },
+                   {
+                       "theme":  "sql_reference",
+                       "documents":  110
+                   },
+                   {
+                       "theme":  "troubleshoot_monitoring",
+                       "documents":  51
+                   },
+                   {
+                       "theme":  "version_history",
+                       "documents":  50
+                   }
+               ],
+    "generated_at_utc":  "2026-08-15T15:41:34.3767544Z"
+}
