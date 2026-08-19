@@ -51,6 +51,7 @@ from numpy.typing import NDArray
 from zhrag.eval.crud import Query, sample_corpus
 from zhrag.eval.metrics import (
     bootstrap_ci,
+    bootstrap_p_floor,
     holm_bonferroni,
     mrr_at_k,
     ndcg_at_k,
@@ -73,6 +74,11 @@ QUERY_CACHE = EXPANDED / "emb_cache_queries_4096.jsonl"
 #: curve that only degrades at the far end is far more convincing than three
 #: points that all look fine.
 DIMS = (4096, 2048, 1024, 512, 256, 128, 64)
+
+#: Bootstrap resamples for every CI and p-value in this script. Named rather
+#: than defaulted because the p-value column has to be rendered against the
+#: floor this number implies -- see :func:`zhrag.eval.metrics.bootstrap_p_floor`.
+RESAMPLES = 10_000
 
 #: Asymmetric by design. Qwen3's document prompt is the empty string; adding a
 #: prefix to both sides silently costs several points of R@1 and raises nothing.
@@ -315,7 +321,7 @@ def report_retrieval(
         # resolve differences this small.
         per_query[dim] = [recall_at_k(r, q.gold_doc_ids, 1) for r, q in pairs]
         rows[dim] = {
-            "ci": bootstrap_ci(per_query[dim]),
+            "ci": bootstrap_ci(per_query[dim], resamples=RESAMPLES),
             "mrr": sum(mrr_at_k(r, q.gold_doc_ids, 10) for r, q in pairs) / n,
             "ndcg": sum(ndcg_at_k(r, q.gold_doc_ids, 10) for r, q in pairs) / n,
             "mb": len(doc_ids) * dim * 4 / 1e6,
@@ -323,11 +329,12 @@ def report_retrieval(
 
     full = DIMS[0]
     raw_p = {
-        str(dim): paired_bootstrap_test(per_query[dim], per_query[full])
+        str(dim): paired_bootstrap_test(per_query[dim], per_query[full], resamples=RESAMPLES)
         for dim in DIMS
         if dim != full
     }
     adjusted = holm_bonferroni(raw_p)
+    floor = bootstrap_p_floor(RESAMPLES)
 
     for dim in DIMS:
         row, ci = rows[dim], rows[dim]["ci"]
@@ -336,13 +343,22 @@ def report_retrieval(
             verdict = "baseline"
         else:
             p, reject = adjusted[str(dim)]
-            verdict = f"{p:.3f}{'*' if reject else ''}"
+            # A raw p sitting on the Monte-Carlo floor is a resolution limit, not
+            # an estimate, and Holm then multiplies it by the family size into
+            # something that reads like one. Print it as an upper bound.
+            at_floor = raw_p[str(dim)] <= floor + 1e-12
+            verdict = f"{'<' if at_floor else ''}{p:.3f}{'*' if reject else ''}"
         print(
             f"   {dim:>6} {ci.mean:>7.1%} [{ci.low:.1%}, {ci.high:.1%}] {row['mrr']:>8.3f} "
             f"{row['ndcg']:>8.3f} {delta:>+8.2f}pp {verdict:>9} {row['mb']:>7.1f}"
         )
 
     print("\n   * = significant at family-wise alpha=0.05 after Holm correction.")
+    print(f"   '<' marks a p at the {RESAMPLES:,}-resample floor ({floor:.1e} raw); the true")
+    print("   value is smaller and this run cannot say by how much.")
+    print("   Note the three rows that all print 0.684: Holm forces adjusted p-values to")
+    print("   be monotone, so a -0.50pp regression and a +0.37pp improvement land on the")
+    print("   same number. Read the delta column, not the p column, for direction.")
     significant = [d for d in DIMS if d != full and adjusted[str(d)][1]]
     if not significant:
         print("   => NO width is significantly worse than 4096 on this query set.")

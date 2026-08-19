@@ -28,7 +28,7 @@
 | **LLM（生成）** | Qwen 系（你已有 key） | 与 embedding/rerank 同族，叙事一致 | — |
 | **LLM（评判）** | **DeepSeek-V3 类 或 Kimi**，必须≠生成模型 | 自偏好偏差已被因果证实（GPT-4 自评胜率 +10%，Claude-v1 +25%；Panickssery et al. 2404.13076 证明自我识别能力与自偏好强度线性相关）。deepeval 内置 `deepseek_model.py` / `kimi_model.py` | 任一非 Qwen 家族强中文模型 |
 | **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,725，p50 375，p90 747，欠长块 5.3%，代码块破损 0 | 必须补跑 256/400/800 sweep 出曲线（验证分块目标的选择依据） |
-| **检索管线** | dense(4096/1024, HNSW, COSINE) + sparse(char-bigram BM25, **IP**) 双字段 → 服务端 `hybrid_search` + `RRFRanker` → 客户端 Qwen3-Reranker-4B 重排 top-50 | 三段式，每段可单独消融 | 融合方式备选 WeightedRanker / Qdrant 的 dbsf，作为消融表一列 |
+| **检索管线** | dense(4096/1024, HNSW, COSINE) + sparse(char-bigram BM25, **IP**) 双字段 → 服务端 `hybrid_search` + `RRFRanker` → 客户端 Qwen3-Reranker-4B 重排 top-50 | 三段式，每段可单独消融 | **WeightedRanker 是必测项而非备选**：离线实测等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），加权 0.3/0.7 才显著（16 胜 4 负，p=0.047）。反过来 `RRFRanker` 的 **k 几乎不影响结果**（60→10 只动 0.1pp），不值得占消融表一列。Qdrant 的 dbsf 仍可作对照 |
 | **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | Milvus 内置 `chinese` analyzer 就是 jieba，且默认 `mode="search"` = `cut_for_search`——正是你实测最差的 73.4%，比 char bigram 的 75.9% 低 2.5 分。**开服务端分词器会让系统变差**。另外可绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的坑 | 无（这是本项目最有说服力的设计决策之一） |
 | **服务层** | FastAPI + httpx（异步）+ tenacity（429 指数退避） | 三个依赖，全部薄，不侵入检索层 | — |
 | **前端** | FastAPI 挂一个单文件静态 HTML（检索框 + 结果卡片 + 命中 chunk 高亮 + 各阶段耗时条） | 界面优先展示**阶段耗时**和**检索证据**，便于检查系统行为 | Gradio / Streamlit（若你想 5 分钟部署到 HF Space）。改选条件：你决定公网 demo 放 HF Space 而非 Zilliz |
@@ -185,7 +185,7 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 
 1. **配置冻结点写死**：README 明确写「所有超参在 CRUD-RAG 5,681 文档评测集上选定，选定后冻结，原样部署到 TiDB 语料，未在 TiDB 上做任何调参」。这句话本身就是方法论声明。
 2. **切分 dev/test**：CRUD-RAG 的 2,394 条 QA 里，用 1doc(800) 做 dev 调参，2docs(797)+3docs(797) 只在最终一次上报——避免在同一批 query 上反复选参。
-3. **报告置信区间**：你已经实现了 `bootstrap_ci` 和 `paired_bootstrap_test`。**消融表每一行带 95% CI，配置间差异带 p 值**。一个带 CI 的 +1.2pt 提升是工程结论；一个裸的 +1.2pt 是噪声。⚠️ 但先确认 `paired_bootstrap_test` 的实现是对的（重采样的是 query 还是 per-query 分差？单尾还是双尾？~40 个消融格是否做多重比较校正？）——懂 IR 的评审会先查这个再看你的 R@1。
+3. **报告置信区间**：**消融表每一行带 95% CI，配置间差异带 p 值与 win/loss**。✅ `paired_bootstrap_test` 已于 2026-08-19 审计（详见 §13）：配对重采样 query、单尾、Holm 已实现；另修了蒙特卡洛分辨率下界与 `observed<=0` 的保守短路，并为二元指标加了精确 McNemar。**一个带 CI 与 win/loss 的 +1.2pt 是工程结论；一个裸的 +1.2pt 是噪声** —— 本项目的 dense vs BM25 正是「裸看 +2.1pt 像结论、配对检验后是噪声」的实例。
 4. **TiDB 侧只报无标注可测的量**：延迟、吞吐、chunk 分布、代码块完整率、增量重建的 `{added, updated, deleted, skipped}` 计数。**不要在 TiDB 上编造检索指标**。
 5. **两个语料的许可都不入库**：`.gitignore` 已经正确排除了四个语料目录，保持。补一个 `DATA_LICENSE.md`（见 §12）。
 
@@ -195,7 +195,7 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 
 ### 6.1 检索侧消融表骨架（主表）
 
-**已实现**：`src/zhrag/eval/metrics.py` 里的 R@k / MRR@k / nDCG@k / ALL-gold@k / bootstrap_ci / paired_bootstrap_test。以下只是把它们排成表。
+**已实现**：`src/zhrag/eval/metrics.py` 里的 R@k / MRR@k / nDCG@k / ALL-gold@k / bootstrap_ci / paired_bootstrap_test / **mcnemar_exact** / **win_loss_tie** / **bootstrap_p_floor** / holm_bonferroni，以及 `src/zhrag/retrieval/fusion.py` 的 **RRF（可加权、可指定融合深度）**。以下只是把它们排成表。
 
 **列**：
 
@@ -210,7 +210,8 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 | `MRR@10` ±95%CI | 头条指标 |
 | `nDCG@10` ±95%CI | 头条指标 |
 | `ALL-gold@10` | 按 1doc/2docs/3docs 分列（**3docs 的 68.9% 天花板必须同表标注**） |
-| `p_vs_baseline` | paired bootstrap vs char-bigram BM25 基线 |
+| `p_vs_baseline` | vs char-bigram BM25 基线：二元指标（R@1）用**精确 McNemar**，连续指标（MRR/nDCG）用**配对 bootstrap**，全表 Holm 校正 |
+| `win/loss` | 逐查询胜/负计数。**必列** —— 同样是 +2pp，由 86 胜 69 负得来（churn 0.80，不可检测）和由 16 胜 4 负得来（显著）是两回事，而 delta 列一模一样 |
 | `index_build_s` | jieba+bigram 并集慢 7 倍这件事要有列承载 |
 | `latency_p95_ms` | 端到端 |
 | `cost_usd` | 该配置跑一遍的 API 花费 |
@@ -223,9 +224,10 @@ B. bm25-jieba-precise    @5681, chunk=400, rerank=none      ← 已有 74.8
 C. bm25-jieba-search     @5681, chunk=400, rerank=none      ← 已有 73.4
 D. dense-4096            @5681, chunk=400, rerank=none      ← ✅ 已测 78.0 / 0.866
 E. dense-1024 (MRL)      @5681, chunk=400, rerank=none      ← ✅ 已测 77.5 / 0.861（p=0.684，不显著劣于 D）
-F. dense-512  (MRL)      @5681, chunk=400, rerank=none      ← ✅ 已测 78.4 / 0.864（p=1.000）
-G. hybrid-rrf (A+D)      @5681, chunk=400, rerank=none      ← 新
-H. hybrid-rrf (A+E)      @5681, chunk=400, rerank=none      ← 新，最可能是最终配置
+F. dense-512  (MRL)      @5681, chunk=400, rerank=none      ← ✅ 已测 78.4 / 0.864（p=0.684）
+G. hybrid-rrf (A+D)      @5681, chunk=400, rerank=none      ← ✅ 已测（离线）79.9 / 0.881；vs A +4.00pp（p=1.6e-03，显著）；vs D +1.87pp（Holm p=0.231，不显著）
+G'. hybrid-rrf 加权 .3/.7 @5681, chunk=400, rerank=none     ← ✅ 已测（离线）79.5 / 0.878；vs D +1.50pp（16 胜 4 负，Holm p=0.047，全表唯一显著优于 D）
+H. hybrid-rrf (A+E)      @5681, chunk=400, rerank=none      ← 待跑，最可能是最终配置。脚本已就绪、dense 臂换成 1024 维切片即可，零 API 成本
 I. H + rerank-8b@50      @5681, chunk=400                   ← 新
 J. H + rerank-8b@100     @5681, chunk=400                   ← 新
 K. ~~4B vs 8B~~                                             ← ❌ 取消：中转站没有 4B（见 §4.5）
@@ -236,10 +238,12 @@ M. bm25-bigram           @500,  chunk=400, rerank=none      ← 饱和对照行�
 > **D/E/F 已于 2026-08-19 实测完成**（`scripts/probe_mrl_quality.py`，800 条 1doc 查询）。
 > 三个结论改变了后续排期：
 >
-> 1. **dense 只比 BM25 高 2.1pp**（78.0 vs 75.9）。不是失败，但意味着**头条指标不能靠 dense 单臂**
->    —— G/H 的融合收益成了主线。⚠️ 这 2.1pp 尚未做配对显著性检验。
+> 1. **dense 只比 BM25 高 2.1pp，且已证不显著**（78.0 vs 75.9；配对 95% CI [−1.00, +5.25]pp，
+>    McNemar 精确双尾 p = 0.199）。头条指标不能靠 dense 单臂 —— 但**融合的理由反而更硬了**：
+>    两臂 R@1 列联表 538 / 69 / 86 / 107，φ = 0.455，**并集 oracle 上限 86.6%**。G 行已把其中
+>    4.00pp 兑现（对 A 显著），H/I/J 仍是主线。
 > 2. **M6（MRL 消融）实际已经做完**，且零 API 成本：1024 维 −0.50pp（p=0.684）、128 维 −1.00pp
->    （p=0.521）、**只有 64 维显著劣化**（−4.25pp，p=0.001）。存储 93.1 MB → 23.3 MB（−75%）。
+>    （p=0.521）、**只有 64 维显著劣化**（−4.25pp，p<0.001——原始 p 触到重采样地板）。存储 93.1 MB → 23.3 MB（−75%）。
 > 3. 因此 **E 而非 D 应作为 H 行的 dense 臂**：质量无显著差异，存储少 75%，索引与查询都更快。
 
 **M 行必须存在，且和 A 行贴在一起。** 这是全篇最重要的排版决策——非技术筛选人看到孤零零的 75.9% 会当成退化。
@@ -294,8 +298,8 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 
 这是需要**提前决定**的分支，不能等测完再想：
 
-1. **先看 CI 是否重叠**。若 hybrid 与 BM25 的 95% CI 大幅重叠且 paired bootstrap 的 p > 0.05，**如实报告「在本语料上 dense 臂未带来统计显著提升」**。这是第二个诚实的负结果，和 98.0%→75.9% 那个同样值钱。
-2. **切分难度桶再看**。按 1doc/2docs/3docs 分层——dense 臂大概率在 2docs/3docs（ALL-gold@10 只有 87.3%/68.9%）上才显出优势，整体均值会把它稀释掉。**分层表是打平时的救命稻草**。
+1. **先看 CI 是否重叠**。✅ **这条已经用上了**：dense 单臂 vs BM25 的 95% CI 大幅重叠（+2.12pp，CI [−1.00, +5.25]pp），McNemar p = 0.199 —— 已如实报告「在本语料上 **dense 单臂**未带来统计显著提升」。这是第二个诚实的负结果，和 98.0%→75.9% 那个同样值钱。**注意它没有连坐 hybrid**：RRF 对 BM25 是 +4.00pp、p = 1.6e-03，显著。打平的是单臂，不是融合。
+2. **切分难度桶再看**。按 1doc/2docs/3docs 分层——dense 臂大概率在 2docs/3docs（ALL-gold@10 只有 87.3%/68.9%）上才显出优势，整体均值会把它稀释掉。**分层表是打平时的救命稻草**。⚠️ **这条现在是本项目最大的未知**：dense 与 RRF 至今只在 1doc(800) 上跑过（列联表要求同 arity，混 arity 会把「部分得分变化」计成胜负）。2docs/3docs 没有任何数据，它是「dense 打平」这个叙事唯一可能翻盘的地方，应排在 rerank 之前跑。
 3. **换看 nDCG@10 和 MRR@10**。R@1 打平不代表排序质量打平。
 4. **绝不通过换评测集来制造差异**。若换了，必须两个集都报。
 
@@ -311,9 +315,9 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 | **M1** | Protocol + registry + YAML config | **1.5** | `retrieval/base.py`（4 个 Protocol）、`registry.py`、`config.py`（pydantic-settings，`extra='forbid'`）、`experiments/*.yaml` | 现有 BM25 零改动通过 Protocol；1 条命令跑通 1 个 config |
 | **M2** | Milvus Lite 冒烟 + provider 客户端 | **1.0** | `store/milvus.py`、`embed/siliconflow.py`（含 instruct 前缀常量）、`rerank/siliconflow.py`；tenacity 退避 | 10 行 create/insert/hybrid_search 通过；embedding L2 范数 = 1.0 验证；dimensions 截断等价性验证 |
 | **M3** | 全量索引 + dense 基线 | **1.5** | `scripts/build_index.py`（幂等 upsert，chunk id = hash(path, ordinal, text)）、`corpus_manifest` sha256 变更检测 | 5,681 文档索引完成；dense-4096 的 R@1 / MRR@10 出数 |
-| **M4** | 混合检索 + RRF | **1.0** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | hybrid vs BM25 vs dense 三行 + paired bootstrap p 值 |
+| **M4** | 混合检索 + RRF | ~~1.0~~ **0.5** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | **离线部分已完成 2026-08-19**（`scripts/compare_dense_bm25.py` + `retrieval/fusion.py`）：hybrid **79.9 / 0.881** vs BM25 75.9（McNemar p=1.6e-03，显著）vs dense 78.0（Holm p=0.231，不显著）。M4 剩下的是**把它搬进 Milvus 服务端并复现同一组数字**——对不上就说明服务端融合口径有问题——外加 2docs/3docs 分层 |
 | **M5** | Rerank + 深度消融 | **1.5** | `rerank` 阶段 + `(qid,docid,model)` 分数缓存 | top-50 / top-100 / 4B vs 8B 四行；**分层报 1doc/2docs/3docs** |
-| **M6** | ~~MRL 消融（原创）~~ **✅ 已完成 2026-08-19** | ~~1.0~~ **0.3** | `scripts/probe_mrl_quality.py`：4096→64 七档 + 逐维方差 + 配对检验 | 存储 93.1 MB → 23.3 MB（1024 维）；**1024 维 −0.50pp 不显著（p=0.684），仅 64 维显著劣化 −4.25pp（p=0.001）** |
+| **M6** | ~~MRL 消融（原创）~~ **✅ 已完成 2026-08-19** | ~~1.0~~ **0.3** | `scripts/probe_mrl_quality.py`：4096→64 七档 + 逐维方差 + 配对检验 | 存储 93.1 MB → 23.3 MB（1024 维）；**1024 维 −0.50pp 不显著（p=0.684），仅 64 维显著劣化 −4.25pp（p<0.001）** |
 | **M7** | chunk sweep | **0.5** | 256/400/800 | 「为什么是 400」有曲线不是故事 |
 | **M8** | 服务层 + 延迟/QPS | **1.5** | FastAPI + 单文件静态前端（含各阶段耗时条）；`scripts/bench.py` | **p50/p95/p99 + QPS**——补上「企业级」四条腿里唯一缺的那条 |
 | **M9** | 生成侧评估 | **2.0** | 移植 `metrics_gen/`（jieba 词级 BLEU/ROUGE + BERTScore-zh rescaled + 自实现 RAGQuestEval）；commit quest_gt JSON | event_summary / QA-1doc 两个任务对齐 CRUD-RAG Table 8 baseline |
@@ -351,7 +355,7 @@ zhrag/
 │   ├── retrieval/
 │   │   ├── base.py                 # 🆕 Retriever / Fusion / Reranker / Chunker Protocol
 │   │   ├── dense.py                # 🆕
-│   │   ├── hybrid.py               # 🆕 RRF / Weighted
+│   │   ├── fusion.py               # ✅ 已建成 RRF（可加权、可指定融合深度）
 │   │   └── pipeline.py             # 🆕 retrieve -> fuse -> rerank
 │   ├── store/
 │   │   ├── base.py                 # 🆕 VectorStore Protocol
@@ -444,16 +448,22 @@ zhrag/
 
 ### 实现与实验摘要
 
-**① 主导中文 RAG 评估框架设计与语料重建。** 发现 CRUD-RAG 官方 500 篇子集已饱和——40 行纯标准库字符 bigram BM25 即达 **R@1 98.0%、MRR@10 0.990**，任何检索配置均近满分、消融表无区分度；定位根因为语料规模不足与问句-证据表层重叠。从原始数据去重扩展至 **5,681 篇**干扰语料后 R@1 降至 **75.9%**、MRR@10 **0.857**，释放 **22 个百分点**可优化空间，并将主指标由已饱和的 R@5 改为 **R@1 / MRR@10 / nDCG@10**，全部指标附 95% bootstrap 置信区间与配置间 paired bootstrap 显著性检验。
+**① 主导中文 RAG 评估框架设计与语料重建。** 发现 CRUD-RAG 官方 500 篇子集已饱和——40 行纯标准库字符 bigram BM25 即达 **R@1 98.0%、MRR@10 0.990**，任何检索配置均近满分、消融表无区分度；定位根因为语料规模不足与问句-证据表层重叠。从原始数据去重扩展至 **5,681 篇**干扰语料后 R@1 降至 **75.9%**、MRR@10 **0.857**，释放 **22 个百分点**可优化空间，并将主指标由已饱和的 R@5 改为 **R@1 / MRR@10 / nDCG@10**；全部指标附 95% bootstrap 置信区间，配置间比较对连续指标用**配对 bootstrap**、对二元指标用**精确 McNemar 检验**，全表经 **Holm-Bonferroni** 多重比较校正，并同时报逐查询**胜/负/平**计数。
 
 **② 中文词法检索方案实测选型。** 对比 jieba 精确模式（R@1 **74.8%**）、jieba 搜索模式（**73.4%**）与字符 bigram（**75.9%**）；jieba+bigram 并集在 1doc 上达 76.4% 但汇总的 ALL-gold@10 反而略低（85.3% vs 85.4%）、索引构建耗时 **3.1 倍**，最终选定字符 bigram。进一步实测**向量数据库内置 jieba analyzer 默认即为搜索模式**，遂将词法臂移出数据库，以客户端预计算 BM25 权重作为 SPARSE_FLOAT_VECTOR（`metric_type=IP`）喂入，数据库仅承担 ANN 与服务端 RRF 融合。
 
 **③ 面向技术文档的两阶段分块策略。** 针对 500 篇 TiDB 中文文档（**3,309** 个代码块 / **5,262** 行表格），纯标题切分导致 **63.5%** 分块 <100 tokens、最大块 **16,111** tokens；改为「标题切分 → 掩码代码块与表格 → 按 target=400 合并小块 / 拆分大块」，得 **1,725** 块，p50 **375** / p90 **747**，欠长块降至 **5.3%**，代码块破损 **0** 例；并给出 256/400/800 的分块尺寸-召回曲线。
 
-**④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B + Qwen3-Reranker-8B 构建混合检索 + 重排流水线，**R@1 由 75.9% 提升至 [XX.X%]（p=[X.XX]）**；端到端 **p95 [XXX] ms / QPS [XX]**。首次公开 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**：4096→1024 维存储由 **93.1 MB 降至 23.3 MB（−75%）**，R@1 **78.0%→77.5%（−0.50pp，配对 bootstrap p=0.684，Holm 校正后不显著）**；降至 128 维（−97% 存储）仍无显著损失，**64 维起显著劣化（−4.25pp，p=0.001）**——官方技术报告未发布此数据。以 alias 实现零停机换索引，重嵌入全量成本约 **$0.19**（`dimensions` 实测为前缀切片，全部维度档共用一次嵌入）。
+**④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B 构建 dense + 字符 bigram BM25 双臂检索与 RRF 融合，在 5,681 篇语料 / 800 条单证据查询上 **R@1 由 BM25 基线 75.9% 提升至 79.9%（+4.00pp，65 胜 33 负，McNemar 精确检验 p = 1.6e-03）**；重排层（Qwen3-Reranker-8B）与端到端 **p95 [XXX] ms / QPS [XX]** 待补。首次公开 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**：4096→1024 维存储由 **93.1 MB 降至 23.3 MB（−75%）**，R@1 **78.0%→77.5%（−0.50pp，配对 bootstrap p=0.684，Holm 校正后不显著）**；降至 128 维（−97% 存储）仍无显著损失，**64 维起显著劣化（−4.25pp，p<0.001）**——官方技术报告未发布此数据。以 alias 实现零停机换索引，重嵌入全量成本约 **$0.19**（`dimensions` 实测为前缀切片，全部维度档共用一次嵌入）。
 
-> ⚠️ **④ 里剩下的 3 个 `[方括号]` 必须在发布前填实数**（M4/M5 的融合+重排结果、M8 的延迟）。
-> MRL 那半句已全部实测。①②③ 每一个数字也都已实测。
+**⑤ 用配对检验推翻自己的点估计，并据此改路线。** 8B 稠密检索相对 40 行纯标准库 BM25 名义领先 2.1pp，配对检验后判定**不显著**（95% CI **[−1.00, +5.25]pp**，McNemar 精确 p = **0.199**）；进一步用 R@1 列联表（both 538 / 仅 BM25 69 / 仅 dense 86 / 都不中 107，φ = 0.455，**并集 oracle 上限 86.6%**）判定两臂**互补而非冗余**，据此把主线从「换更强的单臂」改为「融合」，离线 RRF 兑现 **75.9% → 79.9%（p = 1.6e-03）**。同一批实验还显示**等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），只有加权 0.3/0.7 显著（16 胜 4 负，p=0.047）**——赢在少破坏，不在多修好。
+
+> ⚠️ **④ 里剩下的 2 个 `[方括号]` 必须在发布前填实数**（M5 的重排增量、M8 的延迟）。
+> M4 的融合结果已实测（离线 RRF，79.9% / p=1.6e-03），MRL 那半句已全部实测。①②③⑤ 每一个数字也都已实测。
+>
+> ⚠️ **不要把「dense 打赢 BM25」写进任何一条要点。** 实测 +2.12pp、95% CI [−1.00, +5.25]pp、
+> McNemar p = 0.199 —— **在本语料上不显著**。可以写的是融合后对 BM25 的 +4.00pp（显著），
+> 以及「融合相对 dense 单臂的 +1.87pp 同样不显著（Holm p = 0.231）」。
 >
 > ⚠️ **不要把降维无损归因于 MRL 训练。** 实测跨文档逐维方差首尾比 1.047（平的），
 > 没有信息前置聚集的证据。可写的是行为（掉多少 pp），不是机制。机制解释应作为待验证假设，而不是实测结论：
@@ -512,13 +522,17 @@ zhrag/
 
 **🟢 影响指标可信度**
 
-- [ ] **你现有的 `paired_bootstrap_test` 实现是否统计正确**：重采样 query 还是 per-query 分差？单尾还是双尾？~40 个消融格是否需要多重比较校正？懂 IR 的评审会**先查这个再看你的 R@1**。函数存在，但研究阶段没读实现。
+- [x] **你现有的 `paired_bootstrap_test` 实现是否统计正确**：**已于 2026-08-19 审计，实现本身成立。** 三个问题的答案：重采样的是**配对的 query**（逐查询分差作为一个单元重采样，不是对两臂各自自举）；**单尾**（`treatment > baseline`，所以 p=0.60 意味着「没有证据说 treatment 赢」，不是「baseline 赢」）；Holm-Bonferroni 已实现且已用于 MRL 全表。审计另修了两处并新增一处：
+  ① **蒙特卡洛分辨率下界**——估计量是 `(count+1)/(resamples+1)`，10,000 次重采样下最小可表示的 p 是 `9.999e-05`；低于它的值只能写作 `< floor`，而经 Holm 乘以族大小 m 之后会伪装成一个像模像样的估计值。**MRL 表里 64 维那格的 `p=0.001` 正是这么来的**，现已改印 `<0.001`。新增 `bootstrap_p_floor()` 并要求调用方据此渲染。
+  ② **`observed <= 0` 直接返回 1.0 的短路**——保守、不产生假阳性，但会把一族真值各异的 p 压成同一个 1.0 再喂给 Holm。已改走通用路径；**副作用是 MRL 表 512 维那行的 p 从 1.000 变为 0.684**，README 与本文档已按硬规则 3 重出。
+  ③ 二元指标新增 **`mcnemar_exact`**（精确、无下界、无种子、跨机器同值）与 **`win_loss_tie`**。dense vs BM25 的判定即由前者给出。⚠️ 注意 `recall_at_k(..., 1)` 在 2docs/3docs 上不是二元的（会返回 0.5 / 1/3 / 2/3），McNemar 会拒绝它——这是特性不是缺陷，混 arity 的列联表会把「部分得分变化」计成胜负。
 - [ ] **CRUD-RAG 论文 Table 8 的 baseline 数字**是 pypdf 文本抽取得来的，PDF 表格抽取可能错位相邻数字。**你实际引用的那 3–4 行**（summarization、QA-1doc）要对着原 PDF 逐个核对。
 - [ ] **GitHub Actions `windows-latest` Python 的实际默认 codepage**。预期是 cp1252（美式 locale）而非你的 cp936——它复现的是「非 UTF-8 默认」，不是你的具体环境。要精确复现 cp936 得强制 locale 或在某个 job 里设 `PYTHONIOENCODING=gbk`。
 - [ ] **`rouge-chinese` 与 `evaluate + rouge_score + jieba` 两条路径的数值差多少。** 研究阶段只测了前者（好 0.8276 / 坏 0.1154，判别力正常），没有在同一输入上跑两者做对比。混用或替换前跑一次。
 - [ ] **DeepInfra 的 Qwen3-Embedding-4B 标价 $0.020/M、比 8B 的 $0.010/M 贵一倍**，这个反常价格可能是促销或过期数据。做预算前在实时页面确认。
 - [ ] **英文 instruction 与中文 instruction 在你的中文语料上到底哪个好。** Qwen 基于训练数据来源推荐英文，但那是通用建议不是在 TiDB 文档上的实测。两次跑，同一评测，又一行诚实消融。
-- [~] **hybrid + rerank 到底能不能在你的 5,681 语料上打赢 char-bigram BM25 的 75.9%。** **部分已测**：dense 单臂已经赢了，但只赢 **2.1pp**（dense-4096 78.0% vs BM25 75.9%，同语料同 800 条 1doc 查询）。两点未完成：① 这 2.1pp **尚未做配对显著性检验**，需要把两侧逐查询分数对齐；② 融合与重排未测。**注意「两臂接近」不等于「融合无用」——恰恰相反**：若二者分数相当却错在不同查询上，RRF 收益最大。下一步应先出 dense/BM25 的逐查询胜/负/平分布，它同时回答「该不该做 hybrid」和「预期能涨多少」。**若最终打不赢，那就是第二个诚实的负结果——现在就决定你会怎么发布它。**
+- [x] **hybrid 到底能不能在你的 5,681 语料上打赢 char-bigram BM25 的 75.9%。** **能，且显著。** 离线 RRF 融合 dense-4096 与 BM25 两条 run：**R@1 79.9% / MRR@10 0.881**，对 BM25 **+4.00pp**（65 胜 33 负，McNemar 精确 p = **1.6e-03**）。同时**修正了本条此前的一个错误结论**：dense 单臂并没有「赢」——+2.12pp、95% CI **[−1.00, +5.25]pp**、p = **0.199**，**不显著**。当初「两臂接近不等于融合无用」的判断被证实了：列联表 538 / 69 / 86 / 107，φ = 0.455，并集 oracle 上限 **86.6%**；且一臂 rank-1 落空时 gold 在另一臂里 83–88% 落在前 3、掉出 top-100 的是 0.0%。三条工程结论：**融合深度 10 与 100 的逐查询 R@1 逐位相同**（0/800 条 top-1 改变）；k 从 60 调到 10 只动 0.1pp；**唯一有效的旋钮是权重**（0.3/0.7 是全表唯一显著优于 dense 单臂的配置，16 胜 4 负，Holm p=0.047）。复现：`uv run python scripts/compare_dense_bm25.py`（不联网）。⚠️ 四个融合配置是在同一批 800 条上选出又汇报的，最好那行是上界不是泛化估计。
+- [ ] **rerank 能否在 hybrid 的 79.9% 之上再拿到显著增量，以及 2docs/3docs 的分层结果。** 上一条只跑了 1doc(800)。两个未知：① Qwen3-Reranker-8B @ top-50/100 的增量——oracle 上限告诉我们 dense+BM25 的并集还剩 6.7pp，重排够不够得着是空的；② dense 与融合在 2docs/3docs 上的表现**完全未测**，这是目前最大的未知，也是「dense 打平」这个叙事唯一可能翻盘的地方（见 §6.4 第 2 条）。**若最终打不赢，那就是第二个诚实的负结果——现在就决定你会怎么发布它。**
 - [ ] **RAGAS / DeepEval 内置指标提示词在中文上的校准度。** 研究只验证了管道（`base_url` 支持、`adapt_instruction` 语义、DeepSeek/Kimi 类），**零中文评测**。人工标 ~50 行，先测判官与你的一致率。
 
 **部署与生态待验证事项**

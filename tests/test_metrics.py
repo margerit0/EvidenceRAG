@@ -13,13 +13,16 @@ import pytest
 from zhrag.eval import (
     all_gold_at_k,
     bootstrap_ci,
+    bootstrap_p_floor,
     evaluate,
     hit_at_k,
     holm_bonferroni,
+    mcnemar_exact,
     mrr_at_k,
     ndcg_at_k,
     paired_bootstrap_test,
     recall_at_k,
+    win_loss_tie,
 )
 
 RANKED = ["d1", "d2", "d3", "d4", "d5"]
@@ -133,6 +136,33 @@ class TestPairedBootstrap:
     def test_regression_returns_one(self) -> None:
         assert paired_bootstrap_test([1.0] * 50, [0.0] * 50, resamples=500) == 1.0
 
+    def test_uniform_regression_is_the_degenerate_case_not_a_shortcut(self) -> None:
+        """The two tests above hit 1.0 through the maths, not through an early return.
+
+        Every per-query difference being identical leaves a zero-variance null
+        after centring, so every resample ties the observation and the p-value
+        is genuinely 1.0. A *mixed* regression has variance and must land below
+        1.0 -- otherwise 'clearly worse' and 'a hair below zero' would be
+        indistinguishable, and a family of them would enter Holm as identical
+        values.
+        """
+        baseline = [float(i % 2) for i in range(400)]
+        treatment = list(baseline)
+        for i in range(1, 41, 2):  # 20 queries regress (odd indices score 1.0)
+            treatment[i] = 0.0
+        for i in range(200, 220, 2):  # 10 improve -> net -2.5pp, but with spread
+            treatment[i] = 1.0
+        p = paired_bootstrap_test(baseline, treatment, resamples=4000)
+        assert 0.5 < p < 1.0
+
+    def test_reports_the_resolution_floor(self) -> None:
+        assert bootstrap_p_floor(10_000) == pytest.approx(1 / 10_001)
+        # A perfectly consistent gain saturates the estimator at its floor, which
+        # is why the floor has to be quotable rather than inferred.
+        assert paired_bootstrap_test([0.0] * 200, [1.0] * 200, resamples=1000) == pytest.approx(
+            bootstrap_p_floor(1000)
+        )
+
     def test_bidirectional_noise_swamps_a_small_net_gain(self) -> None:
         """A +1pp net gain is not significant once queries move in both directions.
 
@@ -160,6 +190,111 @@ class TestPairedBootstrap:
     def test_rejects_mismatched_lengths(self) -> None:
         with pytest.raises(ValueError, match="length mismatch"):
             paired_bootstrap_test([1.0], [1.0, 0.0])
+
+
+class TestWinLossTie:
+    def test_counts_the_four_outcomes(self) -> None:
+        baseline = [1.0, 0.0, 1.0, 0.0, 1.0]
+        treatment = [0.0, 1.0, 1.0, 0.0, 1.0]
+        counts = win_loss_tie(baseline, treatment)
+        assert (counts.wins, counts.losses) == (1, 1)
+        assert (counts.ties_nonzero, counts.ties_zero) == (2, 1)
+        assert counts.n == 5
+        assert counts.discordant == 2
+
+    def test_oracle_ceiling_excludes_only_the_shared_failures(self) -> None:
+        """The number a fusion of these two runs cannot exceed."""
+        counts = win_loss_tie([1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0])
+        assert counts.union_rate == pytest.approx(0.5)  # 2 of 4 reachable
+
+    def test_a_net_delta_hides_the_column_sizes(self) -> None:
+        """Two systems with the same +2pp delta and opposite fusion prospects."""
+        churny_b = [1.0] * 50 + [0.0] * 50
+        churny_t = [0.0] * 20 + [1.0] * 30 + [1.0] * 22 + [0.0] * 28
+        quiet_b = [1.0] * 50 + [0.0] * 50
+        quiet_t = [1.0] * 50 + [1.0] * 2 + [0.0] * 48
+        assert sum(churny_t) - sum(churny_b) == sum(quiet_t) - sum(quiet_b) == 2
+        assert win_loss_tie(churny_b, churny_t).discordant == 42
+        assert win_loss_tie(quiet_b, quiet_t).discordant == 2
+
+    def test_rejects_mismatched_lengths(self) -> None:
+        with pytest.raises(ValueError, match="length mismatch"):
+            win_loss_tie([1.0], [1.0, 0.0])
+
+
+class TestMcNemar:
+    def test_only_discordant_pairs_matter(self) -> None:
+        """Padding with queries both systems agree on cannot change the p-value."""
+        base, treat = [1.0, 0.0, 0.0], [0.0, 1.0, 1.0]
+        padded_b, padded_t = base + [1.0] * 500, treat + [1.0] * 500
+        assert mcnemar_exact(base, treat) == pytest.approx(mcnemar_exact(padded_b, padded_t))
+
+    def test_matches_the_closed_form_binomial(self) -> None:
+        # 8 discordant pairs, all won by the treatment: two-sided p = 2 * 0.5**8.
+        baseline = [0.0] * 8
+        treatment = [1.0] * 8
+        assert mcnemar_exact(baseline, treatment) == pytest.approx(2 * 0.5**8)
+        assert mcnemar_exact(baseline, treatment, alternative="greater") == pytest.approx(0.5**8)
+
+    def test_perfect_agreement_is_not_evidence(self) -> None:
+        assert mcnemar_exact([1.0, 0.0], [1.0, 0.0]) == 1.0
+
+    def test_symmetric_disagreement_is_not_evidence(self) -> None:
+        baseline = [1.0] * 10 + [0.0] * 10
+        treatment = [0.0] * 10 + [1.0] * 10
+        assert mcnemar_exact(baseline, treatment) == pytest.approx(1.0)
+
+    def test_has_no_resolution_floor(self) -> None:
+        """The reason it is preferred over the bootstrap for binary metrics.
+
+        60 discordant pairs all in one direction give p ~ 1.7e-18. A bootstrap
+        at 10,000 resamples cannot report anything below 1e-4, so it would
+        return its floor and a Holm correction would turn that floor into a
+        plausible-looking 4e-4.
+        """
+        p = mcnemar_exact([0.0] * 60, [1.0] * 60)
+        assert p < bootstrap_p_floor(10_000) / 1_000_000
+
+    def test_direction_matters_for_the_one_sided_form(self) -> None:
+        baseline, treatment = [0.0] * 8, [1.0] * 8
+        assert mcnemar_exact(baseline, treatment, alternative="greater") < 0.01
+        assert mcnemar_exact(treatment, baseline, alternative="greater") == pytest.approx(1.0)
+
+    def test_rejects_graded_scores(self) -> None:
+        with pytest.raises(ValueError, match="not binary"):
+            mcnemar_exact([0.5, 1.0], [1.0, 1.0])
+
+    def test_rejects_a_none_element_rather_than_crashing_downstream(self) -> None:
+        """A None sentinel in the guard would let None through to a TypeError."""
+        with pytest.raises(ValueError, match="not binary"):
+            mcnemar_exact([0.0, None], [1.0, 1.0])  # type: ignore[list-item]
+
+    def test_rejects_nan(self) -> None:
+        with pytest.raises(ValueError, match="not binary"):
+            mcnemar_exact([0.0, math.nan], [1.0, 1.0])
+
+    def test_rejects_an_unrecognised_alternative(self) -> None:
+        """'less' is plausible -- scipy accepts it -- and must not silently
+        fall through to the two-sided branch, which would double the p-value."""
+        with pytest.raises(ValueError, match="alternative must be"):
+            mcnemar_exact([0.0] * 8, [1.0] * 8, alternative="less")  # type: ignore[arg-type]
+
+    def test_accepts_the_binary_metrics_this_repo_actually_has(self) -> None:
+        ranked, gold = ["d1", "d2"], ["d1", "d9"]
+        binary = [hit_at_k(ranked, gold, 2), all_gold_at_k(ranked, gold, 2)]
+        assert mcnemar_exact(binary, binary) == 1.0
+        # ...and refuses the one the docstring warns about: partial recall.
+        with pytest.raises(ValueError, match="not binary"):
+            mcnemar_exact([recall_at_k(ranked, gold, 2)], [1.0])
+
+    def test_integrates_with_holm(self) -> None:
+        raw = {
+            "real": mcnemar_exact([0.0] * 20, [1.0] * 20),
+            "noise": mcnemar_exact([1.0, 0.0] * 10, [0.0, 1.0] * 10),
+        }
+        out = holm_bonferroni(raw)
+        assert out["real"][1] is True
+        assert out["noise"][1] is False
 
 
 class TestHolmBonferroni:

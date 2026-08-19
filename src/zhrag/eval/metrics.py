@@ -19,18 +19,23 @@ import math
 import random
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 __all__ = [
     "BootstrapCI",
+    "WinLossTie",
     "all_gold_at_k",
     "bootstrap_ci",
+    "bootstrap_p_floor",
     "evaluate",
     "hit_at_k",
     "holm_bonferroni",
+    "mcnemar_exact",
     "mrr_at_k",
     "ndcg_at_k",
     "paired_bootstrap_test",
     "recall_at_k",
+    "win_loss_tie",
 ]
 
 
@@ -139,6 +144,23 @@ def bootstrap_ci(
     )
 
 
+def bootstrap_p_floor(resamples: int) -> float:
+    """Smallest p-value :func:`paired_bootstrap_test` can return for ``resamples``.
+
+    The estimator is ``(count + 1) / (resamples + 1)``, so with the default
+    10,000 resamples nothing below ``9.999e-05`` is representable. A reported
+    ``p = 0.0001`` therefore means "at or below the resolution of this run", not
+    "estimated at one in ten thousand" -- and after a Holm correction over a
+    family of *m* it shows up as ``m * 1e-4``, which reads like a real estimate
+    and is not one. Callers that print p-values should compare against this and
+    render ``< floor`` rather than ``= floor``, or raise ``resamples`` until the
+    observed p lifts off it.
+    """
+    if resamples < 1:
+        raise ValueError(f"resamples must be >= 1, got {resamples}")
+    return 1.0 / (resamples + 1)
+
+
 def paired_bootstrap_test(
     baseline: Sequence[float],
     treatment: Sequence[float],
@@ -156,8 +178,16 @@ def paired_bootstrap_test(
     Sensitivity depends on how correlated the arms are, not on the headline gap
     alone. At n=500 a +1pp gain where nothing regresses is detectable; the same
     +1pp net gain is not, once some queries improve and others break. Report the
-    win/loss/tie counts alongside the p-value so the reader can tell which case
-    they are looking at.
+    :func:`win_loss_tie` counts alongside the p-value so the reader can tell
+    which case they are looking at.
+
+    Two properties worth knowing before quoting the number:
+
+    * **It is one-sided.** A p of 0.60 does not mean "baseline wins"; it means
+      "no evidence that treatment wins". Swap the arguments to ask the other
+      question, and say which direction was tested when reporting.
+    * **It has a resolution floor** of :func:`bootstrap_p_floor`. For a *binary*
+      metric prefer :func:`mcnemar_exact`, which is exact and has no floor.
     """
     if len(baseline) != len(treatment):
         raise ValueError(f"length mismatch: {len(baseline)} vs {len(treatment)}")
@@ -166,17 +196,187 @@ def paired_bootstrap_test(
 
     diffs = [t - b for b, t in zip(baseline, treatment, strict=True)]
     observed = sum(diffs) / len(diffs)
-    if observed <= 0:
-        return 1.0
 
     rng = random.Random(seed)
     n = len(diffs)
     # Centre the differences so the resampling distribution matches H0: mean = 0.
+    #
+    # A regression (observed <= 0) is *not* short-circuited to 1.0 here. That
+    # shortcut is conservative and never produces a false discovery, but it
+    # discards the distinction between "clearly worse" and "a hair below zero",
+    # and it feeds a family of identical 1.0s into Holm where the real values
+    # would have been spread out. The general path costs one more resampling
+    # loop and returns the actual one-sided p-value.
+    #
+    # The constant-difference case is worth knowing about because it is not
+    # symmetric. Centring leaves a zero-variance null, so every resample ties
+    # the observation and the test reduces to asking `0 >= observed`: exactly
+    # 1.0 when the constant is <= 0, and the floor -- the most significant value
+    # the estimator can emit -- when it is > 0, however tiny. A change that
+    # shifts every query by the same epsilon therefore reports as the strongest
+    # arm in the table. That is the bootstrap being asked a question it cannot
+    # answer (there is no per-query variation to resample), not a defect to
+    # patch here; report win/loss counts and the effect size next to any p-value
+    # and the case is self-evidently degenerate.
     centred = [d - observed for d in diffs]
     at_least_as_extreme = sum(
         1 for _ in range(resamples) if sum(rng.choices(centred, k=n)) / n >= observed
     )
     return (at_least_as_extreme + 1) / (resamples + 1)
+
+
+@dataclass(frozen=True, slots=True)
+class WinLossTie:
+    """Per-query outcome breakdown for two systems on the same queries.
+
+    The counts a bare p-value hides. ``+2pp`` produced by 100 wins and 84 losses
+    is a different system from ``+2pp`` produced by 16 wins and 0 losses: the
+    first has found a genuinely different ranking and is a candidate for fusion,
+    the second is the same ranking nudged. Both print the same delta.
+    """
+
+    wins: int
+    """Queries where ``treatment`` scored strictly higher."""
+
+    losses: int
+    """Queries where ``baseline`` scored strictly higher."""
+
+    ties_nonzero: int
+    """Queries both systems scored equally and above zero -- both succeeded."""
+
+    ties_zero: int
+    """Queries both systems scored zero. **Nothing built on top of these two
+    runs can fix them**, so this count is the hard floor on any fusion."""
+
+    @property
+    def n(self) -> int:
+        return self.wins + self.losses + self.ties_nonzero + self.ties_zero
+
+    @property
+    def discordant(self) -> int:
+        """Queries the two systems disagree on -- the only ones a paired test sees."""
+        return self.wins + self.losses
+
+    @property
+    def union_rate(self) -> float:
+        """Fraction where *at least one* system scored above zero.
+
+        For a binary metric this is the **oracle ceiling**: the score a perfect
+        fusion of exactly these two runs would reach, and therefore the honest
+        upper bound to quote before building one. For a graded metric it is only
+        a coverage rate, because a fusion could also improve a query both
+        systems scored partially.
+        """
+        return 1.0 - self.ties_zero / self.n if self.n else 0.0
+
+    def __str__(self) -> str:
+        # "reachable", not "oracle": union_rate is an oracle ceiling only when
+        # the metric is binary, and this dataclass never learns which it was.
+        reach = f"{self.union_rate:.1%}" if self.n else "n/a"
+        return (
+            f"win {self.wins} / loss {self.losses} / tie {self.ties_nonzero}+{self.ties_zero} "
+            f"(n={self.n}, reachable {reach})"
+        )
+
+
+def win_loss_tie(baseline: Sequence[float], treatment: Sequence[float]) -> WinLossTie:
+    """Count per-query wins, losses and the two kinds of tie.
+
+    Ties are split because they are not interchangeable: a both-succeeded tie is
+    headroom already taken, a both-failed tie is headroom no combination of
+    these two systems can reach. Collapsing them into one "tie" column is how an
+    ablation table ends up claiming a fusion ceiling it cannot hit.
+    """
+    if len(baseline) != len(treatment):
+        raise ValueError(f"length mismatch: {len(baseline)} vs {len(treatment)}")
+    if not baseline:
+        raise ValueError("scores must be non-empty")
+
+    wins = losses = ties_nonzero = ties_zero = 0
+    for b, t in zip(baseline, treatment, strict=True):
+        if t > b:
+            wins += 1
+        elif b > t:
+            losses += 1
+        elif b > 0.0:
+            ties_nonzero += 1
+        else:
+            ties_zero += 1
+    return WinLossTie(wins=wins, losses=losses, ties_nonzero=ties_nonzero, ties_zero=ties_zero)
+
+
+def mcnemar_exact(
+    baseline: Sequence[float],
+    treatment: Sequence[float],
+    *,
+    alternative: Literal["two-sided", "greater"] = "two-sided",
+) -> float:
+    """Exact McNemar test for two systems on the same queries, binary outcomes only.
+
+    The right test for a paired *binary* metric, and strictly better than
+    :func:`paired_bootstrap_test` there for two reasons. It is exact -- the null
+    is ``Binomial(discordant, 0.5)``, evaluated in closed form -- so it has no
+    Monte-Carlo resolution floor and no seed. And it is the same number on every
+    machine, which a bootstrap only is because a seed was pinned.
+
+    **Which of this project's metrics qualify.** :func:`hit_at_k` and
+    :func:`all_gold_at_k` are 0/1 by construction. :func:`recall_at_k` is *not*,
+    except when every query has one gold document: on the 2docs/3docs tasks it
+    returns 0.5, 1/3 or 2/3, and this function will refuse them rather than
+    quietly treating "partial credit changed" as a win. So "R@1" is admissible
+    on ``questanswer_1doc`` and inadmissible on the pooled 2,394-query set --
+    which is the same restriction :func:`recall_at_k` documents for a different
+    reason.
+
+    Only the queries the two systems *disagree* on carry information: a query
+    both got right and a query both got wrong say nothing about which system is
+    better. That is why a 2pp gap over 800 queries can rest on as few as 30
+    discordant pairs, and why quoting :func:`win_loss_tie` next to the p-value
+    is not optional.
+
+    ``alternative='greater'`` tests ``treatment > baseline``, matching
+    :func:`paired_bootstrap_test`'s direction. The default is two-sided, which
+    is the appropriate choice when comparing two systems neither of which was
+    designated the incumbent beforehand.
+
+    The exact tail underflows to 0.0 once the discordant count passes ~1074,
+    since the denominator ``2**n`` leaves no representable double. That needs
+    over a thousand queries on which the two systems disagree; if a table ever
+    reaches it, the printed p is a floor rather than a value.
+    """
+    if len(baseline) != len(treatment):
+        raise ValueError(f"length mismatch: {len(baseline)} vs {len(treatment)}")
+    if not baseline:
+        raise ValueError("scores must be non-empty")
+    if alternative not in ("two-sided", "greater"):
+        # Literal is erased at runtime, and 'less' is a plausible thing to try --
+        # scipy's binomtest accepts it. Falling through to the two-sided branch
+        # would hand back a p-value exactly twice the intended one.
+        raise ValueError(f"alternative must be 'two-sided' or 'greater', got {alternative!r}")
+    for name, scores in (("baseline", baseline), ("treatment", treatment)):
+        # A flag rather than a None sentinel: None is itself a value that must
+        # be rejected, and `next(..., None)` cannot tell it from "nothing found".
+        for score in scores:
+            if score != 0.0 and score != 1.0:  # noqa: PLR1714 - NaN must fail both
+                raise ValueError(
+                    f"{name} is not binary: found {score!r}; McNemar needs 0/1 outcomes"
+                )
+
+    counts = win_loss_tie(baseline, treatment)
+    wins, n = counts.wins, counts.discordant
+    if n == 0:
+        return 1.0
+
+    # Under H0 the wins among discordant pairs are Binomial(n, 0.5). Integer
+    # arithmetic throughout: comb() and the 2**n denominator (spelled as a shift
+    # so it stays an int for the type checker) are exact, so the tail is correct
+    # to the last bit rather than accumulated from n floating-point terms.
+    total = 1 << n
+    upper = sum(math.comb(n, i) for i in range(wins, n + 1)) / total
+    if alternative == "greater":
+        return upper
+    lower = sum(math.comb(n, i) for i in range(wins + 1)) / total
+    return min(1.0, 2 * min(lower, upper))
 
 
 def holm_bonferroni(
