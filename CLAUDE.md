@@ -64,8 +64,8 @@ uv run mypy                       # strict
 |---|---|---|
 | `crud-rag-subset/raw/split_merged.json` | 26 MB | `crud-rag-subset/build_subset.ps1` |
 | `crud-rag-subset/eval-expanded/{corpus,qrels}.jsonl` | 11 MB | `scripts/build_eval_corpus.py`（不联网） |
-| `crud-rag-subset/eval-expanded/emb_cache_4096.jsonl` | 499 MB | `scripts/probe_mrl_quality.py`，5,681 篇 @4096 维 |
-| `crud-rag-subset/eval-expanded/emb_cache_queries_4096.jsonl` | 71 MB | 同上，800 条 query（**独立缓存**：Qwen3 非对称，query 带 instruct 前缀、doc 不带） |
+| `crud-rag-subset/eval-expanded/emb_cache_4096.jsonl` | 523 MB | `scripts/probe_mrl_quality.py`，5,681 篇 @4096 维 |
+| `crud-rag-subset/eval-expanded/emb_cache_queries_4096.jsonl` | 220 MB | 同上 + `scripts/embed_queries.py`，2,394 条 query（**独立缓存**：Qwen3 非对称，query 带 instruct 前缀、doc 不带） |
 | `tidb-rag-curated/documents/` | 6.6 MB | `tidb-rag-curated/download_curated.ps1` |
 
 **嵌入缓存已存在，所以维度消融重跑是免费的**（`dimensions=n` 实测就是前缀切片，
@@ -73,7 +73,6 @@ uv run mypy                       # strict
 
 ## 已知的技术债
 
-- 缓存格式是 JSONL 存十进制浮点，**比 float32 二进制大 5.6 倍**（90 KB/条 vs 16.4 KB）。
-  且**缓存键里没有模型名**——换模型会静默读到旧向量。架构文档 §8 给它留了
-  `src/zhrag/providers/cache.py` 的位置，M2 应该按 float32 + 键含模型重写。
-- `_load_env` / `_post` / `_slice` 在两个 scripts 里各有一份，M2 建 provider 层时收敛。
+- 缓存格式仍是 JSONL 存十进制浮点，**比 float32 二进制大 5.6 倍**（90 KB/条 vs 16.4 KB）。
+  model / prompt 已由同目录 sidecar 防止静默混用，但缓存键本身仍只有 id；M2 后续可按
+  float32 + 键含模型重写，代价是重建现有缓存。

@@ -31,17 +31,21 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
 
-from zhrag.eval.crud import Query, sample_corpus
+from zhrag.eval.crud import QA_TASKS, Query, sample_corpus
 from zhrag.eval.metrics import (
+    BootstrapCI,
     WinLossTie,
+    all_gold_at_k,
     bootstrap_ci,
     bootstrap_p_floor,
+    hit_at_k,
     holm_bonferroni,
     mcnemar_exact,
     mrr_at_k,
@@ -70,7 +74,7 @@ BM25_LABEL = "BM25 char-bigram"
 DENSE_LABEL = "dense-4096"
 
 
-def _load_queries(limit: int | None) -> list[Query]:
+def _load_queries(tasks: Sequence[str], limit: int | None = None) -> list[Query]:
     queries = [
         Query(
             query_id=r["query_id"],
@@ -80,12 +84,14 @@ def _load_queries(limit: int | None) -> list[Query]:
             task=r["task"],
         )
         for r in read_jsonl(EXPANDED / "qrels.jsonl")
-        if r["task"] == "questanswer_1doc"
+        if r["task"] in set(tasks)
     ]
     return queries[:limit] if limit else queries
 
 
-def _load_matrix(cache: Path, ids: Sequence[str]) -> NDArray[np.float32]:
+def _load_matrix(
+    cache: Path, ids: Sequence[str], *, require_all: bool = True
+) -> tuple[NDArray[np.float32], list[str]]:
     """Fill a preallocated matrix from an append-only embedding cache.
 
     Streaming into a fixed array rather than building ``{id: [float, ...]}``
@@ -94,6 +100,12 @@ def _load_matrix(cache: Path, ids: Sequence[str]) -> NDArray[np.float32]:
     hold an id more than once (it is appended per batch and resumable), and a
     later row simply overwrites an earlier one -- the same last-write-wins rule
     the rest of the codebase uses.
+
+    Returns the matrix and the ids the cache did not cover. ``require_all``
+    defaults to True because an uncovered row stays all-zero, which cosines to 0
+    against every document and so ranks last silently instead of announcing
+    itself. The one caller that passes False is deciding *whether* an optional
+    section can run at all, and drops the affected rows before scoring anything.
     """
     position = {doc_id: i for i, doc_id in enumerate(ids)}
     matrix = np.zeros((len(ids), WIDTH), dtype=np.float32)
@@ -110,13 +122,15 @@ def _load_matrix(cache: Path, ids: Sequence[str]) -> NDArray[np.float32]:
         matrix[i] = vector
         seen.add(row["doc_id"])
 
-    if len(seen) != len(ids):
+    missing = [doc_id for doc_id in ids if doc_id not in seen]
+    if missing and require_all:
         raise SystemExit(
-            f"! {cache.name} is missing {len(ids) - len(seen):,} of {len(ids):,} vectors.\n"
+            f"! {cache.name} is missing {len(missing):,} of {len(ids):,} vectors.\n"
             f"  This script never calls the embedding API. Populate the cache first:\n"
-            f"    uv run python scripts/probe_mrl_quality.py --docs 5681 --queries 800"
+            f"    uv run python scripts/probe_mrl_quality.py --docs 5681 --queries 800\n"
+            f"    uv run python scripts/embed_queries.py     # multi-evidence queries"
         )
-    return matrix
+    return matrix, missing
 
 
 def _bm25_runs(corpus: dict[str, str], queries: Sequence[Query]) -> list[list[str]]:
@@ -144,6 +158,11 @@ def _per_query(runs: Sequence[Sequence[str]], queries: Sequence[Query]) -> dict[
         "R@1": [recall_at_k(r, q.gold_doc_ids, 1) for r, q in pairs],
         "MRR@10": [mrr_at_k(r, q.gold_doc_ids, 10) for r, q in pairs],
         "nDCG@10": [ndcg_at_k(r, q.gold_doc_ids, 10) for r, q in pairs],
+        # Binary at any arity, unlike R@1. hit@1 asks "is *a* gold document
+        # first"; ALL-gold@10 asks "did we retrieve everything the question
+        # needs". Both are 0/1, so both admit the exact McNemar test.
+        "hit@1": [hit_at_k(r, q.gold_doc_ids, 1) for r, q in pairs],
+        "ALL@10": [all_gold_at_k(r, q.gold_doc_ids, 10) for r, q in pairs],
     }
 
 
@@ -326,7 +345,13 @@ def report_fusion(
     bm25: dict[str, list[float]],
     dense: dict[str, list[float]],
     resamples: int,
-) -> None:
+) -> str:
+    """Price every fusion configuration; returns the label of the best by R@1.
+
+    The winner is returned rather than recomputed downstream so that section 5
+    audits *this* choice. Re-deriving it there from a different query set would
+    let the two sections quietly disagree about which arm they are discussing.
+    """
     print("\n\n## 4. What RRF actually buys, computed rather than assumed\n")
     print("   Both rankings are already on disk, so fusion is a client-side")
     print("   rearrangement: this is M4's headline number, available before any")
@@ -390,6 +415,7 @@ def report_fusion(
     print("   resolution floor to hide behind.")
 
     _report_depth(arms, n)
+    return best
 
 
 def _report_churn(
@@ -447,6 +473,290 @@ def _report_depth(arms: dict[str, dict[str, list[float]]], n: int) -> None:
     print("   recall, not by what RRF would have promoted.")
 
 
+#: The two 0/1 metrics. Both are reported in every arity block; the ordering
+#: function below only decides which one the prose leads with.
+BINARY_METRICS = ("ALL@10", "hit@1")
+
+#: Above this, a metric has stopped separating systems and leading with it would
+#: report a ceiling rather than a difference.
+SATURATION_CEILING = 0.95
+
+
+def _binary_metrics(baseline: Mapping[str, Sequence[float]]) -> tuple[str, str, str]:
+    """Order the two binary metrics for this stratum, unsaturated one first.
+
+    Returns ``(primary, secondary, why)``. Both are always printed -- this only
+    chooses which one the block leads with.
+
+    ALL-gold@10 is the honest success indicator for a multi-evidence question,
+    since answering it needs every passage, but on single-gold queries it
+    collapses to hit@10, which BM25 already scores 99.5%: a column that cannot
+    separate two systems. hit@1 is the reverse, discriminative everywhere but
+    blind to whether the *rest* of the evidence was found.
+
+    The rule looks only at the baseline arm, which makes the choice
+    treatment-blind: it cannot be tuned toward whichever arm happened to win.
+    That is worth something, and it is emphatically not the same as
+    verdict-neutral. The two metrics answer different questions -- "is one gold
+    document first" against "is the whole evidence set in the top ten" -- and on
+    this data a treatment wins one while losing the other. Designating a primary
+    picks the question; printing both, and correcting over both, is what keeps
+    the designation from deciding the answer.
+    """
+    saturation = _mean(list(baseline["ALL@10"]))
+    if saturation < SATURATION_CEILING:
+        return (
+            "ALL@10",
+            "hit@1",
+            f"BM25 scores {saturation:.1%} on ALL@10, below the {SATURATION_CEILING:.0%} bar",
+        )
+    return "hit@1", "ALL@10", f"ALL@10 is saturated at {saturation:.1%} for BM25"
+
+
+class _ArityRow(NamedTuple):
+    """One printed line of the per-arity test table, with its family key."""
+
+    arity: int
+    arm: str
+    metric: str
+    ci_low: str
+    ci_high: str
+    tally: str
+    key: str
+    primary: bool
+
+
+def report_by_arity(
+    queries: Sequence[Query],
+    arms: Mapping[str, Sequence[Sequence[str]]],
+    resamples: int,
+    fusion_label: str,
+) -> None:
+    """Everything above, re-cut by how many documents the question actually needs."""
+    print("\n\n## 5. Stratified by gold arity\n")
+    print("   Sections 1-4 are held to questanswer_1doc. This one is not, and it is")
+    print("   the open question the roadmap flags as most likely to overturn them:")
+    print("   dense retrieval is supposed to pull ahead where lexical overlap runs")
+    print("   out, and a 3-document question is where that should show.\n")
+    print("   Grouped by the **actual** gold count, not by task name. The names do not")
+    print("   fix arity -- questanswer_2docs holds 8 single-gold queries and")
+    print("   questanswer_3docs holds 13 two-gold and 1 single-gold -- and since R@1")
+    print("   is capped at 1/arity, a row mixing them would carry three ceilings.")
+
+    groups: dict[int, list[int]] = {}
+    for i, query in enumerate(queries):
+        groups.setdefault(len(query.gold_doc_ids), []).append(i)
+
+    scored = {
+        arity: {
+            label: _per_query([runs[i] for i in idx], [queries[i] for i in idx])
+            for label, runs in arms.items()
+        }
+        for arity, idx in sorted(groups.items())
+    }
+
+    print(
+        f"\n   {'arity':>5} {'n':>6} {'arm':<22} {'R@1':>7} {'MRR@10':>8} "
+        f"{'nDCG@10':>8} {'hit@1':>7} {'ALL@10':>7}"
+    )
+    print(f"   {'-' * 5} {'-' * 6} {'-' * 22} {'-' * 7} {'-' * 8} {'-' * 8} {'-' * 7} {'-' * 7}")
+    for arity, per_arm in scored.items():
+        for j, (label, metrics) in enumerate(per_arm.items()):
+            head = f"   {arity:>5} {len(groups[arity]):>6,}" if j == 0 else "   " + " " * 12
+            print(
+                f"{head} {label:<22} {_mean(metrics['R@1']):>6.1%} "
+                f"{_mean(metrics['MRR@10']):>8.3f} {_mean(metrics['nDCG@10']):>8.3f} "
+                f"{_mean(metrics['hit@1']):>6.1%} {_mean(metrics['ALL@10']):>6.1%}"
+            )
+
+    print("\n   R@1 is comparable down a column only *within* an arity block: its")
+    print("   ceiling is 1/arity, so 3-gold rows top out at 33.3%. hit@1 and ALL@10")
+    print("   are 0/1 at any arity and are the columns to read across blocks.")
+    extra = len(groups.get(1, [])) - sum(1 for q in queries if q.task == "questanswer_1doc")
+    if extra:
+        print("\n   The arity-1 block is not the questanswer_1doc row from sections 1-4:")
+        print(f"   it is {extra} queries larger, because that many rows filed under the")
+        print("   2docs and 3docs tasks carry a single gold document. Small differences")
+        print("   against the README's per-task numbers are that regrouping, not drift.")
+
+    print("\n   All four fusion configurations appear in the table so the reader can see")
+    print(f"   they cluster, but only '{fusion_label}' -- the one section 4 selected --")
+    print("   is carried into the tests below. Adding three near-identical arms would")
+    print("   inflate the correction's family size without adding a question.")
+
+    _report_arity_tests(scored, resamples, fusion_label)
+    _report_arity_verdict(scored, fusion_label, resamples)
+
+
+def _report_arity_verdict(
+    scored: Mapping[int, Mapping[str, dict[str, list[float]]]],
+    fusion_label: str,
+    resamples: int,
+) -> None:
+    """State plainly whether one fusion configuration survives a change of arity."""
+    print("\n   Fusion against dense alone, per arity -- the configuration in section 4")
+    print("   was chosen on single-evidence queries, so this is where that choice gets")
+    print("   audited rather than assumed. Both binary metrics, Holm-corrected over the")
+    print("   whole block:\n")
+
+    raw: dict[str, float] = {}
+    deltas: dict[str, float] = {}
+    cis: dict[str, BootstrapCI] = {}
+    tallies: dict[str, WinLossTie] = {}
+    for arity, per_arm in scored.items():
+        dense, fused = per_arm[DENSE_LABEL], per_arm[fusion_label]
+        for metric in BINARY_METRICS:
+            key = f"arity {arity} {metric}"
+            raw[key] = mcnemar_exact(dense[metric], fused[metric])
+            diffs = [t - d for d, t in zip(dense[metric], fused[metric], strict=True)]
+            cis[key] = bootstrap_ci(diffs, resamples=resamples)
+            deltas[key] = (_mean(fused[metric]) - _mean(dense[metric])) * 100
+            tallies[key] = win_loss_tie(dense[metric], fused[metric])
+    adjusted = holm_bonferroni(raw)
+
+    regressions: list[str] = []
+    for key in raw:
+        delta, ci, counts = deltas[key], cis[key], tallies[key]
+        p, reject = adjusted[key]
+        if delta > 0:
+            verdict = "fusion ahead"
+        elif delta < 0:
+            verdict = "**dense alone ahead**"
+        else:
+            verdict = "dead level"
+        if delta < 0 and reject:
+            regressions.append(key)
+        interval = f"[{ci.low * 100:+.2f}, {ci.high * 100:+.2f}]pp"
+        print(
+            f"     {key:<16} {delta:+6.2f}pp {interval:>18}, win/loss "
+            f"{f'{counts.wins}/{counts.losses}':>7}, p(Holm) = {_fmt_exact_p(p):>9}"
+            f"{'*' if reject else ' '} -- {verdict}"
+        )
+    print(f"\n   * = significant at family-wise alpha=0.05 after Holm over {len(raw)} tests.")
+
+    if not regressions:
+        print("\n   No fusion regression survives the correction: one configuration is")
+        print("   defensible across every arity on this data.")
+        return
+    print(f"\n   Fusion is significantly behind dense alone on: {', '.join(regressions)}.")
+    print("   Read the metric, not just the sign. The losses are on ALL-gold@10 -- the")
+    print("   whole evidence set -- while hit@1 moves by amounts the same test cannot")
+    print("   separate from zero. So the bill section 4 ran up is specific: the")
+    print("   lexical arm helps put *a* passage first on questions one passage answers,")
+    print("   and dilutes dense's ability to surface *every* passage on questions that")
+    print("   need several. A single fusion configuration across all arities is")
+    print("   therefore not supported here -- either the weights vary with the question,")
+    print("   or the ablation reports per-arity rows and declines to name one winner.")
+
+
+def _report_arity_tests(
+    scored: Mapping[int, Mapping[str, dict[str, list[float]]]],
+    resamples: int,
+    fusion_label: str,
+) -> None:
+    """Per-arity verdicts against the BM25 baseline, on both binary metrics."""
+    print("\n   Against the BM25 baseline, per arity. Both 0/1 metrics are reported in")
+    print("   every block; '>' marks the one the block leads with, chosen by looking")
+    print("   only at the baseline's saturation. The graded row underneath is the")
+    print("   one-sided paired bootstrap on nDCG@10.\n")
+
+    floor = bootstrap_p_floor(resamples)
+    rows: list[_ArityRow] = []
+    binary_p: dict[str, float] = {}
+    graded_p: dict[str, float] = {}
+    why_by_arity: dict[int, str] = {}
+
+    for arity, per_arm in scored.items():
+        baseline = per_arm[BM25_LABEL]
+        primary, secondary, why = _binary_metrics(baseline)
+        why_by_arity[arity] = why
+        for arm in (DENSE_LABEL, fusion_label):
+            treatment = per_arm[arm]
+            for metric in (primary, secondary):
+                key = f"a{arity} {arm} {metric}"
+                binary_p[key] = mcnemar_exact(baseline[metric], treatment[metric])
+                counts = win_loss_tie(baseline[metric], treatment[metric])
+                diffs = [t - b for b, t in zip(baseline[metric], treatment[metric], strict=True)]
+                ci = bootstrap_ci(diffs, resamples=resamples)
+                rows.append(
+                    _ArityRow(
+                        arity=arity,
+                        arm=arm,
+                        metric=metric,
+                        ci_low=f"{ci.low * 100:+.2f}",
+                        ci_high=f"{ci.high * 100:+.2f}",
+                        tally=f"{counts.wins}/{counts.losses}",
+                        key=key,
+                        primary=metric == primary,
+                    )
+                )
+            key = f"a{arity} {arm} nDCG@10"
+            graded_p[key] = paired_bootstrap_test(
+                baseline["nDCG@10"], treatment["nDCG@10"], resamples=resamples
+            )
+            diffs = [t - b for b, t in zip(baseline["nDCG@10"], treatment["nDCG@10"], strict=True)]
+            ci = bootstrap_ci(diffs, resamples=resamples)
+            rows.append(
+                _ArityRow(
+                    arity=arity,
+                    arm=arm,
+                    metric="nDCG@10",
+                    ci_low=f"{ci.low:+.3f}",
+                    ci_high=f"{ci.high:+.3f}",
+                    tally="",
+                    key=key,
+                    primary=False,
+                )
+            )
+
+    # Two families, not one. The binary tests are exact and two-sided; the graded
+    # ones are one-sided with a Monte-Carlo floor at 1/(resamples+1). Pooling
+    # them would let floored values -- which are "at most this small", not "this
+    # small" -- set the step-down order for the exact ones.
+    binary_adj = holm_bonferroni(binary_p)
+    graded_adj = holm_bonferroni(graded_p)
+
+    print(
+        f"   {'':>1}{'arity':>5} {'arm':<22} {'metric':>8} {'delta [95% CI]':>24} "
+        f"{'win/loss':>9} {'p':>10} {'p(Holm)':>10}"
+    )
+    print(f"    {'-' * 5} {'-' * 22} {'-' * 8} {'-' * 24} {'-' * 9} {'-' * 10} {'-' * 10}")
+    last_arity: int | None = None
+    for row in rows:
+        if last_arity is not None and row.arity != last_arity:
+            print(f"    {'':>5} ({why_by_arity[last_arity]})")
+        last_arity = row.arity
+        graded = row.metric == "nDCG@10"
+        raw_p = graded_p[row.key] if graded else binary_p[row.key]
+        adj, reject = (graded_adj if graded else binary_adj)[row.key]
+        shown_raw = _fmt_p(raw_p, floor) if graded else _fmt_exact_p(raw_p)
+        shown_adj = _fmt_p(adj, floor) if graded else _fmt_exact_p(adj)
+        baseline = scored[row.arity][BM25_LABEL][row.metric]
+        treatment = scored[row.arity][row.arm][row.metric]
+        mean = (_mean(treatment) - _mean(baseline)) * (1 if graded else 100)
+        interval = (
+            f"{mean:+.3f} [{row.ci_low}, {row.ci_high}]"
+            if graded
+            else f"{mean:+.2f}pp [{row.ci_low}, {row.ci_high}]"
+        )
+        print(
+            f"   {'>' if row.primary else ' '}{row.arity:>5} {row.arm:<22} "
+            f"{row.metric:>8} {interval:>24} {row.tally:>9} {shown_raw:>10} "
+            f"{shown_adj:>9}{'*' if reject else ' '}"
+        )
+    if last_arity is not None:
+        print(f"    {'':>5} ({why_by_arity[last_arity]})")
+
+    print(
+        f"\n   Holm runs over the {len(binary_p)} binary tests as one family and the "
+        f"{len(graded_p)} graded ones"
+    )
+    print("   as another. The binary family spans both metrics on purpose: every one of")
+    print(f"   those {len(binary_p)} is a chance to claim an improvement, and splitting them into")
+    print("   a family per column would buy power by redrawing the family after seeing")
+    print("   the table. A result that needs that split is not a result.")
+
+
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -454,6 +764,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--queries", type=int, default=0, help="0 = all single-evidence queries")
     parser.add_argument("--resamples", type=int, default=10_000)
+    parser.add_argument(
+        "--no-arity",
+        action="store_true",
+        help="skip section 5 even when the multi-evidence query embeddings are cached",
+    )
     args = parser.parse_args()
 
     if not (EXPANDED / "corpus.jsonl").exists():
@@ -473,26 +788,90 @@ def main() -> int:
             return 1
 
     pool = {r["doc_id"]: r["text"] for r in read_jsonl(EXPANDED / "corpus.jsonl")}
-    queries = _load_queries(args.queries or None)
-    corpus = sample_corpus(pool, queries)
+    one_doc = _load_queries(["questanswer_1doc"], args.queries or None)
+    multi = [q for q in _load_queries(list(QA_TASKS)) if q.task != "questanswer_1doc"]
+    corpus = sample_corpus(pool, _load_queries(list(QA_TASKS)))
     doc_ids = list(corpus)
-    print(f"corpus {len(corpus):,} documents | {len(queries):,} questanswer_1doc queries")
+
+    print(f"corpus {len(corpus):,} documents | {len(one_doc):,} questanswer_1doc queries")
     print(f"retrieval depth {DEPTH} per arm | {args.resamples:,} bootstrap resamples")
+
+    print(f"loading {DOC_CACHE.name} ({DOC_CACHE.stat().st_size / 1e6:.0f} MB) ...", flush=True)
+    doc_matrix, _ = _load_matrix(DOC_CACHE, doc_ids)
+
+    # Section 5 needs the multi-evidence queries embedded, which the MRL ablation
+    # never asked for. Degrade to sections 1-4 rather than failing: the
+    # pre-registered comparison must stay runnable on a machine that has only
+    # ever run probe_mrl_quality.py. The coverage question is answered by the
+    # one pass that has to read this 220 MB file anyway -- asking it separately
+    # first would parse every vector twice to learn only which ids exist.
+    print(f"loading {QUERY_CACHE.name} ...", flush=True)
+    query_matrix, absent = _load_matrix(
+        QUERY_CACHE, [q.query_id for q in one_doc + multi], require_all=False
+    )
+    one_doc_absent = [qid for qid in absent if qid in {q.query_id for q in one_doc}]
+    if one_doc_absent:
+        raise SystemExit(
+            f"! {QUERY_CACHE.name} is missing {len(one_doc_absent):,} of the "
+            f"{len(one_doc):,} single-evidence queries\n"
+            f"  sections 1-4 depend on. Populate the cache first:\n"
+            f"    uv run python scripts/probe_mrl_quality.py --docs 5681 --queries 800"
+        )
+
+    stratified = bool(multi) and not absent and not args.no_arity and not args.queries
+    if stratified:
+        print(f"section 5 additionally covers {len(multi):,} multi-evidence queries")
+    elif args.no_arity:
+        print("section 5 skipped: --no-arity")
+    elif args.queries:
+        print(
+            f"section 5 skipped: --queries {args.queries} truncates the single-evidence\n"
+            f"  arm, and an arity-1 block scored on {args.queries} queries next to arity-2 and\n"
+            f"  arity-3 blocks scored on all of theirs would put three sample sizes in one\n"
+            f"  column. Drop --queries to include it."
+        )
+    elif absent:
+        print(
+            f"section 5 skipped: {len(absent):,} multi-evidence queries are not in "
+            f"{QUERY_CACHE.name}\n  populate them with: uv run python scripts/embed_queries.py"
+        )
+
+    queries = one_doc + (multi if stratified else [])
+    query_matrix = query_matrix[: len(queries)]
 
     print("\nbuilding BM25 (char bigram) ...", flush=True)
     bm25_runs = _bm25_runs(corpus, queries)
-
-    print(f"loading {DOC_CACHE.name} ({DOC_CACHE.stat().st_size / 1e6:.0f} MB) ...", flush=True)
-    doc_matrix = _load_matrix(DOC_CACHE, doc_ids)
-    print(f"loading {QUERY_CACHE.name} ...", flush=True)
-    query_matrix = _load_matrix(QUERY_CACHE, [q.query_id for q in queries])
     dense_runs = _dense_runs(query_matrix, doc_matrix, doc_ids)
 
-    bm25, dense = _per_query(bm25_runs, queries), _per_query(dense_runs, queries)
+    # Sections 1-4 are the pre-registered single-evidence comparison and stay
+    # held to it; slicing here rather than re-running keeps both halves on
+    # byte-identical runs.
+    n1 = len(one_doc)
+    bm25 = _per_query(bm25_runs[:n1], one_doc)
+    dense = _per_query(dense_runs[:n1], one_doc)
     report_head_to_head(bm25, dense, args.resamples)
     report_contingency(bm25, dense)
-    report_recoverable(bm25_runs, dense_runs, queries)
-    report_fusion(bm25_runs, dense_runs, queries, bm25=bm25, dense=dense, resamples=args.resamples)
+    report_recoverable(bm25_runs[:n1], dense_runs[:n1], one_doc)
+    best = report_fusion(
+        bm25_runs[:n1],
+        dense_runs[:n1],
+        one_doc,
+        bm25=bm25,
+        dense=dense,
+        resamples=args.resamples,
+    )
+
+    if stratified:
+        report_by_arity(
+            queries,
+            {
+                BM25_LABEL: bm25_runs,
+                DENSE_LABEL: dense_runs,
+                **_fusion_arms(bm25_runs, dense_runs),
+            },
+            args.resamples,
+            best,
+        )
     return 0
 
 

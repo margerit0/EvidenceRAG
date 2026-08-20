@@ -299,7 +299,7 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 这是需要**提前决定**的分支，不能等测完再想：
 
 1. **先看 CI 是否重叠**。✅ **这条已经用上了**：dense 单臂 vs BM25 的 95% CI 大幅重叠（+2.12pp，CI [−1.00, +5.25]pp），McNemar p = 0.199 —— 已如实报告「在本语料上 **dense 单臂**未带来统计显著提升」。这是第二个诚实的负结果，和 98.0%→75.9% 那个同样值钱。**注意它没有连坐 hybrid**：RRF 对 BM25 是 +4.00pp、p = 1.6e-03，显著。打平的是单臂，不是融合。
-2. **切分难度桶再看**。按 1doc/2docs/3docs 分层——dense 臂大概率在 2docs/3docs（ALL-gold@10 只有 87.3%/68.9%）上才显出优势，整体均值会把它稀释掉。**分层表是打平时的救命稻草**。⚠️ **这条现在是本项目最大的未知**：dense 与 RRF 至今只在 1doc(800) 上跑过（列联表要求同 arity，混 arity 会把「部分得分变化」计成胜负）。2docs/3docs 没有任何数据，它是「dense 打平」这个叙事唯一可能翻盘的地方，应排在 rerank 之前跑。
+2. **切分难度桶再看。** ✅ **已于 2026-08-20 跑完**：按实际 gold 数而非任务名分成 809 / 802 / 783 条。结果不是笼统的「dense 随 arity 增大而全面领先」，而是**指标特异**：跨 arity 可比的 `hit@1` 上，dense vs BM25 为 +1.98pp / +0.37pp / +4.34pp，配对 95% CI 分别为 [−0.99,+4.94] / [−3.37,+4.36] / [+0.64,+8.17]pp，12 项二元 family 经 Holm 后 p=1.000 / 1.000 / 0.176，均不显著；`ALL-gold@10` 上，arity=2 为 **+6.48pp**（95% CI [+4.24, +8.73]pp，Holm p=2.81e-07），arity=3 为 **+15.71pp**（[+12.90, +18.52]pp，Holm p=1.66e-27）。**dense 强在把整套证据捞进 top-10，不强在把任一证据排第一。** 同时，1doc 上选出的 RRF k=10/depth=100 到 arity=3 的 ALL-gold@10 相对 dense **−5.11pp**（95% CI [−7.02, −3.19]pp，6 项 Holm p=1.67e-06），而 hit@1 −0.77pp（95% CI [−3.58,+2.04]pp，Holm p=1.000）不显著；所以退化不能泛化成「融合整体伤害多文档查询」，但一套融合配置通吃全部 arity 也不再受数据支持。复现：`scripts/compare_dense_bm25.py` section 5。
 3. **换看 nDCG@10 和 MRR@10**。R@1 打平不代表排序质量打平。
 4. **绝不通过换评测集来制造差异**。若换了，必须两个集都报。
 
@@ -313,9 +313,9 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 |---|---|---|---|---|
 | **M0** | 仓库卫生 + CI | **1.0** | `.github/workflows/ci.yml`（ubuntu + windows 双 leg，windows 不设 PYTHONUTF8）；ruff 加 PLW1514；删除 `_research_*.py` / `_enc_test.txt`；`DATA_LICENSE.md` | CI 绿；ruff 0 error；测试通过率 100% |
 | **M1** | Protocol + registry + YAML config | **1.5** | `retrieval/base.py`（4 个 Protocol）、`registry.py`、`config.py`（pydantic-settings，`extra='forbid'`）、`experiments/*.yaml` | 现有 BM25 零改动通过 Protocol；1 条命令跑通 1 个 config |
-| **M2** | Milvus Lite 冒烟 + provider 客户端 | **1.0** | `store/milvus.py`、`embed/siliconflow.py`（含 instruct 前缀常量）、`rerank/siliconflow.py`；tenacity 退避 | 10 行 create/insert/hybrid_search 通过；embedding L2 范数 = 1.0 验证；dimensions 截断等价性验证 |
+| **M2** | Milvus Lite 冒烟 + provider 客户端 | **1.0** | `store/milvus.py`；✅ `providers/embedding.py`（One Hub/OpenAI-compatible，含 QUERY_PROMPT、7 次长退避、批级续传、model/prompt sidecar）；rerank provider 待建 | ✅ embedding provider 55 个隔离测试；L2 与 dimensions 探针复用同一客户端；Milvus create/insert/hybrid_search 冒烟已通过；M2 剩 store + rerank |
 | **M3** | 全量索引 + dense 基线 | **1.5** | `scripts/build_index.py`（幂等 upsert，chunk id = hash(path, ordinal, text)）、`corpus_manifest` sha256 变更检测 | 5,681 文档索引完成；dense-4096 的 R@1 / MRR@10 出数 |
-| **M4** | 混合检索 + RRF | ~~1.0~~ **0.5** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | **离线部分已完成 2026-08-19**（`scripts/compare_dense_bm25.py` + `retrieval/fusion.py`）：hybrid **79.9 / 0.881** vs BM25 75.9（McNemar p=1.6e-03，显著）vs dense 78.0（Holm p=0.231，不显著）。M4 剩下的是**把它搬进 Milvus 服务端并复现同一组数字**——对不上就说明服务端融合口径有问题——外加 2docs/3docs 分层 |
+| **M4** | 混合检索 + RRF | ~~1.0~~ **0.5** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | **离线部分已完成 2026-08-19，分层于 2026-08-20 补齐**（`scripts/compare_dense_bm25.py` + `retrieval/fusion.py`）：1doc hybrid **79.9 / 0.881** vs BM25 75.9（p=1.6e-03，显著）vs dense 78.0（Holm p=0.231，不显著）；多证据上 dense 的完整证据召回更强，而同一 RRF 在 arity=3 ALL@10 比 dense 低 5.11pp。M4 剩把融合搬进 Milvus 服务端并复现数字 |
 | **M5** | Rerank + 深度消融 | **1.5** | `rerank` 阶段 + `(qid,docid,model)` 分数缓存 | top-50 / top-100 / 4B vs 8B 四行；**分层报 1doc/2docs/3docs** |
 | **M6** | ~~MRL 消融（原创）~~ **✅ 已完成 2026-08-19** | ~~1.0~~ **0.3** | `scripts/probe_mrl_quality.py`：4096→64 七档 + 逐维方差 + 配对检验 | 存储 93.1 MB → 23.3 MB（1024 维）；**1024 维 −0.50pp 不显著（p=0.684），仅 64 维显著劣化 −4.25pp（p<0.001）** |
 | **M7** | chunk sweep | **0.5** | 256/400/800 | 「为什么是 400」有曲线不是故事 |
@@ -362,8 +362,8 @@ zhrag/
 │   │   ├── milvus.py               # 🆕 Lite / Standalone / Zilliz 同一份代码
 │   │   └── tidb.py                 # 🆕 第二后端（叙事用）
 │   ├── providers/
-│   │   ├── siliconflow.py          # 🆕 embed + rerank，含 QUERY_PROMPT 常量
-│   │   └── cache.py                # 🆕 (qid, docid, model) 重排分数缓存
+│   │   ├── embedding.py            # ✅ One Hub/OpenAI-compatible：prompt / 重试 / 批缓存 / sidecar
+│   │   └── cache.py                # 🆕 (qid, docid, model) 重排分数缓存（嵌入 sidecar 已在 embedding.py）
 │   ├── eval/
 │   │   ├── metrics.py              # ✅ R@k / MRR / nDCG / ALL-gold / bootstrap
 │   │   ├── metrics_gen.py          # 🆕 jieba 词级 BLEU/ROUGE + BERTScore-zh
@@ -532,7 +532,8 @@ zhrag/
 - [ ] **DeepInfra 的 Qwen3-Embedding-4B 标价 $0.020/M、比 8B 的 $0.010/M 贵一倍**，这个反常价格可能是促销或过期数据。做预算前在实时页面确认。
 - [ ] **英文 instruction 与中文 instruction 在你的中文语料上到底哪个好。** Qwen 基于训练数据来源推荐英文，但那是通用建议不是在 TiDB 文档上的实测。两次跑，同一评测，又一行诚实消融。
 - [x] **hybrid 到底能不能在你的 5,681 语料上打赢 char-bigram BM25 的 75.9%。** **能，且显著。** 离线 RRF 融合 dense-4096 与 BM25 两条 run：**R@1 79.9% / MRR@10 0.881**，对 BM25 **+4.00pp**（65 胜 33 负，McNemar 精确 p = **1.6e-03**）。同时**修正了本条此前的一个错误结论**：dense 单臂并没有「赢」——+2.12pp、95% CI **[−1.00, +5.25]pp**、p = **0.199**，**不显著**。当初「两臂接近不等于融合无用」的判断被证实了：列联表 538 / 69 / 86 / 107，φ = 0.455，并集 oracle 上限 **86.6%**；且一臂 rank-1 落空时 gold 在另一臂里 83–88% 落在前 3、掉出 top-100 的是 0.0%。三条工程结论：**融合深度 10 与 100 的逐查询 R@1 逐位相同**（0/800 条 top-1 改变）；k 从 60 调到 10 只动 0.1pp；**唯一有效的旋钮是权重**（0.3/0.7 是全表唯一显著优于 dense 单臂的配置，16 胜 4 负，Holm p=0.047）。复现：`uv run python scripts/compare_dense_bm25.py`（不联网）。⚠️ 四个融合配置是在同一批 800 条上选出又汇报的，最好那行是上界不是泛化估计。
-- [ ] **rerank 能否在 hybrid 的 79.9% 之上再拿到显著增量，以及 2docs/3docs 的分层结果。** 上一条只跑了 1doc(800)。两个未知：① Qwen3-Reranker-8B @ top-50/100 的增量——oracle 上限告诉我们 dense+BM25 的并集还剩 6.7pp，重排够不够得着是空的；② dense 与融合在 2docs/3docs 上的表现**完全未测**，这是目前最大的未知，也是「dense 打平」这个叙事唯一可能翻盘的地方（见 §6.4 第 2 条）。**若最终打不赢，那就是第二个诚实的负结果——现在就决定你会怎么发布它。**
+- [x] **2docs/3docs 分层结果。** 已于 2026-08-20 完成。按实际 gold 数分组（809 / 802 / 783）后，dense vs BM25 的 `hit@1` 为 +1.98 / +0.37 / +4.34pp，配对 95% CI 为 [−0.99,+4.94] / [−3.37,+4.36] / [+0.64,+8.17]pp，12 项二元 family 经 Holm 后 p=1.000 / 1.000 / 0.176，均不显著；但 `ALL-gold@10` 在 arity=2/3 分别 **+6.48pp**（95% CI [+4.24,+8.73]，Holm p=2.81e-07）与 **+15.71pp**（[+12.90,+18.52]，p=1.66e-27）。结论是 **dense 强在找齐证据，不强在把任一证据排第一**。1doc 选出的 RRF k=10/depth=100 在 arity=3 的 ALL@10 又比 dense **低 5.11pp**（[−7.02,−3.19]，6 项 Holm p=1.67e-06），而 hit@1 为 −0.77pp（[−3.58,+2.04]，Holm p=1.000），差异不显著；一套 RRF 配置不能直接外推。复现：`uv run python scripts/compare_dense_bm25.py`（不联网）。
+- [ ] **rerank 能否在 hybrid 的 79.9% 之上再拿到显著增量。** 仍待验证 Qwen3-Reranker-8B @ top-50/100 能否在各 arity 上带来经配对检验的增量。单证据上 dense+BM25 的并集 oracle 还剩 6.7pp，但多证据分层已经说明不能假定同一 fusion/rerank 配置跨 arity 通吃。
 - [ ] **RAGAS / DeepEval 内置指标提示词在中文上的校准度。** 研究只验证了管道（`base_url` 支持、`adapt_instruction` 语义、DeepSeek/Kimi 类），**零中文评测**。人工标 ~50 行，先测判官与你的一致率。
 
 **部署与生态待验证事项**

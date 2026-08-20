@@ -44,15 +44,15 @@ equals 1.0.
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import statistics
 import sys
-import urllib.error
-import urllib.request
+from pathlib import Path
 from typing import Any
 
-from zhrag.io_utils import read_text
+from zhrag.providers.embedding import EmbeddingClient, EmbeddingConfig, load_env
+
+ROOT = Path(__file__).resolve().parent.parent
 
 #: float32 has ~7 decimal digits, and the values arrive as decimal JSON, so a
 #: genuinely normalised vector lands within ~1e-6 of 1.0 rather than exactly on
@@ -104,65 +104,6 @@ RANK_DOCS: list[str] = [
 ]
 
 
-def _load_env() -> dict[str, str]:
-    """Parse .env without importing a dependency. Values are never logged."""
-    out: dict[str, str] = {}
-    for raw in read_text(".env").lstrip("﻿").splitlines():
-        line = raw.strip()
-        if line and not line.startswith("#") and "=" in line:
-            name, _, value = line.partition("=")
-            out[name.strip()] = value.strip().strip("'\"")
-    return out
-
-
-def _endpoint(base: str) -> str:
-    """Join the base URL to /v1/embeddings without doubling an existing /v1."""
-    base = base.rstrip("/")
-    return f"{base}/embeddings" if base.endswith("/v1") else f"{base}/v1/embeddings"
-
-
-def _hint(detail: str) -> str:
-    """Translate the two 403s this relay returns, which look identical to a caller."""
-    if "1010" in detail:
-        return "\n  -> Cloudflare rejected the User-Agent, not your key."
-    if "可调用时段" in detail:
-        return (
-            "\n  -> Not an auth or code failure: this relay's key group is gated to a"
-            "\n     time-of-day window. Re-run inside the window shown in the message."
-        )
-    return ""
-
-
-def _post(url: str, key: str, payload: dict[str, Any], *, timeout: float = 180.0) -> dict[str, Any]:
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-            # Cloudflare in front of this relay answers the stdlib's default
-            # "Python-urllib/3.13" with 403 error 1010 ("browser signature
-            # banned"). That 403 is indistinguishable from an auth failure
-            # until you read the body, so send a real UA and let genuine errors
-            # surface as themselves.
-            "User-Agent": "zhrag/0.1 (+https://github.com/margerit0/zhrag)",
-            "Accept": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            body: dict[str, Any] = json.loads(response.read().decode("utf-8"))
-            return body
-    except urllib.error.HTTPError as exc:
-        # The provider's error body is the whole point of a probe script: it is
-        # how an unsupported parameter announces itself. Surface it verbatim.
-        detail = exc.read().decode("utf-8", errors="replace")[:600]
-        raise SystemExit(f"! HTTP {exc.code} from {url}\n  {detail}{_hint(detail)}") from exc
-    except urllib.error.URLError as exc:
-        raise SystemExit(f"! cannot reach {url}: {exc.reason}") from exc
-
-
 def _l2(vector: list[float]) -> float:
     """Exactly-rounded L2 norm. Equivalent to np.linalg.norm, but not lossy."""
     return math.sqrt(math.fsum(x * x for x in vector))
@@ -188,21 +129,21 @@ def _vectors(response: dict[str, Any]) -> list[list[float]]:
 
 
 def _embed(
-    url: str, key: str, model: str, texts: list[str], *, dim: int | None = None
+    client: EmbeddingClient, texts: list[str], *, dim: int | None = None
 ) -> list[list[float]]:
-    payload: dict[str, Any] = {"model": model, "input": texts}
+    payload: dict[str, Any] = {"model": client.config.model, "input": texts}
     if dim is not None:
         payload["dimensions"] = dim
-    return _vectors(_post(url, key, payload))
+    return _vectors(client.post(payload))
 
 
-def check_normalisation(url: str, key: str, model: str) -> list[list[float]]:
+def check_normalisation(client: EmbeddingClient) -> list[list[float]]:
     print("## 1. L2 normalisation\n")
-    response = _post(url, key, {"model": model, "input": [text for _, text in PROBES]})
+    response = client.post({"model": client.config.model, "input": [t for _, t in PROBES]})
     vectors = _vectors(response)
 
     tokens = response.get("usage", {}).get("total_tokens")
-    print(f"   model={response.get('model', model)}  usage={tokens} tokens\n")
+    print(f"   model={response.get('model', client.config.model)}  usage={tokens} tokens\n")
     print(f"   {'probe':<14} {'chars':>6} {'dim':>6} {'L2 norm':>19} {'|norm-1|':>10}")
     print(f"   {'-' * 14} {'-' * 6} {'-' * 6} {'-' * 19} {'-' * 10}")
 
@@ -229,14 +170,14 @@ def check_normalisation(url: str, key: str, model: str) -> list[list[float]]:
     return vectors
 
 
-def check_reproducibility(url: str, key: str, model: str, batch: list[list[float]]) -> float:
+def check_reproducibility(client: EmbeddingClient, batch: list[list[float]]) -> float:
     """Return the noise floor as a cosine, for use as the yardstick in check_mrl."""
     print("\n\n## 2. Reproducibility -- establishing the noise floor\n")
 
     intra = _cos(batch[0], batch[-1])
     print(f"   same text, same batch  (positions 0 and 5): cos = {intra:.12f}")
 
-    repeat = _embed(url, key, model, [PROBES[0][1]])[0]
+    repeat = _embed(client, [PROBES[0][1]])[0]
     inter = _cos(batch[0], repeat)
     print(f"   same text, separate request:                cos = {inter:.12f}")
 
@@ -253,9 +194,7 @@ def check_reproducibility(url: str, key: str, model: str, batch: list[list[float
     return floor
 
 
-def check_mrl(
-    url: str, key: str, model: str, full: list[float], floor: float, *, dims: list[int]
-) -> None:
+def check_mrl(client: EmbeddingClient, full: list[float], floor: float, *, dims: list[int]) -> None:
     print("\n\n## 3. dimensions=n -- prefix slice or separately trained head?\n")
     print("   Judged against the noise floor, not an absolute threshold: a re-embed of")
     print(f"   the *same* text at full width already only reaches cos {floor:.9f}.\n")
@@ -265,7 +204,7 @@ def check_mrl(
     verdicts: list[bool] = []
     for dim in dims:
         try:
-            native = _embed(url, key, model, [PROBES[0][1]], dim=dim)[0]
+            native = _embed(client, [PROBES[0][1]], dim=dim)[0]
         except SystemExit as exc:
             print(f"   {dim:>6}  rejected: {exc}")
             verdicts.append(False)
@@ -299,16 +238,16 @@ def check_mrl(
         print("      and its own index; budget the MRL ablation accordingly.")
 
 
-def check_ranking_equivalence(url: str, key: str, model: str, *, dim: int) -> None:
+def check_ranking_equivalence(client: EmbeddingClient, *, dim: int) -> None:
     """The only test whose outcome changes a downstream decision."""
     print(f"\n\n## 4. Ranking equivalence at dim={dim} (the decision test)\n")
     print(f"   {len(RANK_DOCS)} near-duplicate Chinese technical sentences, 1 query.")
     print("   Near-duplicates on purpose: ranking only flips when scores are close.\n")
 
-    q_full = _embed(url, key, model, [RANK_QUERY])[0]
-    d_full = _embed(url, key, model, RANK_DOCS)
-    d_native = _embed(url, key, model, RANK_DOCS, dim=dim)
-    q_native = _embed(url, key, model, [RANK_QUERY], dim=dim)[0]
+    q_full = _embed(client, [RANK_QUERY])[0]
+    d_full = _embed(client, RANK_DOCS)
+    d_native = _embed(client, RANK_DOCS, dim=dim)
+    q_native = _embed(client, [RANK_QUERY], dim=dim)[0]
 
     sliced_scores = [_cos(_renorm(q_full, dim), _renorm(d, dim)) for d in d_full]
     native_scores = [_cos(q_native, d) for d in d_native]
@@ -363,20 +302,15 @@ def main() -> int:
     parser.add_argument("--skip-ranking", action="store_true")
     args = parser.parse_args()
 
-    env = _load_env()
-    try:
-        key = env["Embedding_API_KEY"]
-        model = env["Embedding_MODEL_NAME"]
-        url = _endpoint(env["Embedding_BASE_URL"])
-    except KeyError as exc:
-        raise SystemExit(f"! .env is missing {exc}") from exc
+    config = EmbeddingConfig.from_env(load_env(ROOT / ".env"))
+    client = EmbeddingClient(config=config)
 
-    print(f"endpoint {url}\nmodel    {model}\n")
-    vectors = check_normalisation(url, key, model)
-    floor = check_reproducibility(url, key, model, vectors)
-    check_mrl(url, key, model, vectors[0], floor, dims=args.dims)
+    print(f"endpoint {config.url}\nmodel    {config.model}\n")
+    vectors = check_normalisation(client)
+    floor = check_reproducibility(client, vectors)
+    check_mrl(client, vectors[0], floor, dims=args.dims)
     if not args.skip_ranking:
-        check_ranking_equivalence(url, key, model, dim=args.rank_dim)
+        check_ranking_equivalence(client, dim=args.rank_dim)
     return 0
 
 

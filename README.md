@@ -267,7 +267,44 @@ Qwen3-Embedding-8B，query 侧加 instruct 前缀、document 侧不加）：
 > ⚠️ **这四个配置是在同一批 800 条查询上选出来又在同一批上汇报的**，所以"最好那一行"是上界，
 > 不是泛化估计；泛化结论仍需独立的 held-out 切分。另外**「深度无关」只对 1doc 的 R@1 成立，不要外推到
 > rerank 窗口** —— 重排器会给它拿到的每个候选打分，窗口大小由召回决定，不由 RRF 会不会提升它决定。
-> 而 2docs/3docs 的分层结果目前**完全没有数据**，那是这套结论唯一可能翻盘的地方。
+
+### 多证据分层：dense 强在找齐证据，不强在把任一证据排第一
+
+同一脚本把全部 2,394 条查询按**实际 gold 数量**重分层，而不是相信任务名（2docs 中有 8 条
+实际只有 1 个 gold，3docs 中还有 13 条 2-gold 和 1 条 1-gold）。因此样本数是
+**809 / 802 / 783**。R@1 在 arity=2/3 时上限只有 1/2、1/3，不能跨块比较；以下同时报告
+任意 arity 都是二元的 `hit@1`（是否有一篇 gold 排第一）和 `ALL@10`（是否把整套证据都放进 top-10）：
+
+| arity | n | arm | R@1 | MRR@10 | nDCG@10 | hit@1 | ALL@10 |
+|---:|---:|---|---:|---:|---:|---:|---:|
+| 1 | 809 | BM25 | 75.6% | 0.854 | 0.889 | 75.6% | 99.5% |
+|  |  | dense-4096 | 77.6% | 0.863 | 0.895 | 77.6% | 99.3% |
+|  |  | RRF k=10, depth=100 | **79.7%** | **0.879** | **0.909** | **79.7%** | **99.8%** |
+| 2 | 802 | BM25 | 35.2% | 0.817 | 0.796 | 70.4% | 87.4% |
+|  |  | dense-4096 | **35.4%** | **0.828** | 0.824 | **70.8%** | **93.9%** |
+|  |  | RRF k=10, depth=100 | 35.1% | 0.827 | **0.827** | 70.2% | 93.8% |
+| 3 | 783 | BM25 | 22.7% | 0.799 | 0.748 | 68.2% | 68.7% |
+|  |  | dense-4096 | **24.2%** | **0.840** | **0.819** | **72.5%** | **84.4%** |
+|  |  | RRF k=10, depth=100 | 23.9% | 0.835 | 0.804 | 71.8% | 79.3% |
+
+这里最容易写错的一句话是“arity 越高，dense 越赢”。在跨 arity 可比的 `hit@1` 上，dense 相对
+BM25 依次是 **+1.98pp / +0.37pp / +4.34pp**，配对 95% CI 分别为
+**[−0.99, +4.94]pp / [−3.37, +4.36]pp / [+0.64, +8.17]pp**；经同一 family 的 Holm
+校正，三行都不显著（校正 p = 1.000 / 1.000 / 0.176）。arity=2 甚至比 arity=1 更弱，
+所以“dense 碾压 2docs”只是从 `hit@1` 偷换成 `ALL@10` 后的指标假象。
+
+**真正成立、而且更有用的结论是完整证据召回。** `ALL@10` 上，dense 相对 BM25 在 arity=2
+提升 **+6.48pp**（95% CI **[+4.24, +8.73]pp**，71 胜 19 负，Holm p = **2.81e-07**），
+arity=3 提升 **+15.71pp**（95% CI **[+12.90, +18.52]pp**，133 胜 10 负，Holm
+p = **1.66e-27**）。也就是说，dense 不擅长把“某一篇”推到第 1，但明显更擅长把回答问题所需的
+**整套证据**捞进 top-10。
+
+这也推翻了“一套 RRF 权重通吃”的设想。第 4 节在 1doc 上选出的 RRF k=10/depth=100，
+到 arity=3 时相对 dense 的 `ALL@10` **84.4% → 79.3%（−5.11pp，95% CI
+[−7.02, −3.19]pp，11 胜 51 负，6 项 Holm p = 1.67e-06）**；同一块的 `hit@1`
+只有 −0.77pp（95% CI [−3.58, +2.04]pp，校正 p = 1.000）。退化只发生在“找齐整套证据”这个口径，
+不能泛化成“融合整体伤害多文档查询”。因此后续要么让权重随问题变化，要么如实按 arity 报告，
+不再命名一个全局赢家。
 
 ### MRL 降维：存储降 75%，R@1 无显著损失
 
@@ -367,6 +404,8 @@ src/zhrag/
                          + 精确 McNemar（二元指标，无下界、无种子）
                          + 逐查询胜/负/平计数
                          + Holm-Bonferroni 多重比较校正
+  providers/
+    embedding.py          共享嵌入客户端：配置 / 重试 / 批缓存 / 模型与 prompt sidecar
   retrieval/
     fusion.py            RRF 融合（可加权、可指定融合深度）
 scripts/
@@ -376,12 +415,13 @@ scripts/
   corpus_stats.py        重新生成上方语料与分块统计
   verify_embedding_api.py  嵌入供应商行为探针：L2 归一化 / 噪声底 / 切片等价 / 排序等价
   probe_mrl_quality.py   MRL 维度-质量曲线（逐维方差 + R@1 曲线 + 配对检验）
-  compare_dense_bm25.py  dense 与 BM25 逐查询对齐：列联表 / RRF 融合 / 配对检验（不联网）
+  embed_queries.py       补齐多证据 query 嵌入缓存（可预估 token 与成本）
+  compare_dense_bm25.py  dense 与 BM25 逐查询对齐：列联表 / RRF / arity 分层 / 配对检验（不联网）
   smoke_milvus_lite.py   Milvus Lite 在 Windows + Python 3.13 的冒烟测试
-tests/                   178 个单元测试
+tests/                   233 个单元测试
 ```
 
-质量门禁：`pytest` 178 passed · `ruff check` 全通过 · `mypy --strict` 无告警。
+质量门禁：`pytest` 233 passed · `ruff check` 全通过 · `mypy --strict` 无告警。
 
 README 中每一个数字都由上述脚本生成，没有手工誊写。这不是洁癖：早期原型用固定 1.15 字符/token 估算，得出的 chunk 数与最终实现相差 2.4 倍；而最初那次 BM25 饱和实验是一次性脚本跑的、从未提交，导致 README 里的核心结论一度**无法被任何人复现**。
 
@@ -409,7 +449,7 @@ UnicodeDecodeError: 'gbk' codec can't decode byte 0xad in position 9
 
 `recall_at_k` 在多证据文档场景下的定义各家评估库并不一致（"命中比例" vs "是否命中任一"），而 2docs / 3docs 任务恰好有 2 和 3 个证据文档，该定义直接决定主指标数值。因此指标自研并配单元测试，同时提供 `all_gold_at_k` 作为多文档任务的诚实口径。
 
-统计口径：n=500 时约 3–4 个百分点才是可辨差异下限，故所有结果报 bootstrap 置信区间；ablation 各臂之间，连续指标用**配对 bootstrap 检验**（各臂共享同一查询集，配对可大幅降低方差），二元指标（R@1 的命中/不中）用**精确 McNemar 检验** —— 它没有蒙特卡洛分辨率下界、不需要随机种子、换台机器还是同一个数，dense vs BM25 那一格就是由它判定的。所有比较同时报逐查询**胜/负/平计数**：同样是 +2pp，由 86 胜 69 负得来和由 16 胜 4 负得来，是两个完全不同的系统，而 delta 列一模一样。
+统计口径：n=500 时约 3–4 个百分点才是可辨差异下限，故所有结果报 bootstrap 置信区间；ablation 各臂之间，连续指标用**配对 bootstrap 检验**（各臂共享同一查询集，配对可大幅降低方差），二元指标用**精确 McNemar 检验** —— 它没有蒙特卡洛分辨率下界、不需要随机种子、换台机器还是同一个数。单证据查询的 R@1 是二元的；多证据查询的 R@1 会取 1/2、1/3、2/3 等分数，所以改用 `hit@1`（任一 gold 排第一）与 `ALL-gold@10`（整套 gold 都在 top-10）做精确检验。dense vs BM25 那一格就是由它判定的。所有比较同时报逐查询**胜/负/平计数**：同样是 +2pp，由 86 胜 69 负得来和由 16 胜 4 负得来，是两个完全不同的系统，而 delta 列一模一样。
 
 ---
 
@@ -420,7 +460,7 @@ uv venv --python 3.13
 uv pip install -e ".[dev]"
 
 uv run pytest          # 单元测试
-uv run ruff check .    # 含 PLW1514：禁止裸 open()
+uv run ruff check src tests scripts  # 含 PLW1514：禁止裸 open()
 uv run mypy            # strict
 ```
 
@@ -455,13 +495,17 @@ uv run python scripts/verify_embedding_api.py
 #    7 个维度档全部是该次嵌入的客户端切片，重跑读缓存、零成本。
 uv run python scripts/probe_mrl_quality.py --docs 5681 --queries 800
 
-# 7. dense 与 BM25 逐查询对齐：头对头检验 / 列联表 / RRF 融合
-#    只读第 6 步写下的向量缓存，零 API 调用，缓存已在磁盘上时完全离线
+# 7. dense 与 BM25 逐查询对齐：头对头 / RRF / 按实际 gold 数分层
+#    第 6 步先写下 800 条 1doc query；补齐另外 1,594 条后，全程离线复算。
+uv run python scripts/embed_queries.py --dry-run  # 先看缺口、token 与费用
+uv run python scripts/embed_queries.py            # 有缺口时才调用 API
 uv run python scripts/compare_dense_bm25.py
 ```
 
-第 6 步把 4096 维向量缓存到 `eval-expanded/emb_cache_4096.jsonl`（499 MB，已 gitignore）。
-缓存按批追加写入，中断可续跑；query 因 Qwen3 的非对称前缀而使用独立缓存文件。
+第 6 步把 4096 维文档向量缓存到 `eval-expanded/emb_cache_4096.jsonl`（当前约 523 MB，
+十进制 JSONL，已 gitignore）。query 因 Qwen3 的非对称前缀而使用独立缓存文件；补齐全部 2,394 条后
+当前约 220 MB。两个缓存都按批追加写入、中断可续；同目录 sidecar 记录 model 与 prompt，防止换模型后
+静默复用旧向量。
 
 ---
 
