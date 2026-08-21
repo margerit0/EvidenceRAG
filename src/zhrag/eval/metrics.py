@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 import random
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -30,6 +30,7 @@ __all__ = [
     "evaluate",
     "hit_at_k",
     "holm_bonferroni",
+    "holm_floor_flags",
     "mcnemar_exact",
     "mrr_at_k",
     "ndcg_at_k",
@@ -147,14 +148,14 @@ def bootstrap_ci(
 def bootstrap_p_floor(resamples: int) -> float:
     """Smallest p-value :func:`paired_bootstrap_test` can return for ``resamples``.
 
-    The estimator is ``(count + 1) / (resamples + 1)``, so with the default
-    10,000 resamples nothing below ``9.999e-05`` is representable. A reported
-    ``p = 0.0001`` therefore means "at or below the resolution of this run", not
-    "estimated at one in ten thousand" -- and after a Holm correction over a
-    family of *m* it shows up as ``m * 1e-4``, which reads like a real estimate
-    and is not one. Callers that print p-values should compare against this and
-    render ``< floor`` rather than ``= floor``, or raise ``resamples`` until the
-    observed p lifts off it.
+    The add-one estimator is ``(count + 1) / (resamples + 1)``, so with the
+    default 10,000 resamples nothing below ``9.999e-05`` is representable. A
+    value at that floor means zero resampled null statistics were at least as
+    extreme as the observation. It does *not* prove that the underlying tail
+    probability is below the floor: zero exceedances can still occur when that
+    probability is nonzero. Callers should mark the value as a Monte Carlo floor
+    (ideally with ``0 / resamples``), never render it as a ``<`` bound. Raising
+    ``resamples`` gives a finer estimate when the result remains at the floor.
     """
     if resamples < 1:
         raise ValueError(f"resamples must be >= 1, got {resamples}")
@@ -377,6 +378,39 @@ def mcnemar_exact(
         return upper
     lower = sum(math.comb(n, i) for i in range(wins + 1)) / total
     return min(1.0, 2 * min(lower, upper))
+
+
+def holm_floor_flags(
+    raw: Mapping[str, float],
+    raw_at_floor: Mapping[str, bool],
+) -> dict[str, bool]:
+    """Propagate Monte Carlo floor provenance through a Holm adjustment.
+
+    This is provenance, not a claim that an adjusted p-value is an upper bound.
+    A Holm value inherits the marker only when its active running maximum is
+    formed entirely from raw values at their bootstrap floors. An exact or
+    otherwise resolved contributor at the same maximum removes the marker.
+    """
+    if set(raw) != set(raw_at_floor):
+        raise ValueError("raw p-values and floor flags must have identical keys")
+
+    ordered = sorted(raw.items(), key=lambda item: item[1])
+    running = 0.0
+    running_at_floor = False
+    floor_flags: dict[str, bool] = {}
+    family_size = len(ordered)
+    for index, (key, raw_p) in enumerate(ordered):
+        candidate = min(1.0, (family_size - index) * raw_p)
+        candidate_at_floor = raw_at_floor[key]
+        if candidate > running and not math.isclose(
+            candidate, running, rel_tol=1e-12, abs_tol=1e-15
+        ):
+            running = candidate
+            running_at_floor = candidate_at_floor and candidate < 1.0
+        elif math.isclose(candidate, running, rel_tol=1e-12, abs_tol=1e-15):
+            running_at_floor = running_at_floor and candidate_at_floor and candidate < 1.0
+        floor_flags[key] = running_at_floor
+    return floor_flags
 
 
 def holm_bonferroni(

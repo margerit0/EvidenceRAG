@@ -24,17 +24,21 @@ measured quirks that this module encodes rather than documents elsewhere:
 
 from __future__ import annotations
 
-import json
-import math
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 from zhrag.io_utils import append_jsonl, read_json, read_jsonl, read_text, write_json
+from zhrag.providers.http import (
+    MAX_RETRY_AFTER,
+    RETRY_STATUS,
+    JsonClient,
+    Transport,
+    backoff_seconds,
+    explain_http_error,
+)
 
 __all__ = [
     "MAX_RETRY_AFTER",
@@ -58,44 +62,9 @@ QUERY_PROMPT = (
     "Instruct: Given a Chinese question, retrieve the news passage that answers it\nQuery:"
 )
 
-#: Cloudflare 403s the stdlib default UA with error 1010.
-USER_AGENT = "zhrag/0.1 (+https://github.com/margerit0/zhrag)"
-
-#: How much of a provider error body to surface. Generous on purpose: the body
-#: is the only place an unsupported parameter or a gated key group announces
-#: itself, and truncating it turns a diagnosable failure into a status code.
-ERROR_DETAIL_CHARS = 600
-
-#: Transient upstream conditions. Everything else is a bug in the request and
-#: retrying it just spends the same money seven times.
-RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
-
-#: Cap on a server-sent ``Retry-After``. The server knows more than we do about
-#: when it will be ready, but not enough to be handed an unbounded sleep.
-MAX_RETRY_AFTER = 300.0
-
 
 def _flush_print(message: str) -> None:
     print(message, flush=True)
-
-
-def explain_http_error(detail: str) -> str:
-    """Translate the two 403s this relay returns, which look identical to a caller.
-
-    Both arrive as ``HTTP 403`` with a body, and both look exactly like a bad
-    key until the body is read. One is Cloudflare rejecting the User-Agent; the
-    other is this relay gating the key group to a time-of-day window, which no
-    amount of retrying inside the window will fix and no amount of code will
-    either.
-    """
-    if "1010" in detail:
-        return "\n  -> Cloudflare rejected the User-Agent, not your key."
-    if "可调用时段" in detail:
-        return (
-            "\n  -> Not an auth or code failure: this relay's key group is gated to a"
-            "\n     time-of-day window. Re-run inside the window shown in the message."
-        )
-    return ""
 
 
 def load_env(path: str | Path) -> dict[str, str]:
@@ -159,56 +128,13 @@ class EmbeddingConfig:
         )
 
 
-def backoff_seconds(attempt: int, retry_after: float | None = None) -> float:
-    """Seconds to wait before retry number ``attempt`` (0-based).
-
-    Deliberately long. The observed 429 on this relay is
-    ``"当前分组上游负载已饱和"`` -- upstream saturation, not a per-key quota, so
-    it clears on the provider's timescale rather than ours. A 1/2/4-second
-    ladder gives up after seven seconds and throws away a run that is otherwise
-    fine; this one spends up to ~4 minutes in total, still far cheaper than
-    re-embedding a corpus. A server-sent ``Retry-After`` always wins, because
-    the server knows something we do not.
-    """
-    if attempt < 0:
-        raise ValueError(f"attempt must be >= 0, got {attempt}")
-    if retry_after is not None:
-        return retry_after
-    return min(60.0, 5.0 * float(2**attempt))
-
-
-def _parse_retry_after(raw: str | None) -> float | None:
-    """``Retry-After`` in delta-seconds form; the HTTP-date form is ignored."""
-    if raw is None:
-        return None
-    try:
-        seconds = float(raw)
-    except ValueError:
-        return None
-    # isfinite, not just >= 0: float("inf") and float("nan") both parse, and an
-    # infinite Retry-After would hand the run to time.sleep and never return.
-    # The original used raw.isdigit(), which excluded them by accident.
-    if not math.isfinite(seconds) or seconds < 0:
-        return None
-    return min(seconds, MAX_RETRY_AFTER)
-
-
-Transport = Callable[[urllib.request.Request], bytes]
-
-
-def _urlopen(request: urllib.request.Request) -> bytes:
-    with urllib.request.urlopen(request, timeout=300) as response:
-        body: bytes = response.read()
-        return body
-
-
 @dataclass(frozen=True, slots=True)
 class EmbeddingClient:
     """A retrying client for one OpenAI-compatible embeddings endpoint."""
 
     config: EmbeddingConfig
     retries: int = 7
-    transport: Transport = _urlopen
+    transport: Transport | None = None
     sleep: Callable[[float], None] = time.sleep
     #: Progress goes through here. The default flushes, because both scripts
     #: this was extracted from did: a quarter-hour run whose output is being
@@ -216,41 +142,17 @@ class EmbeddingClient:
     log: Callable[[str], None] = _flush_print
 
     def post(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """POST once, retrying transient failures with :func:`backoff_seconds`."""
-        request_body = json.dumps(payload).encode("utf-8")
-        for attempt in range(self.retries):
-            request = urllib.request.Request(
-                self.config.url,
-                data=request_body,
-                headers={
-                    "Authorization": f"Bearer {self.config.key}",
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "User-Agent": USER_AGENT,
-                },
-                method="POST",
-            )
-            try:
-                parsed: dict[str, Any] = json.loads(self.transport(request).decode("utf-8"))
-                return parsed
-            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
-                detail, retry_after = "", None
-                if isinstance(exc, urllib.error.HTTPError):
-                    detail = exc.read().decode("utf-8", errors="replace")[:ERROR_DETAIL_CHARS]
-                    if exc.code not in RETRY_STATUS:
-                        raise SystemExit(
-                            f"! HTTP {exc.code} from {self.config.url}\n"
-                            f"  {detail}{explain_http_error(detail)}"
-                        ) from exc
-                    retry_after = _parse_retry_after(exc.headers.get("Retry-After"))
-                if attempt == self.retries - 1:
-                    raise SystemExit(
-                        f"! giving up after {self.retries} attempts: {exc} {detail}"
-                    ) from exc
-                wait = backoff_seconds(attempt, retry_after)
-                self.log(f"    retry {attempt + 1}/{self.retries} in {wait:.0f}s ({exc})")
-                self.sleep(wait)
-        raise SystemExit("unreachable")
+        """POST once through the shared relay transport."""
+        kwargs: dict[str, Any] = {
+            "url": self.config.url,
+            "key": self.config.key,
+            "retries": self.retries,
+            "sleep": self.sleep,
+            "log": self.log,
+        }
+        if self.transport is not None:
+            kwargs["transport"] = self.transport
+        return JsonClient(**kwargs).post(payload)
 
     def embed_all(
         self,

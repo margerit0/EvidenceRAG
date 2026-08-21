@@ -35,27 +35,30 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
-import numpy as np
-from numpy.typing import NDArray
-
 from zhrag.eval.crud import QA_TASKS, Query, sample_corpus
 from zhrag.eval.metrics import (
     BootstrapCI,
     WinLossTie,
-    all_gold_at_k,
     bootstrap_ci,
     bootstrap_p_floor,
-    hit_at_k,
     holm_bonferroni,
+    holm_floor_flags,
     mcnemar_exact,
-    mrr_at_k,
-    ndcg_at_k,
     paired_bootstrap_test,
-    recall_at_k,
     win_loss_tie,
 )
+from zhrag.eval.retrieval import (
+    bm25_runs as build_bm25_runs,
+)
+from zhrag.eval.retrieval import (
+    dense_runs as build_dense_runs,
+)
+from zhrag.eval.retrieval import (
+    load_embedding_matrix,
+    load_queries,
+    per_query_metrics,
+)
 from zhrag.io_utils import read_jsonl
-from zhrag.lexical import BM25, char_ngram
 from zhrag.retrieval import reciprocal_rank_fusion
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -74,98 +77,6 @@ BM25_LABEL = "BM25 char-bigram"
 DENSE_LABEL = "dense-4096"
 
 
-def _load_queries(tasks: Sequence[str], limit: int | None = None) -> list[Query]:
-    queries = [
-        Query(
-            query_id=r["query_id"],
-            question=r["question"],
-            answer=r["answer"],
-            gold_doc_ids=tuple(r["gold_doc_ids"]),
-            task=r["task"],
-        )
-        for r in read_jsonl(EXPANDED / "qrels.jsonl")
-        if r["task"] in set(tasks)
-    ]
-    return queries[:limit] if limit else queries
-
-
-def _load_matrix(
-    cache: Path, ids: Sequence[str], *, require_all: bool = True
-) -> tuple[NDArray[np.float32], list[str]]:
-    """Fill a preallocated matrix from an append-only embedding cache.
-
-    Streaming into a fixed array rather than building ``{id: [float, ...]}``
-    first: 5,681 rows of 4,096 Python floats is roughly 560 MB of boxed objects
-    against 93 MB for the float32 matrix that is actually wanted. The cache may
-    hold an id more than once (it is appended per batch and resumable), and a
-    later row simply overwrites an earlier one -- the same last-write-wins rule
-    the rest of the codebase uses.
-
-    Returns the matrix and the ids the cache did not cover. ``require_all``
-    defaults to True because an uncovered row stays all-zero, which cosines to 0
-    against every document and so ranks last silently instead of announcing
-    itself. The one caller that passes False is deciding *whether* an optional
-    section can run at all, and drops the affected rows before scoring anything.
-    """
-    position = {doc_id: i for i, doc_id in enumerate(ids)}
-    matrix = np.zeros((len(ids), WIDTH), dtype=np.float32)
-    seen: set[str] = set()
-    for row in read_jsonl(cache):
-        i = position.get(row["doc_id"])
-        if i is None:
-            continue
-        vector = row["embedding"]
-        if len(vector) != WIDTH:
-            raise SystemExit(
-                f"! {cache.name}: {row['doc_id']} has width {len(vector)}, not {WIDTH}"
-            )
-        matrix[i] = vector
-        seen.add(row["doc_id"])
-
-    missing = [doc_id for doc_id in ids if doc_id not in seen]
-    if missing and require_all:
-        raise SystemExit(
-            f"! {cache.name} is missing {len(missing):,} of {len(ids):,} vectors.\n"
-            f"  This script never calls the embedding API. Populate the cache first:\n"
-            f"    uv run python scripts/probe_mrl_quality.py --docs 5681 --queries 800\n"
-            f"    uv run python scripts/embed_queries.py     # multi-evidence queries"
-        )
-    return matrix, missing
-
-
-def _bm25_runs(corpus: dict[str, str], queries: Sequence[Query]) -> list[list[str]]:
-    index = BM25(analyzer=char_ngram(2)).index(list(corpus), list(corpus.values()))
-    return [[doc for doc, _ in index.search(q.question, k=DEPTH)] for q in queries]
-
-
-def _dense_runs(
-    query_matrix: NDArray[np.float32], doc_matrix: NDArray[np.float32], doc_ids: Sequence[str]
-) -> list[list[str]]:
-    """Top-``DEPTH`` ids per query by cosine. Vectors arrive L2-normalised."""
-    # kth=DEPTH-1, not DEPTH: argpartition's kth is a 0-based index into the
-    # partitioned row, so DEPTH would demand a corpus of at least DEPTH+1
-    # documents and raise on one of exactly DEPTH. Same selection either way.
-    depth = min(DEPTH, len(doc_ids))
-    sims = query_matrix @ doc_matrix.T
-    top = np.argpartition(-sims, depth - 1, axis=1)[:, :depth]
-    ordered = np.take_along_axis(top, np.argsort(-np.take_along_axis(sims, top, 1), axis=1), 1)
-    return [[doc_ids[i] for i in row] for row in ordered]
-
-
-def _per_query(runs: Sequence[Sequence[str]], queries: Sequence[Query]) -> dict[str, list[float]]:
-    pairs = list(zip(runs, queries, strict=True))
-    return {
-        "R@1": [recall_at_k(r, q.gold_doc_ids, 1) for r, q in pairs],
-        "MRR@10": [mrr_at_k(r, q.gold_doc_ids, 10) for r, q in pairs],
-        "nDCG@10": [ndcg_at_k(r, q.gold_doc_ids, 10) for r, q in pairs],
-        # Binary at any arity, unlike R@1. hit@1 asks "is *a* gold document
-        # first"; ALL-gold@10 asks "did we retrieve everything the question
-        # needs". Both are 0/1, so both admit the exact McNemar test.
-        "hit@1": [hit_at_k(r, q.gold_doc_ids, 1) for r, q in pairs],
-        "ALL@10": [all_gold_at_k(r, q.gold_doc_ids, 10) for r, q in pairs],
-    }
-
-
 def _mean(scores: Sequence[float]) -> float:
     return sum(scores) / len(scores)
 
@@ -175,18 +86,18 @@ def _first_gold_rank(run: Sequence[str], gold: Sequence[str]) -> int | None:
     return next((i for i, doc in enumerate(run, start=1) if doc in goldset), None)
 
 
-def _fmt_p(p: float, floor: float) -> str:
-    """Render a bootstrap p-value, refusing to print its floor as an estimate."""
-    return f"<{floor:.1e}" if p <= floor + 1e-12 else f"{p:.4f}"
+def _fmt_p(p: float, *, at_floor: bool) -> str:
+    """Mark an unresolved Monte Carlo floor without claiming a ``<`` bound."""
+    rendered = f"{p:.2e}" if 0.0 < p < 1e-4 else f"{p:.4f}"
+    return f"{rendered}†" if at_floor else rendered
 
 
 def _fmt_exact_p(p: float) -> str:
     """Render an exact p-value without rounding a real number down to 0.0000.
 
-    ``.4f`` would print an exact McNemar p of 1.7e-18 as ``0.0000`` -- the same
-    "a floor is not an estimate" misreading :func:`_fmt_p` exists to prevent,
-    reintroduced three lines from prose boasting that the exact test has no
-    floor.
+    ``.4f`` would print an exact McNemar p of 1.7e-18 as ``0.0000`` and hide
+    information that the exact test actually resolved. Bootstrap floor values,
+    by contrast, receive an explicit dagger from :func:`_fmt_p`.
     """
     return f"{p:.2e}" if 0.0 < p < 1e-4 else f"{p:.4f}"
 
@@ -217,7 +128,8 @@ def report_head_to_head(
             rendered, test = _fmt_exact_p(p), "McNemar exact"
         else:
             p = paired_bootstrap_test(bm25[metric], dense[metric], resamples=resamples)
-            rendered, test = _fmt_p(p, floor), "bootstrap, 1-sided"
+            rendered = _fmt_p(p, at_floor=p <= floor + 1e-12)
+            test = "bootstrap, 1-sided"
         scale, unit = (100, "pp") if metric == "R@1" else (1, "")
         interval = f"[{ci.low * scale:+.2f}, {ci.high * scale:+.2f}]{unit}"
         verdicts[metric] = (ci.low, ci.high)
@@ -237,6 +149,8 @@ def report_head_to_head(
     print("   exact null is available and there is no resampling floor. MRR@10 and")
     print("   nDCG@10 are graded, so they fall back to the one-sided paired bootstrap")
     print(f"   ('dense > BM25'), whose floor at {resamples:,} resamples is {floor:.1e}.")
+    print(f"   † means 0/{resamples:,} sampled null statistics met or exceeded the observation;")
+    print("   it marks the add-one Monte Carlo floor, not a proven '<' tail bound.")
 
     high = verdicts["R@1"][1] * 100
     if straddles:
@@ -358,7 +272,7 @@ def report_fusion(
     print("   vector store exists. Baseline is dense-4096, the better single arm.\n")
 
     arms = {
-        label: _per_query(runs, queries)
+        label: per_query_metrics(runs, queries)
         for label, runs in _fusion_arms(bm25_runs, dense_runs).items()
     }
     raw_p = {label: mcnemar_exact(dense["R@1"], arm["R@1"]) for label, arm in arms.items()}
@@ -549,7 +463,7 @@ def report_by_arity(
 
     scored = {
         arity: {
-            label: _per_query([runs[i] for i in idx], [queries[i] for i in idx])
+            label: per_query_metrics([runs[i] for i in idx], [queries[i] for i in idx])
             for label, runs in arms.items()
         }
         for arity, idx in sorted(groups.items())
@@ -649,6 +563,19 @@ def _report_arity_verdict(
     print("   or the ablation reports per-arity rows and declines to name one winner.")
 
 
+def _report_arity_family_notes(resamples: int, binary_count: int, graded_count: int) -> None:
+    print(
+        f"\n   Holm runs over the {binary_count} binary tests as one family and the "
+        f"{graded_count} graded ones"
+    )
+    print(f"   as another. † means 0/{resamples:,} sampled null statistics met or exceeded")
+    print("   the observation for the active bootstrap estimate; it is not a '<' bound.")
+    print("   The binary family spans both metrics on purpose: every one of")
+    print(f"   those {binary_count} is a chance to claim an improvement, and splitting them into")
+    print("   a family per column would buy power by redrawing the family after seeing")
+    print("   the table. A result that needs that split is not a result.")
+
+
 def _report_arity_tests(
     scored: Mapping[int, Mapping[str, dict[str, list[float]]]],
     resamples: int,
@@ -710,11 +637,13 @@ def _report_arity_tests(
             )
 
     # Two families, not one. The binary tests are exact and two-sided; the graded
-    # ones are one-sided with a Monte-Carlo floor at 1/(resamples+1). Pooling
-    # them would let floored values -- which are "at most this small", not "this
-    # small" -- set the step-down order for the exact ones.
+    # ones are one-sided with a Monte Carlo floor at 1/(resamples+1). Pooling
+    # them would let unresolved floor-valued estimates set the step-down order
+    # for exact values, as well as combine distinct endpoint families.
     binary_adj = holm_bonferroni(binary_p)
     graded_adj = holm_bonferroni(graded_p)
+    graded_raw_floors = {key: p <= floor + 1e-12 for key, p in graded_p.items()}
+    graded_adjusted_floors = holm_floor_flags(graded_p, graded_raw_floors)
 
     print(
         f"   {'':>1}{'arity':>5} {'arm':<22} {'metric':>8} {'delta [95% CI]':>24} "
@@ -729,8 +658,12 @@ def _report_arity_tests(
         graded = row.metric == "nDCG@10"
         raw_p = graded_p[row.key] if graded else binary_p[row.key]
         adj, reject = (graded_adj if graded else binary_adj)[row.key]
-        shown_raw = _fmt_p(raw_p, floor) if graded else _fmt_exact_p(raw_p)
-        shown_adj = _fmt_p(adj, floor) if graded else _fmt_exact_p(adj)
+        shown_raw = (
+            _fmt_p(raw_p, at_floor=graded_raw_floors[row.key]) if graded else _fmt_exact_p(raw_p)
+        )
+        shown_adj = (
+            _fmt_p(adj, at_floor=graded_adjusted_floors[row.key]) if graded else _fmt_exact_p(adj)
+        )
         baseline = scored[row.arity][BM25_LABEL][row.metric]
         treatment = scored[row.arity][row.arm][row.metric]
         mean = (_mean(treatment) - _mean(baseline)) * (1 if graded else 100)
@@ -747,14 +680,7 @@ def _report_arity_tests(
     if last_arity is not None:
         print(f"    {'':>5} ({why_by_arity[last_arity]})")
 
-    print(
-        f"\n   Holm runs over the {len(binary_p)} binary tests as one family and the "
-        f"{len(graded_p)} graded ones"
-    )
-    print("   as another. The binary family spans both metrics on purpose: every one of")
-    print(f"   those {len(binary_p)} is a chance to claim an improvement, and splitting them into")
-    print("   a family per column would buy power by redrawing the family after seeing")
-    print("   the table. A result that needs that split is not a result.")
+    _report_arity_family_notes(resamples, len(binary_p), len(graded_p))
 
 
 def main() -> int:
@@ -788,16 +714,20 @@ def main() -> int:
             return 1
 
     pool = {r["doc_id"]: r["text"] for r in read_jsonl(EXPANDED / "corpus.jsonl")}
-    one_doc = _load_queries(["questanswer_1doc"], args.queries or None)
-    multi = [q for q in _load_queries(list(QA_TASKS)) if q.task != "questanswer_1doc"]
-    corpus = sample_corpus(pool, _load_queries(list(QA_TASKS)))
+    one_doc = load_queries(EXPANDED / "qrels.jsonl", ["questanswer_1doc"], args.queries or None)
+    multi = [
+        q
+        for q in load_queries(EXPANDED / "qrels.jsonl", list(QA_TASKS))
+        if q.task != "questanswer_1doc"
+    ]
+    corpus = sample_corpus(pool, load_queries(EXPANDED / "qrels.jsonl", list(QA_TASKS)))
     doc_ids = list(corpus)
 
     print(f"corpus {len(corpus):,} documents | {len(one_doc):,} questanswer_1doc queries")
     print(f"retrieval depth {DEPTH} per arm | {args.resamples:,} bootstrap resamples")
 
     print(f"loading {DOC_CACHE.name} ({DOC_CACHE.stat().st_size / 1e6:.0f} MB) ...", flush=True)
-    doc_matrix, _ = _load_matrix(DOC_CACHE, doc_ids)
+    doc_matrix, _ = load_embedding_matrix(DOC_CACHE, doc_ids, width=WIDTH)
 
     # Section 5 needs the multi-evidence queries embedded, which the MRL ablation
     # never asked for. Degrade to sections 1-4 rather than failing: the
@@ -806,8 +736,11 @@ def main() -> int:
     # one pass that has to read this 220 MB file anyway -- asking it separately
     # first would parse every vector twice to learn only which ids exist.
     print(f"loading {QUERY_CACHE.name} ...", flush=True)
-    query_matrix, absent = _load_matrix(
-        QUERY_CACHE, [q.query_id for q in one_doc + multi], require_all=False
+    query_matrix, absent = load_embedding_matrix(
+        QUERY_CACHE,
+        [q.query_id for q in one_doc + multi],
+        width=WIDTH,
+        require_all=False,
     )
     one_doc_absent = [qid for qid in absent if qid in {q.query_id for q in one_doc}]
     if one_doc_absent:
@@ -840,15 +773,15 @@ def main() -> int:
     query_matrix = query_matrix[: len(queries)]
 
     print("\nbuilding BM25 (char bigram) ...", flush=True)
-    bm25_runs = _bm25_runs(corpus, queries)
-    dense_runs = _dense_runs(query_matrix, doc_matrix, doc_ids)
+    bm25_runs = build_bm25_runs(corpus, queries, depth=DEPTH)
+    dense_runs = build_dense_runs(query_matrix, doc_matrix, doc_ids, depth=DEPTH)
 
     # Sections 1-4 are the pre-registered single-evidence comparison and stay
     # held to it; slicing here rather than re-running keeps both halves on
     # byte-identical runs.
     n1 = len(one_doc)
-    bm25 = _per_query(bm25_runs[:n1], one_doc)
-    dense = _per_query(dense_runs[:n1], one_doc)
+    bm25 = per_query_metrics(bm25_runs[:n1], one_doc)
+    dense = per_query_metrics(dense_runs[:n1], one_doc)
     report_head_to_head(bm25, dense, args.resamples)
     report_contingency(bm25, dense)
     report_recoverable(bm25_runs[:n1], dense_runs[:n1], one_doc)

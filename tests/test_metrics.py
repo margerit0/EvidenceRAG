@@ -17,6 +17,7 @@ from zhrag.eval import (
     evaluate,
     hit_at_k,
     holm_bonferroni,
+    holm_floor_flags,
     mcnemar_exact,
     mrr_at_k,
     ndcg_at_k,
@@ -360,6 +361,36 @@ class TestHolmBonferroni:
         out = holm_bonferroni(raw)
         assert out["strong"][1] is True
         assert out["null"][1] is False
+
+
+class TestHolmFloorFlags:
+    def test_propagates_floor_provenance_through_running_maximum(self) -> None:
+        flags = holm_floor_flags(
+            {"floor": 0.1, "later": 0.11, "exact": 0.3},
+            {"floor": True, "later": False, "exact": False},
+        )
+
+        assert flags == {"floor": True, "later": True, "exact": False}
+
+    def test_exact_contributor_at_same_maximum_removes_marker(self) -> None:
+        flags = holm_floor_flags(
+            {"floor": 0.1, "exact": 0.3},
+            {"floor": True, "exact": False},
+        )
+
+        assert flags == {"floor": True, "exact": False}
+
+    def test_ceiling_at_one_does_not_inherit_floor_marker(self) -> None:
+        flags = holm_floor_flags(
+            {"first": 0.5, "second": 0.5},
+            {"first": True, "second": True},
+        )
+
+        assert flags == {"first": False, "second": False}
+
+    def test_requires_identical_keys(self) -> None:
+        with pytest.raises(ValueError, match="identical keys"):
+            holm_floor_flags({"floor": 0.1}, {})
 
 
 class TestEvaluate:

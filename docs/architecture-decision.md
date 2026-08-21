@@ -13,7 +13,7 @@
 ---
 
 
-**自研薄检索层（Protocol + YAML config）+ Milvus 三级部署（Lite on Windows → Standalone in WSL2 → Zilliz Cloud Free 公网）+ Qwen3-Embedding-8B（客户端拼 instruct 前缀、MRL 降至 1024 维）+ Qwen3-Reranker-4B（top-50）+ 客户端 char-bigram BM25 稀疏向量做词法臂 + 服务端 RRF 融合，评估侧以已建成的 R@1/MRR@10/nDCG@10 为主指标、移植 CRUD-RAG 的 ~150 行生成指标为辅，全部跑在 GitHub Actions 双 OS CI 上。**
+**自研薄检索层（Protocol + YAML config）+ Milvus 三级部署（Lite on Windows → Standalone in WSL2 → Zilliz Cloud Free 公网）+ Qwen3-Embedding-8B（客户端拼 instruct 前缀、MRL 降至 1024 维）+ One Hub 上的 Qwen3-Reranker-8B（离线消融支持 top-50 / top-100，当前证据选 top-50）+ 客户端 char-bigram BM25 稀疏向量做词法臂 + 服务端 RRF 融合，评估侧以已建成的 R@1/MRR@10/nDCG@10 为主指标、移植 CRUD-RAG 的 ~150 行生成指标为辅，全部跑在 GitHub Actions 双 OS CI 上。**
 
 ---
 
@@ -23,12 +23,12 @@
 |---|---|---|---|
 | **向量数据库** | **Milvus**：本地 `milvus-lite 3.2.0`（纯 Python，支持 Windows）→ WSL2 Ubuntu-24.04 Standalone → Zilliz Cloud Free（5 GB / 5 collections / $0） | 4096 维无压力（上限 32,768）；`hybrid_search` + `RRFRanker` 服务端融合；collection alias 支持原子换索引；同一份 pymilvus 代码跑三种部署 | **Qdrant v1.19.0**（原生 `qdrant-x86_64-pc-windows-msvc.zip`，无需 Docker/WSL2）。改选条件：你决定公网 demo 自己托管 VPS / HF Space，或彻底拒绝 Docker。**pgvector 已被排除**，见 §3 |
 | **检索框架** | **自研薄层**：`Retriever` / `Fusion` / `Reranker` / `Chunker` 四个 Protocol + registry + pydantic-settings YAML | `langchain-community` 已于 2026-05-22 正式 sunset，检索半壁江山被弃；llama-index-core 近 12 周提交量同比 -70%、8 周无发版。你现有 `BM25.search(query, k) -> list[tuple[str, float]]` **本身就是 Retriever Protocol** | **Haystack 3.0**（YAML 原生序列化 + `MultiRetriever` RRF）。改选条件：消融维度超过 6 个，且确实需要框架级配置编排。可另加 LangChain/LlamaIndex 各 ~50 行 adapter 作为**消融表的一行**（用于框架适配对照） |
-| **embedding** | **Qwen/Qwen3-Embedding-8B** @ SiliconFlow，`dimensions=1024`（先按 4096 跑一遍作天花板） | 已持有；C-MTEB Retrieval 78.21；一次性索引成本可忽略（全量 4.88M tokens ≈ ¥1.37） | Qwen3-Embedding-4B（¥0.14/M，2560 维，C-MTEB 77.03）。改选条件：MRL 消融显示 8B 相对 4B 的 +1.18 分在你的语料上不显著 |
-| **rerank** | **Qwen/Qwen3-Reranker-4B** @ SiliconFlow（用 `instruction` 字段） | 8B 只比 4B 高 1.51 CMTEB-R，但 4B 的 FollowIR 14.84 vs 8B 8.05——你要传中文领域自定义 instruction，指令遵循能力才是决定项；价格减半 | Qwen3-Reranker-8B 作为消融表最后一行跑一次。**不要用 0.6B**：CMTEB-R 71.31，输给 bge-reranker-v2-m3 的 72.16 |
+| **embedding** | **Qwen/Qwen3-Embedding-8B** @ One Hub relay；本地保留 4096 维缓存，部署候选为 MRL 1024 维 | 已实测 4096→1024 的 R@1 仅 −0.50pp、Holm p=0.684，存储降 75%；中转站行为与 SiliconFlow 不能混用 | Qwen3-Embedding-4B。改选条件：有可用 endpoint 后，在相同语料与 query 上做配对检验，而不是引用 C-MTEB 的跨模型点估计 |
+| **rerank** | **Qwen/Qwen3-Reranker-8B** @ One Hub relay，传 `instruction`，部署窗口候选 **top-50** | 已在冻结的 dense-4096 hybrid 上完成 top-50/100 分层消融：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp（p=1.32e−09）；top-100 未显著优于 top-50 | 4B 对照取消：当前中转站不提供。若换 provider，必须新建独立 fingerprint/cache，不能与现有 8B 分数混用 |
 | **LLM（生成）** | Qwen 系（你已有 key） | 与 embedding/rerank 同族，叙事一致 | — |
 | **LLM（评判）** | **DeepSeek-V3 类 或 Kimi**，必须≠生成模型 | 自偏好偏差已被因果证实（GPT-4 自评胜率 +10%，Claude-v1 +25%；Panickssery et al. 2404.13076 证明自我识别能力与自偏好强度线性相关）。deepeval 内置 `deepseek_model.py` / `kimi_model.py` | 任一非 Qwen 家族强中文模型 |
 | **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,725，p50 375，p90 747，欠长块 5.3%，代码块破损 0 | 必须补跑 256/400/800 sweep 出曲线（验证分块目标的选择依据） |
-| **检索管线** | dense(4096/1024, HNSW, COSINE) + sparse(char-bigram BM25, **IP**) 双字段 → 服务端 `hybrid_search` + `RRFRanker` → 客户端 Qwen3-Reranker-4B 重排 top-50 | 三段式，每段可单独消融 | **WeightedRanker 是必测项而非备选**：离线实测等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），加权 0.3/0.7 才显著（16 胜 4 负，p=0.047）。反过来 `RRFRanker` 的 **k 几乎不影响结果**（60→10 只动 0.1pp），不值得占消融表一列。Qdrant 的 dbsf 仍可作对照 |
+| **检索管线** | dense(4096/1024, HNSW, COSINE) + sparse(char-bigram BM25, **IP**) 双字段 → 服务端 `hybrid_search` + `RRFRanker` → 客户端 Qwen3-Reranker-8B 重排 top-50 | 三段式，每段可单独消融；top-50 由 top-100 未检出额外收益的实测决定 | **WeightedRanker 是必测项而非备选**：离线实测等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），加权 0.3/0.7 才显著（16 胜 4 负，p=0.047）。反过来 `RRFRanker` 的 **k 几乎不影响结果**（60→10 只动 0.1pp），不值得占消融表一列。Qdrant 的 dbsf 仍可作对照 |
 | **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | Milvus 内置 `chinese` analyzer 就是 jieba，且默认 `mode="search"` = `cut_for_search`——正是你实测最差的 73.4%，比 char bigram 的 75.9% 低 2.5 分。**开服务端分词器会让系统变差**。另外可绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的坑 | 无（这是本项目最有说服力的设计决策之一） |
 | **服务层** | FastAPI + httpx（异步）+ tenacity（429 指数退避） | 三个依赖，全部薄，不侵入检索层 | — |
 | **前端** | FastAPI 挂一个单文件静态 HTML（检索框 + 结果卡片 + 命中 chunk 高亮 + 各阶段耗时条） | 界面优先展示**阶段耗时**和**检索证据**，便于检查系统行为 | Gradio / Streamlit（若你想 5 分钟部署到 HF Space）。改选条件：你决定公网 demo 放 HF Space 而非 Zilliz |
@@ -156,17 +156,22 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 > 2. **Cloudflare 拦截 `Python-urllib/3.x` 默认 UA**，返回 HTTP 403 `error code 1010`。
 >    两者状态码相同且都不是鉴权失败，不读 body 会误判成 key 有问题。必须显式设置 `User-Agent`。
 
-| Provider | Embedding-8B | Reranker-4B | 关键特性 |
-|---|---|---|---|
-| **SiliconFlow（选它）** | ¥0.28/M | ¥0.14/M | 唯一在 `/v1/rerank` 暴露 Qwen3 `instruction` 字段的；Cohere 形状响应（`results[{index, relevance_score}]`，无需客户端排序）；国内原生 |
-| DeepInfra（备用） | $0.010/M | $0.025/M | 便宜约 4x，但 **`normalize` 默认 false**，rerank 是 `{queries[], documents[]}` 平行数组、返回裸 `scores[]` 无索引 |
-| DashScope/百炼 | ❌ | — | `text-embedding-v4` **不是** Qwen3-Embedding-8B：最大 2048 维、8,192 token。将该端点记录为 Qwen3-Embedding-8B 会造成模型身份与实验说明不一致 |
+当前实现只把 **One Hub relay** 当作已验证 provider。旧调研中的 SiliconFlow / DeepInfra / 百炼价格、
+白名单与限流可作为换站时的线索，但不能用来描述当前端点，更不能拿 SiliconFlow 标价反推这次账单。
 
-**限流**：SiliconFlow 是账号级、按模型类别，Embedding RPM 2,000–10,000 / TPM 500K–10M 随 L0–L5 消费等级上升；**Reranker 是平的：RPM 2,000 / TPM 500,000，不随等级涨**。一次 top-100 全量重排约 118M tokens，在 500K TPM 下**至少 4 小时墙钟**。第一天就写指数退避。
+已验证的 transport 契约：显式 `User-Agent`（否则 Cloudflare 403/1010）、最多 7 次尝试、5 秒起步且
+60 秒封顶的长退避、尊重 `Retry-After`（最多 300 秒），以及对 429/500/502/503/504/520 和连接重置
+重试。429 在该站表示上游负载饱和，不是配额耗尽。HTTP 400 没有 blanket retry：它也可能是请求错误；
+本轮少量看似瞬态的 400 在人工确认 checkpoint 后用原请求单条续跑成功。
 
-**成本结构（重要）**：重排是 embedding 的约 24 倍。全量 embedding 一遍 4.88M tokens ≈ ¥1.37；一次 top-50 重排扫描 2,394 条 QA ≈ 59M tokens ≈ ¥16.4。**必须按 `(query_id, doc_id, model)` 缓存重排分数**，否则消融矩阵会让你反复付钱。
+**成本结构只保留行为结论，不保留未验证价格结论。** Rerank 输入远大于 embedding，必须缓存；本轮
+2,394 × 100 = **239,400** 个 `(query_id, doc_id)` 分数只打一次，top-50/100 是同一缓存上的离线
+窗口消融。缓存按 query 的完整响应追加，sidecar 绑定 model、endpoint、instruction、候选与输入指纹；
+它连同 embedding cache 都是语料派生物，**只留本地并 gitignore，绝不提交**。
 
-**批处理**：embedding 侧按 32–64 条一批并发 4–8 路；rerank 侧受 TPM 约束，并发 2 路 + tenacity 退避即可。
+> ⚠️ 本轮评分跨多个时间段断点续跑且 query 顺序按 task/arity 排列；relay 没有暴露后端部署 revision。
+> 未观察到缓存污染或漂移，但跨 arity 结论依赖 endpoint stationarity。后续 provider 应记录可用的
+> request id / response model / deployment revision，并随机化或交错 arity 的请求顺序。
 
 ---
 
@@ -184,10 +189,10 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 ### 怎么避免看起来像过拟合
 
 1. **配置冻结点写死**：README 明确写「所有超参在 CRUD-RAG 5,681 文档评测集上选定，选定后冻结，原样部署到 TiDB 语料，未在 TiDB 上做任何调参」。这句话本身就是方法论声明。
-2. **切分 dev/test**：CRUD-RAG 的 2,394 条 QA 里，用 1doc(800) 做 dev 调参，2docs(797)+3docs(797) 只在最终一次上报——避免在同一批 query 上反复选参。
+2. **dev/test 边界必须按事实描述**：早期计划是 1doc(800) 做 dev、2docs+3docs 只最终上报，但后续 arity 分层、RRF 审计与 rerank 深度消融已经查看了全部 2,394 条。现有数字因此是**探索性 benchmark 结果，不是未触碰的 test 泛化估计**；发布前若要声称泛化，必须另建 held-out split 或外部语料，不能继续沿用这条已失效的计划。
 3. **报告置信区间**：**消融表每一行带 95% CI，配置间差异带 p 值与 win/loss**。✅ `paired_bootstrap_test` 已于 2026-08-19 审计（详见 §13）：配对重采样 query、单尾、Holm 已实现；另修了蒙特卡洛分辨率下界与 `observed<=0` 的保守短路，并为二元指标加了精确 McNemar。**一个带 CI 与 win/loss 的 +1.2pt 是工程结论；一个裸的 +1.2pt 是噪声** —— 本项目的 dense vs BM25 正是「裸看 +2.1pt 像结论、配对检验后是噪声」的实例。
 4. **TiDB 侧只报无标注可测的量**：延迟、吞吐、chunk 分布、代码块完整率、增量重建的 `{added, updated, deleted, skipped}` 计数。**不要在 TiDB 上编造检索指标**。
-5. **两个语料的许可都不入库**：`.gitignore` 已经正确排除了四个语料目录，保持。补一个 `DATA_LICENSE.md`（见 §12）。
+5. **两个语料及其派生物都不入库**：`.gitignore` 覆盖语料目录，向量、chunk、rerank pair score 与可能复述原文的 QG 输出同样不得提交；许可边界记录在 `DATA_LICENSE.md`。
 
 ---
 
@@ -195,7 +200,7 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 
 ### 6.1 检索侧消融表骨架（主表）
 
-**已实现**：`src/zhrag/eval/metrics.py` 里的 R@k / MRR@k / nDCG@k / ALL-gold@k / bootstrap_ci / paired_bootstrap_test / **mcnemar_exact** / **win_loss_tie** / **bootstrap_p_floor** / holm_bonferroni，以及 `src/zhrag/retrieval/fusion.py` 的 **RRF（可加权、可指定融合深度）**。以下只是把它们排成表。
+**已实现**：`src/zhrag/eval/metrics.py` 里的 R@k / MRR@k / nDCG@k / ALL-gold@k / bootstrap_ci / paired_bootstrap_test / **mcnemar_exact** / **win_loss_tie** / **bootstrap_p_floor** / **holm_floor_flags** / holm_bonferroni，`src/zhrag/retrieval/fusion.py` 的 **RRF（可加权、可指定融合深度）**，以及 `eval/rerank.py` 的窗口语义、输入指纹与四个预声明检验族。以下只是把它们排成表。
 
 **列**：
 
@@ -205,12 +210,12 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 | `corpus_size` | 500 / 2000 / 5681（**永远显式，绝不省略**） |
 | `retriever` | bm25-bigram / bm25-jieba / dense-4096 / dense-1024 / hybrid-rrf |
 | `chunk_target` | 256 / 400 / 800 |
-| `rerank` | none / qwen3-4b@50 / qwen3-4b@100 / qwen3-8b@50 |
+| `rerank` | none / qwen3-8b@50 / qwen3-8b@100（当前 provider 无 4B） |
 | `R@1` ±95%CI | **头条指标** |
 | `MRR@10` ±95%CI | 头条指标 |
 | `nDCG@10` ±95%CI | 头条指标 |
 | `ALL-gold@10` | 按 1doc/2docs/3docs 分列（**3docs 的 68.9% 天花板必须同表标注**） |
-| `p_vs_baseline` | vs char-bigram BM25 基线：二元指标（R@1）用**精确 McNemar**，连续指标（MRR/nDCG）用**配对 bootstrap**，全表 Holm 校正 |
+| `p_vs_baseline` | 二元指标用**精确 McNemar**（多 gold 时测试 `hit@1` / `ALL@10`，不把分数型 R@1 塞进列联表），连续指标用**配对 bootstrap**；按预声明 family 做 Holm 校正 |
 | `win/loss` | 逐查询胜/负计数。**必列** —— 同样是 +2pp，由 86 胜 69 负得来（churn 0.80，不可检测）和由 16 胜 4 负得来（显著）是两回事，而 delta 列一模一样 |
 | `index_build_s` | jieba+bigram 并集慢 7 倍这件事要有列承载 |
 | `latency_p95_ms` | 端到端 |
@@ -227,24 +232,26 @@ E. dense-1024 (MRL)      @5681, chunk=400, rerank=none      ← ✅ 已测 77.5 
 F. dense-512  (MRL)      @5681, chunk=400, rerank=none      ← ✅ 已测 78.4 / 0.864（p=0.684）
 G. hybrid-rrf (A+D)      @5681, chunk=400, rerank=none      ← ✅ 已测（离线）79.9 / 0.881；vs A +4.00pp（p=1.6e-03，显著）；vs D +1.87pp（Holm p=0.231，不显著）
 G'. hybrid-rrf 加权 .3/.7 @5681, chunk=400, rerank=none     ← ✅ 已测（离线）79.5 / 0.878；vs D +1.50pp（16 胜 4 负，Holm p=0.047，全表唯一显著优于 D）
-H. hybrid-rrf (A+E)      @5681, chunk=400, rerank=none      ← 待跑，最可能是最终配置。脚本已就绪、dense 臂换成 1024 维切片即可，零 API 成本
-I. H + rerank-8b@50      @5681, chunk=400                   ← 新
-J. H + rerank-8b@100     @5681, chunk=400                   ← 新
+H. hybrid-rrf (A+E)      @5681, chunk=400, rerank=none      ← 待跑：dense-1024 hybrid，必须与 G 分开命名
+I. G + rerank-8b@50      @5681, chunk=400                   ← ✅ 已测：按 arity 报告；当前部署候选
+J. G + rerank-8b@100     @5681, chunk=400                   ← ✅ 已测：未显著优于 I
 K. ~~4B vs 8B~~                                             ← ❌ 取消：中转站没有 4B（见 §4.5）
-L. H + rerank-8b@50      @5681, chunk=256 / 800             ← chunk sweep
+L. H + rerank-8b@50      @5681, chunk=256 / 800             ← 待跑；先完成独立 H baseline 与 chunk sweep
 M. bm25-bigram           @500,  chunk=400, rerank=none      ← 饱和对照行，98.0 / 0.990
 ```
 
 > **D/E/F 已于 2026-08-19 实测完成**（`scripts/probe_mrl_quality.py`，800 条 1doc 查询）。
 > 三个结论改变了后续排期：
 >
-> 1. **dense 只比 BM25 高 2.1pp，且已证不显著**（78.0 vs 75.9；配对 95% CI [−1.00, +5.25]pp，
+> 1. **dense 只比 BM25 高 2.1pp，且已证不显著**（78.0 vs 75.9；配对 95% CI [−0.88, +5.12]pp，
 >    McNemar 精确双尾 p = 0.199）。头条指标不能靠 dense 单臂 —— 但**融合的理由反而更硬了**：
 >    两臂 R@1 列联表 538 / 69 / 86 / 107，φ = 0.455，**并集 oracle 上限 86.6%**。G 行已把其中
->    4.00pp 兑现（对 A 显著），H/I/J 仍是主线。
+>    4.00pp 兑现（对 A 显著）；I/J 已在 G 上完成，H 仍是独立的 1024 维后续实验。
 > 2. **M6（MRL 消融）实际已经做完**，且零 API 成本：1024 维 −0.50pp（p=0.684）、128 维 −1.00pp
->    （p=0.521）、**只有 64 维显著劣化**（−4.25pp，p<0.001——原始 p 触到重采样地板）。存储 93.1 MB → 23.3 MB（−75%）。
-> 3. 因此 **E 而非 D 应作为 H 行的 dense 臂**：质量无显著差异，存储少 75%，索引与查询都更快。
+>    （p=0.521）、**只有 64 维显著劣化**（−4.25pp，Holm p=0.001†；† 表示 0/10,000
+>    零分布样本达到观测值的 add-one 蒙特卡洛地板，不是 `<` 上界）。存储 93.1 MB → 23.3 MB（−75%）。
+> 3. 因此 **E 而非 D 应作为未来 H 行的 dense 臂**：质量无显著差异，存储少 75%，索引与查询都更快。
+>    但已完成的 I/J 付费实验明确建立在 G（dense-4096）上；不能事后把它们改名成 H。
 
 **M 行必须存在，且和 A 行贴在一起。** 这是全篇最重要的排版决策——非技术筛选人看到孤零零的 75.9% 会当成退化。
 
@@ -298,7 +305,7 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 
 这是需要**提前决定**的分支，不能等测完再想：
 
-1. **先看 CI 是否重叠**。✅ **这条已经用上了**：dense 单臂 vs BM25 的 95% CI 大幅重叠（+2.12pp，CI [−1.00, +5.25]pp），McNemar p = 0.199 —— 已如实报告「在本语料上 **dense 单臂**未带来统计显著提升」。这是第二个诚实的负结果，和 98.0%→75.9% 那个同样值钱。**注意它没有连坐 hybrid**：RRF 对 BM25 是 +4.00pp、p = 1.6e-03，显著。打平的是单臂，不是融合。
+1. **先看 CI 是否重叠**。✅ **这条已经用上了**：dense 单臂 vs BM25 的 95% CI 大幅重叠（+2.12pp，CI [−0.88, +5.12]pp），McNemar p = 0.199 —— 已如实报告「在本语料上 **dense 单臂**未带来统计显著提升」。这是第二个诚实的负结果，和 98.0%→75.9% 那个同样值钱。**注意它没有连坐 hybrid**：RRF 对 BM25 是 +4.00pp、p = 1.6e-03，显著。打平的是单臂，不是融合。
 2. **切分难度桶再看。** ✅ **已于 2026-08-20 跑完**：按实际 gold 数而非任务名分成 809 / 802 / 783 条。结果不是笼统的「dense 随 arity 增大而全面领先」，而是**指标特异**：跨 arity 可比的 `hit@1` 上，dense vs BM25 为 +1.98pp / +0.37pp / +4.34pp，配对 95% CI 分别为 [−0.99,+4.94] / [−3.37,+4.36] / [+0.64,+8.17]pp，12 项二元 family 经 Holm 后 p=1.000 / 1.000 / 0.176，均不显著；`ALL-gold@10` 上，arity=2 为 **+6.48pp**（95% CI [+4.24, +8.73]pp，Holm p=2.81e-07），arity=3 为 **+15.71pp**（[+12.90, +18.52]pp，Holm p=1.66e-27）。**dense 强在把整套证据捞进 top-10，不强在把任一证据排第一。** 同时，1doc 上选出的 RRF k=10/depth=100 到 arity=3 的 ALL-gold@10 相对 dense **−5.11pp**（95% CI [−7.02, −3.19]pp，6 项 Holm p=1.67e-06），而 hit@1 −0.77pp（95% CI [−3.58,+2.04]pp，Holm p=1.000）不显著；所以退化不能泛化成「融合整体伤害多文档查询」，但一套融合配置通吃全部 arity 也不再受数据支持。复现：`scripts/compare_dense_bm25.py` section 5。
 3. **换看 nDCG@10 和 MRR@10**。R@1 打平不代表排序质量打平。
 4. **绝不通过换评测集来制造差异**。若换了，必须两个集都报。
@@ -313,11 +320,11 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 |---|---|---|---|---|
 | **M0** | 仓库卫生 + CI | **1.0** | `.github/workflows/ci.yml`（ubuntu + windows 双 leg，windows 不设 PYTHONUTF8）；ruff 加 PLW1514；删除 `_research_*.py` / `_enc_test.txt`；`DATA_LICENSE.md` | CI 绿；ruff 0 error；测试通过率 100% |
 | **M1** | Protocol + registry + YAML config | **1.5** | `retrieval/base.py`（4 个 Protocol）、`registry.py`、`config.py`（pydantic-settings，`extra='forbid'`）、`experiments/*.yaml` | 现有 BM25 零改动通过 Protocol；1 条命令跑通 1 个 config |
-| **M2** | Milvus Lite 冒烟 + provider 客户端 | **1.0** | `store/milvus.py`；✅ `providers/embedding.py`（One Hub/OpenAI-compatible，含 QUERY_PROMPT、7 次长退避、批级续传、model/prompt sidecar）；rerank provider 待建 | ✅ embedding provider 55 个隔离测试；L2 与 dimensions 探针复用同一客户端；Milvus create/insert/hybrid_search 冒烟已通过；M2 剩 store + rerank |
+| **M2** | Milvus Lite 冒烟 + provider 客户端 | **1.0** | `store/milvus.py`；✅ `providers/{http,embedding,rerank,cache}.py`（One Hub/OpenAI-compatible transport、7 次长退避、严格响应校验、断点缓存与 provenance sidecar） | ✅ embedding 与 rerank provider 均有隔离测试；L2/dimensions 探针复用同一客户端；Milvus create/insert/hybrid_search 冒烟已通过；M2 只剩正式 store 实现 |
 | **M3** | 全量索引 + dense 基线 | **1.5** | `scripts/build_index.py`（幂等 upsert，chunk id = hash(path, ordinal, text)）、`corpus_manifest` sha256 变更检测 | 5,681 文档索引完成；dense-4096 的 R@1 / MRR@10 出数 |
 | **M4** | 混合检索 + RRF | ~~1.0~~ **0.5** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | **离线部分已完成 2026-08-19，分层于 2026-08-20 补齐**（`scripts/compare_dense_bm25.py` + `retrieval/fusion.py`）：1doc hybrid **79.9 / 0.881** vs BM25 75.9（p=1.6e-03，显著）vs dense 78.0（Holm p=0.231，不显著）；多证据上 dense 的完整证据召回更强，而同一 RRF 在 arity=3 ALL@10 比 dense 低 5.11pp。M4 剩把融合搬进 Milvus 服务端并复现数字 |
-| **M5** | Rerank + 深度消融 | **1.5** | `rerank` 阶段 + `(qid,docid,model)` 分数缓存 | top-50 / top-100 / 4B vs 8B 四行；**分层报 1doc/2docs/3docs** |
-| **M6** | ~~MRL 消融（原创）~~ **✅ 已完成 2026-08-19** | ~~1.0~~ **0.3** | `scripts/probe_mrl_quality.py`：4096→64 七档 + 逐维方差 + 配对检验 | 存储 93.1 MB → 23.3 MB（1024 维）；**1024 维 −0.50pp 不显著（p=0.684），仅 64 维显著劣化 −4.25pp（p<0.001）** |
+| **M5** | **Rerank + 深度消融：离线部分 ✅ 2026-08-21** | **1.5** | ✅ `providers/rerank.py` + `providers/cache.py` + `eval/rerank.py` + `scripts/evaluate_rerank.py`；在线 pipeline stage 待接 | 冻结 G（dense-4096 hybrid）统一评分 239,400 对：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp@50 / +7.41pp@100；arity=2 无显著增益；top-100 未显著胜 top-50。4B 对照因 provider 无模型而取消 |
+| **M6** | ~~MRL 消融（原创）~~ **✅ 已完成 2026-08-19** | ~~1.0~~ **0.3** | `scripts/probe_mrl_quality.py`：4096→64 七档 + 逐维方差 + 配对检验 | 存储 93.1 MB → 23.3 MB（1024 维）；**1024 维 −0.50pp 不显著（p=0.684），仅 64 维显著劣化 −4.25pp（Holm p=0.001†；蒙特卡洛地板标记）** |
 | **M7** | chunk sweep | **0.5** | 256/400/800 | 「为什么是 400」有曲线不是故事 |
 | **M8** | 服务层 + 延迟/QPS | **1.5** | FastAPI + 单文件静态前端（含各阶段耗时条）；`scripts/bench.py` | **p50/p95/p99 + QPS**——补上「企业级」四条腿里唯一缺的那条 |
 | **M9** | 生成侧评估 | **2.0** | 移植 `metrics_gen/`（jieba 词级 BLEU/ROUGE + BERTScore-zh rescaled + 自实现 RAGQuestEval）；commit quest_gt JSON | event_summary / QA-1doc 两个任务对齐 CRUD-RAG Table 8 baseline |
@@ -362,10 +369,14 @@ zhrag/
 │   │   ├── milvus.py               # 🆕 Lite / Standalone / Zilliz 同一份代码
 │   │   └── tidb.py                 # 🆕 第二后端（叙事用）
 │   ├── providers/
-│   │   ├── embedding.py            # ✅ One Hub/OpenAI-compatible：prompt / 重试 / 批缓存 / sidecar
-│   │   └── cache.py                # 🆕 (qid, docid, model) 重排分数缓存（嵌入 sidecar 已在 embedding.py）
+│   │   ├── http.py                 # ✅ One Hub JSON transport：UA / 长退避 / Retry-After
+│   │   ├── embedding.py            # ✅ embedding prompt / 批缓存 / provenance sidecar
+│   │   ├── rerank.py               # ✅ Qwen3 rerank 请求与严格响应校验
+│   │   └── cache.py                # ✅ gitignored 配对分数缓存 + provenance sidecar
 │   ├── eval/
 │   │   ├── metrics.py              # ✅ R@k / MRR / nDCG / ALL-gold / bootstrap
+│   │   ├── retrieval.py            # ✅ BM25/dense run 与共享逐查询指标
+│   │   ├── rerank.py               # ✅ 窗口语义 / 指纹 / 四个预声明配对检验族
 │   │   ├── metrics_gen.py          # 🆕 jieba 词级 BLEU/ROUGE + BERTScore-zh
 │   │   ├── quest_eval.py           # 🆕 RAGQuestEval 自实现（~60 行）
 │   │   └── runner.py               # 🆕 遍历 experiments/*.yaml -> results/*.jsonl
@@ -379,11 +390,13 @@ zhrag/
 │   ├── h_hybrid_rrf_mrl1024.yaml
 │   └── ...
 ├── results/                        # 🆕 提交（体积小、可复现、可比对）
-│   ├── retrieval_ablation.jsonl
-│   ├── quest_gt_save.json          # QG 只付一次钱，提交它
+│   ├── retrieval_ablation.jsonl    # 只允许无语料文本/向量/逐对分数的聚合结果
+│   ├── quest_gt_save.json          # ⚠️ 可能含语料派生文本；完成许可审计前不得提交
 │   └── ablation_table.md           # 由脚本生成，非手写
 ├── scripts/
 │   ├── corpus_stats.py             # ✅
+│   ├── compare_dense_bm25.py       # ✅ dense/BM25/RRF 与 arity 分层
+│   ├── evaluate_rerank.py          # ✅ top-100 断点评分 + top-50/100 离线分析
 │   ├── download_corpora.py         # 🆕 首次运行 stdout 打印许可声明
 │   ├── build_index.py              # 🆕
 │   └── bench.py                    # 🆕 p50/p95/p99 + QPS
@@ -404,10 +417,9 @@ zhrag/
 |---|---|---|---|
 | Embedding 全量一遍（两个语料） | 4.88M tokens | ¥0.28/M | **¥1.37**（≈ $0.19） |
 | ~~Embedding × 15 遍（MRL 消融 + 重建）~~ | ~~73M tokens~~ | — | **¥0**（实测 `dimensions` 即前缀切片，全部维度档共用一次嵌入，见 §13） |
-| Rerank top-50 一次全扫（2,394 queries × 50 × ~490 tok） | ~59M tokens | ¥0.14/M（4B） | **¥8.2** |
-| Rerank top-100 一次全扫 | ~118M tokens | ¥0.14/M | **¥16.5** |
-| Rerank 消融 ×4 组（有缓存，实际约 2.5 倍成本） | ~250M tokens | ¥0.14/M | **¥35** |
-| Rerank-8B 对照一次（top-50） | 59M tokens | ¥0.28/M | **¥16.5** |
+| Rerank top-100 已完成 sweep | 2,394 queries × 100 docs = 239,400 pairs | One Hub 实际价格未核实 | **不写金额**；不能套用 SiliconFlow 价格 |
+| top-50 深度消融 | 复用上述前 50 个配对分数 | — | **¥0 额外调用** |
+| 4B vs 8B | 当前 relay 无 4B | — | **取消** |
 | RAGQuestEval — QG（强模型，**只跑一次并 commit**） | ~2,400 题 × ~800 tok | 按 LLM 计费 | **≈ ¥30**（⚠️ 估算） |
 | RAGQuestEval — QA（中档判官，per-config） | ~2,400 × N 题 × ~600 tok | 按 LLM 计费 | **≈ ¥20 / 配置**（⚠️ 估算） |
 | 生成侧 LLM 输出（4 个任务 × ~2,000 行 × ~250 tok） | ~2M tokens 输出 | 按 LLM 计费 | **≈ ¥40**（⚠️ 估算） |
@@ -420,7 +432,9 @@ zhrag/
 
 存储侧：1,725 TiDB chunks @ 4096 维 float32 ≈ **28.3 MB**；MRL-1024 ≈ **7.1 MB**；全部落在 Zilliz Free 的 5 GB 里，**约 175 倍余量**。
 
-**成本控制三条铁律**：① 重排分数按 `(qid, docid, model)` 缓存并提交；② QG 结果 JSON 提交进仓库，CI 永不重跑；③ CI 只跑无需 API key 的检索指标，judge 指标 gate 到 nightly。
+**成本与数据边界三条铁律**：① 重排分数按 `(qid, docid)` 缓存并由 sidecar 绑定 model/input provenance，
+但它们是语料派生物，**只留 gitignored 本地目录、绝不提交**；② QG 结果也可能构成语料派生文本，许可审计
+通过前同样不得提交；③ CI 只跑无需 API key、无需派生缓存的单元测试，付费指标只允许手动触发并断点续跑。
 
 ---
 
@@ -454,14 +468,14 @@ zhrag/
 
 **③ 面向技术文档的两阶段分块策略。** 针对 500 篇 TiDB 中文文档（**3,309** 个代码块 / **5,262** 行表格），纯标题切分导致 **63.5%** 分块 <100 tokens、最大块 **16,111** tokens；改为「标题切分 → 掩码代码块与表格 → 按 target=400 合并小块 / 拆分大块」，得 **1,725** 块，p50 **375** / p90 **747**，欠长块降至 **5.3%**，代码块破损 **0** 例；并给出 256/400/800 的分块尺寸-召回曲线。
 
-**④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B 构建 dense + 字符 bigram BM25 双臂检索与 RRF 融合，在 5,681 篇语料 / 800 条单证据查询上 **R@1 由 BM25 基线 75.9% 提升至 79.9%（+4.00pp，65 胜 33 负，McNemar 精确检验 p = 1.6e-03）**；重排层（Qwen3-Reranker-8B）与端到端 **p95 [XXX] ms / QPS [XX]** 待补。首次公开 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**：4096→1024 维存储由 **93.1 MB 降至 23.3 MB（−75%）**，R@1 **78.0%→77.5%（−0.50pp，配对 bootstrap p=0.684，Holm 校正后不显著）**；降至 128 维（−97% 存储）仍无显著损失，**64 维起显著劣化（−4.25pp，p<0.001）**——官方技术报告未发布此数据。以 alias 实现零停机换索引，重嵌入全量成本约 **$0.19**（`dimensions` 实测为前缀切片，全部维度档共用一次嵌入）。
+**④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B 构建 dense + 字符 bigram BM25 双臂检索与 RRF 融合，在 5,681 篇语料 / 800 条单证据查询上 **R@1 由 BM25 基线 75.9% 提升至 79.9%（+4.00pp，65 胜 33 负，McNemar 精确检验 p = 1.6e-03）**；在全部 2,394 条查询上对冻结 hybrid 的 top-100 候选统一调用 Qwen3-Reranker-8B，离线消融显示 top-50 已使单证据 `hit@1` **+6.06pp**（95% CI [+3.34,+8.78]，Holm p=0.0003）、三证据 `ALL@10` **+7.15pp**（[+4.98,+9.32]，p=1.32e-09），而 top-100 无显著额外收益，因此部署候选选 top-50；端到端 **p95 [XXX] ms / QPS [XX]** 待补。首次公开 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**：4096→1024 维存储由 **93.1 MB 降至 23.3 MB（−75%）**，R@1 **78.0%→77.5%（−0.50pp，配对 bootstrap p=0.684，Holm 校正后不显著）**；降至 128 维（−97% 存储）仍无显著损失，**64 维起显著劣化（−4.25pp，Holm p=0.001†；蒙特卡洛地板标记）**——官方技术报告未发布此数据。
 
-**⑤ 用配对检验推翻自己的点估计，并据此改路线。** 8B 稠密检索相对 40 行纯标准库 BM25 名义领先 2.1pp，配对检验后判定**不显著**（95% CI **[−1.00, +5.25]pp**，McNemar 精确 p = **0.199**）；进一步用 R@1 列联表（both 538 / 仅 BM25 69 / 仅 dense 86 / 都不中 107，φ = 0.455，**并集 oracle 上限 86.6%**）判定两臂**互补而非冗余**，据此把主线从「换更强的单臂」改为「融合」，离线 RRF 兑现 **75.9% → 79.9%（p = 1.6e-03）**。同一批实验还显示**等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），只有加权 0.3/0.7 显著（16 胜 4 负，p=0.047）**——赢在少破坏，不在多修好。
+**⑤ 用配对检验推翻自己的点估计，并据此改路线。** 8B 稠密检索相对 40 行纯标准库 BM25 名义领先 2.1pp，配对检验后判定**不显著**（95% CI **[−0.88, +5.12]pp**，McNemar 精确 p = **0.199**）；进一步用 R@1 列联表（both 538 / 仅 BM25 69 / 仅 dense 86 / 都不中 107，φ = 0.455，**并集 oracle 上限 86.6%**）判定两臂**互补而非冗余**，据此把主线从「换更强的单臂」改为「融合」，离线 RRF 兑现 **75.9% → 79.9%（p = 1.6e-03）**。同一批实验还显示**等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），只有加权 0.3/0.7 显著（16 胜 4 负，p=0.047）**——赢在少破坏，不在多修好。
 
-> ⚠️ **④ 里剩下的 2 个 `[方括号]` 必须在发布前填实数**（M5 的重排增量、M8 的延迟）。
-> M4 的融合结果已实测（离线 RRF，79.9% / p=1.6e-03），MRL 那半句已全部实测。①②③⑤ 每一个数字也都已实测。
+> ⚠️ **④ 里剩下的 2 个 `[方括号]` 必须在发布前填实数**（M8 的延迟与吞吐）。
+> M4 的融合、M5 的离线 rerank 深度消融与 M6 的 MRL 结果都已实测；在线 pipeline 与 M8 性能数字仍待完成。①②③⑤ 每一个数字也都已实测。
 >
-> ⚠️ **不要把「dense 打赢 BM25」写进任何一条要点。** 实测 +2.12pp、95% CI [−1.00, +5.25]pp、
+> ⚠️ **不要把「dense 打赢 BM25」写进任何一条要点。** 实测 +2.12pp、95% CI [−0.88, +5.12]pp、
 > McNemar p = 0.199 —— **在本语料上不显著**。可以写的是融合后对 BM25 的 +4.00pp（显著），
 > 以及「融合相对 dense 单臂的 +1.87pp 同样不显著（Holm p = 0.231）」。
 >
@@ -492,8 +506,8 @@ zhrag/
 | **Milvus Lite 的 BM25 IDF 是 segment 局部的** | Lite 的分数在 Standalone/Zilliz 上复现不出来，指标静默失真 | 走客户端稀疏向量（本方案已规避）；若非要用服务端 BM25，出指标的那一遍只在 Standalone 跑 |
 | **Milvus Lite 对 data_dir 加文件锁，单进程** | 并行 eval worker 会死锁或报错 | 每个 worker 独立 data_dir，或 eval 跑 WSL2 Standalone |
 | **Milvus Lite 在 Windows + Python 3.13 未经上游 CI 验证** | 上游 CI 只覆盖 Windows+3.10 和 Linux+3.10~3.13 | **第一件事**做 10 行冒烟测试（见 §13），5 分钟去掉整个方案的最大风险 |
-| **SiliconFlow reranker 限流是平的** | RPM 2,000 / TPM 500,000 **不随消费等级上涨**；一次 top-100 全扫至少 4 小时墙钟 | 第一天就上 tenacity 指数退避 + 分数缓存 + 断点续跑 |
-| **重排成本是 embedding 的 ~24 倍** | 消融矩阵会让你反复付同一笔钱 | 按 `(qid, docid, model)` 缓存并提交结果 |
+| **把 SiliconFlow 限流/价格套到 One Hub** | 会把 relay 的 429 误判成配额，并给出无法核实的成本与墙钟承诺 | 只报告实测：429 是上游负载饱和；显式 UA；7 次长退避并尊重 Retry-After；实际价格单独核对 |
+| **重排输入远大于 embedding** | 消融矩阵会反复付同一笔钱 | 统一评分 top-100 一次，top-50/100 离线切窗；分数缓存保持 gitignored，绝不提交 |
 | **`无法推断` 是精确字符串比较** | 判官回「无法推断。」被算作「答上了」，静默抬高 recall | 归一化后再比，并记录近似哨兵率 |
 | **`bert-score` 0.3.13 停在 2023-02-20** | 整套栈里最可能装不上 Python 3.13 的包 | **设计指标表之前先装**；必要时 pin transformers |
 | **CRUD_RAG requirements 装不上** | pin 了 `llama_index==0.9.32` / `langchain==0.1.4` / `pymilvus==2.3.3`，全是 namespace 拆分前版本 | **不要 pip install 它**，把 `src/metric/` 那 ~150 行移植进自己的包 |
@@ -523,7 +537,7 @@ zhrag/
 **🟢 影响指标可信度**
 
 - [x] **你现有的 `paired_bootstrap_test` 实现是否统计正确**：**已于 2026-08-19 审计，实现本身成立。** 三个问题的答案：重采样的是**配对的 query**（逐查询分差作为一个单元重采样，不是对两臂各自自举）；**单尾**（`treatment > baseline`，所以 p=0.60 意味着「没有证据说 treatment 赢」，不是「baseline 赢」）；Holm-Bonferroni 已实现且已用于 MRL 全表。审计另修了两处并新增一处：
-  ① **蒙特卡洛分辨率下界**——估计量是 `(count+1)/(resamples+1)`，10,000 次重采样下最小可表示的 p 是 `9.999e-05`；低于它的值只能写作 `< floor`，而经 Holm 乘以族大小 m 之后会伪装成一个像模像样的估计值。**MRL 表里 64 维那格的 `p=0.001` 正是这么来的**，现已改印 `<0.001`。新增 `bootstrap_p_floor()` 并要求调用方据此渲染。
+  ① **蒙特卡洛分辨率地板**——估计量是 `(count+1)/(resamples+1)`，10,000 次重采样下最小可表示的 p 是 `9.999e-05`。0/10,000 个零分布样本达到观测值时，只能说 add-one **估计停在地板**，不能把它写成“真实 p `< floor`”。经 Holm 后还必须传播地板 provenance。当前统一用 `†` 标记（MRL 的 64 维为 `0.001†`），并明确它不是 `<` 上界；`bootstrap_p_floor()` 与 `holm_floor_flags()` 负责这一口径。
   ② **`observed <= 0` 直接返回 1.0 的短路**——保守、不产生假阳性，但会把一族真值各异的 p 压成同一个 1.0 再喂给 Holm。已改走通用路径；**副作用是 MRL 表 512 维那行的 p 从 1.000 变为 0.684**，README 与本文档已按硬规则 3 重出。
   ③ 二元指标新增 **`mcnemar_exact`**（精确、无下界、无种子、跨机器同值）与 **`win_loss_tie`**。dense vs BM25 的判定即由前者给出。⚠️ 注意 `recall_at_k(..., 1)` 在 2docs/3docs 上不是二元的（会返回 0.5 / 1/3 / 2/3），McNemar 会拒绝它——这是特性不是缺陷，混 arity 的列联表会把「部分得分变化」计成胜负。
 - [ ] **CRUD-RAG 论文 Table 8 的 baseline 数字**是 pypdf 文本抽取得来的，PDF 表格抽取可能错位相邻数字。**你实际引用的那 3–4 行**（summarization、QA-1doc）要对着原 PDF 逐个核对。
@@ -531,9 +545,9 @@ zhrag/
 - [ ] **`rouge-chinese` 与 `evaluate + rouge_score + jieba` 两条路径的数值差多少。** 研究阶段只测了前者（好 0.8276 / 坏 0.1154，判别力正常），没有在同一输入上跑两者做对比。混用或替换前跑一次。
 - [ ] **DeepInfra 的 Qwen3-Embedding-4B 标价 $0.020/M、比 8B 的 $0.010/M 贵一倍**，这个反常价格可能是促销或过期数据。做预算前在实时页面确认。
 - [ ] **英文 instruction 与中文 instruction 在你的中文语料上到底哪个好。** Qwen 基于训练数据来源推荐英文，但那是通用建议不是在 TiDB 文档上的实测。两次跑，同一评测，又一行诚实消融。
-- [x] **hybrid 到底能不能在你的 5,681 语料上打赢 char-bigram BM25 的 75.9%。** **能，且显著。** 离线 RRF 融合 dense-4096 与 BM25 两条 run：**R@1 79.9% / MRR@10 0.881**，对 BM25 **+4.00pp**（65 胜 33 负，McNemar 精确 p = **1.6e-03**）。同时**修正了本条此前的一个错误结论**：dense 单臂并没有「赢」——+2.12pp、95% CI **[−1.00, +5.25]pp**、p = **0.199**，**不显著**。当初「两臂接近不等于融合无用」的判断被证实了：列联表 538 / 69 / 86 / 107，φ = 0.455，并集 oracle 上限 **86.6%**；且一臂 rank-1 落空时 gold 在另一臂里 83–88% 落在前 3、掉出 top-100 的是 0.0%。三条工程结论：**融合深度 10 与 100 的逐查询 R@1 逐位相同**（0/800 条 top-1 改变）；k 从 60 调到 10 只动 0.1pp；**唯一有效的旋钮是权重**（0.3/0.7 是全表唯一显著优于 dense 单臂的配置，16 胜 4 负，Holm p=0.047）。复现：`uv run python scripts/compare_dense_bm25.py`（不联网）。⚠️ 四个融合配置是在同一批 800 条上选出又汇报的，最好那行是上界不是泛化估计。
+- [x] **hybrid 到底能不能在你的 5,681 语料上打赢 char-bigram BM25 的 75.9%。** **能，且显著。** 离线 RRF 融合 dense-4096 与 BM25 两条 run：**R@1 79.9% / MRR@10 0.881**，对 BM25 **+4.00pp**（65 胜 33 负，McNemar 精确 p = **1.6e-03**）。同时**修正了本条此前的一个错误结论**：dense 单臂并没有「赢」——+2.12pp、95% CI **[−0.88, +5.12]pp**、p = **0.199**，**不显著**。当初「两臂接近不等于融合无用」的判断被证实了：列联表 538 / 69 / 86 / 107，φ = 0.455，并集 oracle 上限 **86.6%**；且一臂 rank-1 落空时 gold 在另一臂里 83–88% 落在前 3、掉出 top-100 的是 0.0%。三条工程结论：**融合深度 10 与 100 的逐查询 R@1 逐位相同**（0/800 条 top-1 改变）；k 从 60 调到 10 只动 0.1pp；**唯一有效的旋钮是权重**（0.3/0.7 是全表唯一显著优于 dense 单臂的配置，16 胜 4 负，Holm p=0.047）。复现：`uv run python scripts/compare_dense_bm25.py`（不联网）。⚠️ 四个融合配置是在同一批 800 条上选出又汇报的，最好那行是上界不是泛化估计。
 - [x] **2docs/3docs 分层结果。** 已于 2026-08-20 完成。按实际 gold 数分组（809 / 802 / 783）后，dense vs BM25 的 `hit@1` 为 +1.98 / +0.37 / +4.34pp，配对 95% CI 为 [−0.99,+4.94] / [−3.37,+4.36] / [+0.64,+8.17]pp，12 项二元 family 经 Holm 后 p=1.000 / 1.000 / 0.176，均不显著；但 `ALL-gold@10` 在 arity=2/3 分别 **+6.48pp**（95% CI [+4.24,+8.73]，Holm p=2.81e-07）与 **+15.71pp**（[+12.90,+18.52]，p=1.66e-27）。结论是 **dense 强在找齐证据，不强在把任一证据排第一**。1doc 选出的 RRF k=10/depth=100 在 arity=3 的 ALL@10 又比 dense **低 5.11pp**（[−7.02,−3.19]，6 项 Holm p=1.67e-06），而 hit@1 为 −0.77pp（[−3.58,+2.04]，Holm p=1.000），差异不显著；一套 RRF 配置不能直接外推。复现：`uv run python scripts/compare_dense_bm25.py`（不联网）。
-- [ ] **rerank 能否在 hybrid 的 79.9% 之上再拿到显著增量。** 仍待验证 Qwen3-Reranker-8B @ top-50/100 能否在各 arity 上带来经配对检验的增量。单证据上 dense+BM25 的并集 oracle 还剩 6.7pp，但多证据分层已经说明不能假定同一 fusion/rerank 配置跨 arity 通吃。
+- [x] **rerank 能否在 hybrid 的 79.9% 之上再拿到显著增量。** **已于 2026-08-21 在冻结的 G（dense-4096 + char-bigram BM25，等权 RRF k=10/depth=100）上完成。** 对全部 2,394 条 query 的 top-100 候选统一打分一次（239,400 个 pair），再离线比较 top-50/100。arity=1 的 `hit@1` 79.7%→85.8%，**+6.06pp**（95% CI [+3.34,+8.78]，91 胜 42 负，12 项 Holm p=**0.0003**）；arity=3 的 `ALL@10` 79.3%→86.5%@50 / 86.7%@100，分别 **+7.15pp**（[+4.98,+9.32]，p=**1.32e-09**）与 **+7.41pp**（[+5.24,+9.58]，p=**4.93e-10**）；arity=2 没有 efficacy 项通过校正。top-100 对 top-50 的四个 depth family 中没有显著结果，三个 arity 的 `hit@1` 完全相同，故当前部署证据选择 **top-50**。这不是 dense-1024 结果；H 必须另跑、另存 fingerprint。另有未量化 stationarity 限制：评分跨多个时间段续跑，query 顺序与 arity 相关，而 relay 不暴露后端 revision；未观察到漂移，但跨 arity 解读依赖端点稳定。复现分析：`uv run python scripts/evaluate_rerank.py --analyze --resamples 100000`（完整本地缓存下不联网、不读 key）。
 - [ ] **RAGAS / DeepEval 内置指标提示词在中文上的校准度。** 研究只验证了管道（`base_url` 支持、`adapt_instruction` 语义、DeepSeek/Kimi 类），**零中文评测**。人工标 ~50 行，先测判官与你的一致率。
 
 **部署与生态待验证事项**

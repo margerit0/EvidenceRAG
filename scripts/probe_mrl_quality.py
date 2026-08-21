@@ -48,6 +48,7 @@ from zhrag.eval.metrics import (
     bootstrap_ci,
     bootstrap_p_floor,
     holm_bonferroni,
+    holm_floor_flags,
     mrr_at_k,
     ndcg_at_k,
     paired_bootstrap_test,
@@ -193,6 +194,8 @@ def report_retrieval(
     }
     adjusted = holm_bonferroni(raw_p)
     floor = bootstrap_p_floor(RESAMPLES)
+    raw_floors = {key: p <= floor + 1e-12 for key, p in raw_p.items()}
+    adjusted_floors = holm_floor_flags(raw_p, raw_floors)
 
     for dim in DIMS:
         row, ci = rows[dim], rows[dim]["ci"]
@@ -201,19 +204,19 @@ def report_retrieval(
             verdict = "baseline"
         else:
             p, reject = adjusted[str(dim)]
-            # A raw p sitting on the Monte-Carlo floor is a resolution limit, not
-            # an estimate, and Holm then multiplies it by the family size into
-            # something that reads like one. Print it as an upper bound.
-            at_floor = raw_p[str(dim)] <= floor + 1e-12
-            verdict = f"{'<' if at_floor else ''}{p:.3f}{'*' if reject else ''}"
+            marker = "†" if adjusted_floors[str(dim)] else ""
+            verdict = f"{p:.3f}{marker}{'*' if reject else ''}"
         print(
             f"   {dim:>6} {ci.mean:>7.1%} [{ci.low:.1%}, {ci.high:.1%}] {row['mrr']:>8.3f} "
             f"{row['ndcg']:>8.3f} {delta:>+8.2f}pp {verdict:>9} {row['mb']:>7.1f}"
         )
 
     print("\n   * = significant at family-wise alpha=0.05 after Holm correction.")
-    print(f"   '<' marks a p at the {RESAMPLES:,}-resample floor ({floor:.1e} raw); the true")
-    print("   value is smaller and this run cannot say by how much.")
+    print(
+        f"   † means the active Holm estimate inherits a raw {RESAMPLES:,}-resample "
+        f"floor ({floor:.1e}; 0/{RESAMPLES:,} null exceedances)."
+    )
+    print("   It marks Monte Carlo resolution, not a proven '<' bound on the true tail.")
     print("   Note the three rows that all print 0.684: Holm forces adjusted p-values to")
     print("   be monotone, so a -0.50pp regression and a +0.37pp improvement land on the")
     print("   same number. Read the delta column, not the p column, for direction.")
