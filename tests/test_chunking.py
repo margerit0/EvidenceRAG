@@ -126,6 +126,19 @@ class TestChunking:
         chunks = chunk_markdown(doc, target_tokens=200, hard_max_tokens=300)
         assert len(chunks) < 10
 
+    def test_merged_siblings_keep_every_heading_in_contextual_text(self) -> None:
+        doc = "# 顶层\n\n## 甲\n甲的正文。\n\n## 乙\n乙的正文。\n"
+        [chunk] = chunk_markdown(doc, target_tokens=200, hard_max_tokens=300)
+
+        assert chunk.heading_path == ("顶层",)
+        assert chunk.contextual_text == ("顶层\n\n甲\n\n甲的正文。\n\n乙\n\n乙的正文。")
+
+    def test_single_section_keeps_the_historical_materialization(self) -> None:
+        [chunk] = chunk_markdown("# 顶层\n\n## 子节\n正文。")
+        assert chunk.heading_path == ("顶层", "子节")
+        assert chunk.text == "正文。"
+        assert chunk.contextual_text == "顶层 > 子节\n\n正文。"
+
     def test_oversized_section_is_split_on_paragraph_boundaries(self) -> None:
         doc = "# 大\n\n" + "\n\n".join("这是一个很长的段落。" * 12 for _ in range(12))
         chunks = chunk_markdown(doc, target_tokens=100, hard_max_tokens=150)

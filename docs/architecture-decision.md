@@ -5,7 +5,7 @@
 > **数字勘误说明**：本报告综合时使用的分块统计来自早期原型（固定 1.15 字符/token）。
 > 生产实现按 Qwen3 tokenizer 实测标定（中文 1.57 / 英文 4.49），已全部更正为
 > `scripts/corpus_stats.py` 的输出：朴素按标题切分的欠长块占比是 **63.5%**（非 31.4%），
-> target=400 得 **1,725** 块（非 4,191），4096 维存储 **28.3 MB**（非 115 MB）。
+> target=400 得 **1,832** 块（非 4,191），4096 维存储 **30.0 MB**（非 115 MB）。
 > 结论方向不变，且更强。
 
 > **验证状态更新**：以下三项阻塞验证已于 2026-08-18 在本机 Windows 11 + Python 3.13.5 完成。旧 checklist 已保留为审计轨迹，状态在 §13 更新。
@@ -27,7 +27,7 @@
 | **rerank** | **Qwen/Qwen3-Reranker-8B** @ One Hub relay，传 `instruction`，部署窗口候选 **top-50** | 已在冻结的 dense-4096 hybrid 上完成 top-50/100 分层消融：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp（p=1.32e−09）；top-100 未显著优于 top-50 | 4B 对照取消：当前中转站不提供。若换 provider，必须新建独立 fingerprint/cache，不能与现有 8B 分数混用 |
 | **LLM（生成）** | Qwen 系（你已有 key） | 与 embedding/rerank 同族，叙事一致 | — |
 | **LLM（评判）** | **DeepSeek-V3 类 或 Kimi**，必须≠生成模型 | 自偏好偏差已被因果证实（GPT-4 自评胜率 +10%，Claude-v1 +25%；Panickssery et al. 2404.13076 证明自我识别能力与自偏好强度线性相关）。deepeval 内置 `deepseek_model.py` / `kimi_model.py` | 任一非 Qwen 家族强中文模型 |
-| **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,725，p50 375，p90 747，欠长块 5.3%，代码块破损 0 | 必须补跑 256/400/800 sweep 出曲线（验证分块目标的选择依据） |
+| **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,832，p50 371，p90 734，欠长块 5.0%，代码块破损 0 | 必须补跑 256/400/800 sweep 出曲线（验证分块目标的选择依据） |
 | **检索管线** | dense(4096/1024, HNSW, COSINE) + sparse(char-bigram BM25, **IP**) 双字段 → 服务端 `hybrid_search` + `RRFRanker` → 客户端 Qwen3-Reranker-8B 重排 top-50 | 三段式，每段可单独消融；top-50 由 top-100 未检出额外收益的实测决定 | **WeightedRanker 是必测项而非备选**：离线实测等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），加权 0.3/0.7 才显著（16 胜 4 负，p=0.047）。反过来 `RRFRanker` 的 **k 几乎不影响结果**（60→10 只动 0.1pp），不值得占消融表一列。Qdrant 的 dbsf 仍可作对照 |
 | **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | Milvus 内置 `chinese` analyzer 就是 jieba，且默认 `mode="search"` = `cut_for_search`——正是你实测最差的 73.4%，比 char bigram 的 75.9% 低 2.5 分。**开服务端分词器会让系统变差**。另外可绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的坑 | 无（这是本项目最有说服力的设计决策之一） |
 | **服务层** | FastAPI + httpx（异步）+ tenacity（429 指数退避） | 三个依赖，全部薄，不侵入检索层 | — |
@@ -124,7 +124,7 @@ MRL 就是切片 + L2 重归一化（`modules.json` 是 `[Transformer, Pooling(l
 
 **没有任何官方来源发布过 2048/1024/512 的质量损失表**——arXiv v3 全文里 "MRL" 只出现两次，都在 Table 1 的表头注释里，"Matryoshka" 出现 0 次。任何引用「1024 维只掉 1%」的人引的是 BGE-M3 或 OpenAI，不是 Qwen。
 
-**这是你最高价值的原创消融**：4096 / 2048 / 1024 / 512 四档，跑 5,681 文档的 R@1 / MRR@10。存储侧 1,725 chunks 从 28.3 MB → 7.1 MB（-75%）。
+**这是你最高价值的原创消融**：4096 / 2048 / 1024 / 512 四档，跑 5,681 文档的 R@1 / MRR@10。存储侧 1,832 chunks 从 30.0 MB → 7.5 MB（-75%）。
 
 先做一个 5 分钟验证：同一段文本分别请求 `dimensions=4096` 和 `dimensions=1024`，检查 1024 维向量是否等于 4096 维前 1024 分量的 L2 重归一化。**若是，你可以只存一份 4096 维向量、客户端任意截断**，不必重嵌入。
 
@@ -179,7 +179,7 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 
 **核心原则：CRUD-RAG 是尺子，TiDB 是产品。尺子上调参，产品上展示，两者数据永不混流。**
 
-| | `crud-rag-subset`（5,681 篇干扰语料） | `tidb-rag-curated`（500 篇 / 1,725 chunks） |
+| | `crud-rag-subset`（5,681 篇干扰语料） | `tidb-rag-curated`（500 篇 / 450 篇入库 / 1,832 chunks） |
 |---|---|---|
 | **角色** | **评测集**——所有数字来源 | **部署集**——公网 demo 与工程化能力展示 |
 | **有无 gold label** | 有（`evidence_document_id`，免费） | 无 |
@@ -320,10 +320,10 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 |---|---|---|---|---|
 | **M0** | 仓库卫生 + CI | **1.0** | `.github/workflows/ci.yml`（ubuntu + windows 双 leg，windows 不设 PYTHONUTF8）；ruff 加 PLW1514；删除 `_research_*.py` / `_enc_test.txt`；`DATA_LICENSE.md` | CI 绿；ruff 0 error；测试通过率 100% |
 | **M1** | Protocol + registry + YAML config | **1.5** | `retrieval/base.py`（4 个 Protocol）、`registry.py`、`config.py`（pydantic-settings，`extra='forbid'`）、`experiments/*.yaml` | 现有 BM25 零改动通过 Protocol；1 条命令跑通 1 个 config |
-| **M2** | Milvus Lite 冒烟 + provider 客户端 | **1.0** | `store/milvus.py`；✅ `providers/{http,embedding,rerank,cache}.py`（One Hub/OpenAI-compatible transport、7 次长退避、严格响应校验、断点缓存与 provenance sidecar） | ✅ embedding 与 rerank provider 均有隔离测试；L2/dimensions 探针复用同一客户端；Milvus create/insert/hybrid_search 冒烟已通过；M2 只剩正式 store 实现 |
-| **M3** | 全量索引 + dense 基线 | **1.5** | `scripts/build_index.py`（幂等 upsert，chunk id = hash(path, ordinal, text)）、`corpus_manifest` sha256 变更检测 | 5,681 文档索引完成；dense-4096 的 R@1 / MRR@10 出数 |
-| **M4** | 混合检索 + RRF | ~~1.0~~ **0.5** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | **离线部分已完成 2026-08-19，分层于 2026-08-20 补齐**（`scripts/compare_dense_bm25.py` + `retrieval/fusion.py`）：1doc hybrid **79.9 / 0.881** vs BM25 75.9（p=1.6e-03，显著）vs dense 78.0（Holm p=0.231，不显著）；多证据上 dense 的完整证据召回更强，而同一 RRF 在 arity=3 ALL@10 比 dense 低 5.11pp。M4 剩把融合搬进 Milvus 服务端并复现数字 |
-| **M5** | **Rerank + 深度消融：离线部分 ✅ 2026-08-21** | **1.5** | ✅ `providers/rerank.py` + `providers/cache.py` + `eval/rerank.py` + `scripts/evaluate_rerank.py`；在线 pipeline stage 待接 | 冻结 G（dense-4096 hybrid）统一评分 239,400 对：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp@50 / +7.41pp@100；arity=2 无显著增益；top-100 未显著胜 top-50。4B 对照因 provider 无模型而取消 |
+| **M2** | **Milvus store + provider 客户端 ✅ 2026-08-22** | **1.0** | ✅ `store/{base,milvus}.py`（vendor-neutral Protocol + 惰性导入的 pymilvus 适配器）；✅ `providers/{http,embedding,rerank,cache}.py`（One Hub/OpenAI-compatible transport、7 次长退避、严格响应校验、断点缓存与 provenance sidecar） | ✅ 适配器有 fake-client 契约测试（默认环境不 import pymilvus）；✅ 真实 Milvus Lite 集成通过 `scripts/verify_milvus_store.py`（schema 幂等、完整行 upsert、dense/sparse 两臂、fetch 定序、alias 切换、close 后重开）；`pymilvus==3.0.1` 收进可选 extra |
+| **M3** | 全量索引 + dense 基线 | **1.5** | ✅ `ingest.py` + `scripts/build_index.py`（manifest 校验、稳定 source key、chunk id = sha256(key, ordinal, contextual_text)、shadow collection + alias 切换、全局 sparse 重建、dense 按 chunk id 复用） | 干跑已出数：450 篇 evergreen → **1,832 chunks**、75,620 bigram 词表、delta/复用计数（`--dry-run`，不联网）；**付费嵌入与 alias 发布尚未执行**（需 `--embed --publish`） |
+| **M4** | 混合检索 + RRF | ~~1.0~~ **0.5** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | **离线部分已完成 2026-08-19，分层于 2026-08-20 补齐**（`scripts/compare_dense_bm25.py` + `retrieval/fusion.py`）：1doc hybrid **79.9 / 0.881** vs BM25 75.9（p=1.6e-03，显著）vs dense 78.0（Holm p=0.231，不显著）；多证据上 dense 的完整证据召回更强，而同一 RRF 在 arity=3 ALL@10 比 dense 低 5.11pp。在线链路已用客户端精确 RRF 落地（`retrieval/online.py`，两臂各 100 → 本地 RRF k=10/depth=100）；M4 剩把融合搬进 Milvus 服务端并复现数字（服务端 tie 顺序与本地 doc-id tie-break 不保证一致，属优化路径而非默认精确路径） |
+| **M5** | **Rerank + 深度消融：离线部分 ✅ 2026-08-21** | **1.5** | ✅ `providers/rerank.py` + `providers/cache.py` + `eval/rerank.py` + `scripts/evaluate_rerank.py`；✅ 在线 stage 已接入 `retrieval/online.py`（**请求深度 100 / 应用深度 50** 分开建模） | 冻结 G（dense-4096 hybrid）统一评分 239,400 对：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp@50 / +7.41pp@100；arity=2 无显著增益；top-100 未显著胜 top-50。4B 对照因 provider 无模型而取消 |
 | **M6** | ~~MRL 消融（原创）~~ **✅ 已完成 2026-08-19** | ~~1.0~~ **0.3** | `scripts/probe_mrl_quality.py`：4096→64 七档 + 逐维方差 + 配对检验 | 存储 93.1 MB → 23.3 MB（1024 维）；**1024 维 −0.50pp 不显著（p=0.684），仅 64 维显著劣化 −4.25pp（Holm p=0.001†；蒙特卡洛地板标记）** |
 | **M7** | chunk sweep | **0.5** | 256/400/800 | 「为什么是 400」有曲线不是故事 |
 | **M8** | 服务层 + 延迟/QPS | **1.5** | FastAPI + 单文件静态前端（含各阶段耗时条）；`scripts/bench.py` | **p50/p95/p99 + QPS**——补上「企业级」四条腿里唯一缺的那条 |
@@ -430,7 +430,7 @@ zhrag/
 | Phoenix tracing | 本地 SQLite | — | **¥0** |
 | **总计（含全部消融，保守）** | | | **≈ ¥200–250（约 $28–35）** |
 
-存储侧：1,725 TiDB chunks @ 4096 维 float32 ≈ **28.3 MB**；MRL-1024 ≈ **7.1 MB**；全部落在 Zilliz Free 的 5 GB 里，**约 175 倍余量**。
+存储侧：1,832 TiDB chunks @ 4096 维 float32 ≈ **30.0 MB**；MRL-1024 ≈ **7.5 MB**；全部落在 Zilliz Free 的 5 GB 里，**约 175 倍余量**。
 
 **成本与数据边界三条铁律**：① 重排分数按 `(qid, docid)` 缓存并由 sidecar 绑定 model/input provenance，
 但它们是语料派生物，**只留 gitignored 本地目录、绝不提交**；② QG 结果也可能构成语料派生文本，许可审计
@@ -466,7 +466,7 @@ zhrag/
 
 **② 中文词法检索方案实测选型。** 对比 jieba 精确模式（R@1 **74.8%**）、jieba 搜索模式（**73.4%**）与字符 bigram（**75.9%**）；jieba+bigram 并集在 1doc 上达 76.4% 但汇总的 ALL-gold@10 反而略低（85.3% vs 85.4%）、索引构建耗时 **3.1 倍**，最终选定字符 bigram。进一步实测**向量数据库内置 jieba analyzer 默认即为搜索模式**，遂将词法臂移出数据库，以客户端预计算 BM25 权重作为 SPARSE_FLOAT_VECTOR（`metric_type=IP`）喂入，数据库仅承担 ANN 与服务端 RRF 融合。
 
-**③ 面向技术文档的两阶段分块策略。** 针对 500 篇 TiDB 中文文档（**3,309** 个代码块 / **5,262** 行表格），纯标题切分导致 **63.5%** 分块 <100 tokens、最大块 **16,111** tokens；改为「标题切分 → 掩码代码块与表格 → 按 target=400 合并小块 / 拆分大块」，得 **1,725** 块，p50 **375** / p90 **747**，欠长块降至 **5.3%**，代码块破损 **0** 例；并给出 256/400/800 的分块尺寸-召回曲线。
+**③ 面向技术文档的两阶段分块策略。** 针对 500 篇 TiDB 中文文档（**3,309** 个代码块 / **5,262** 行表格），纯标题切分导致 **63.5%** 分块 <100 tokens、最大块 **16,111** tokens；改为「标题切分 → 掩码代码块与表格 → 按 target=400 合并小块 / 拆分大块」，得 **1,832** 块，p50 **371** / p90 **734**，欠长块降至 **5.0%**，代码块破损 **0** 例；并给出 256/400/800 的分块尺寸-召回曲线。
 
 **④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B 构建 dense + 字符 bigram BM25 双臂检索与 RRF 融合，在 5,681 篇语料 / 800 条单证据查询上 **R@1 由 BM25 基线 75.9% 提升至 79.9%（+4.00pp，65 胜 33 负，McNemar 精确检验 p = 1.6e-03）**；在全部 2,394 条查询上对冻结 hybrid 的 top-100 候选统一调用 Qwen3-Reranker-8B，离线消融显示 top-50 已使单证据 `hit@1` **+6.06pp**（95% CI [+3.34,+8.78]，Holm p=0.0003）、三证据 `ALL@10` **+7.15pp**（[+4.98,+9.32]，p=1.32e-09），而 top-100 无显著额外收益，因此部署候选选 top-50；端到端 **p95 [XXX] ms / QPS [XX]** 待补。首次公开 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**：4096→1024 维存储由 **93.1 MB 降至 23.3 MB（−75%）**，R@1 **78.0%→77.5%（−0.50pp，配对 bootstrap p=0.684，Holm 校正后不显著）**；降至 128 维（−97% 存储）仍无显著损失，**64 维起显著劣化（−4.25pp，Holm p=0.001†；蒙特卡洛地板标记）**——官方技术报告未发布此数据。
 
@@ -512,6 +512,10 @@ zhrag/
 | **`bert-score` 0.3.13 停在 2023-02-20** | 整套栈里最可能装不上 Python 3.13 的包 | **设计指标表之前先装**；必要时 pin transformers |
 | **CRUD_RAG requirements 装不上** | pin 了 `llama_index==0.9.32` / `langchain==0.1.4` / `pymilvus==2.3.3`，全是 namespace 拆分前版本 | **不要 pip install 它**，把 `src/metric/` 那 ~150 行移植进自己的包 |
 | **`corpus_manifest.jsonl` 的 `id` 是内容哈希** | `id == git_blob_sha1` 500/500，内容一变 id 就变，不是稳定身份 | 稳定键 = `path`（500/500 唯一）；变更检测 = `sha256`；chunk id = `hash(path, ordinal, chunk_text)` 保证重跑是 upsert 不是重复插入 |
+| **gRPC 遵循 `HTTP_PROXY`，Milvus Lite 走的正是回环 gRPC** | 导出了代理的 shell 里，本机 Lite 连接被路由到代理，报 `code=2, illegal connection params or server unavailable`——**读起来像服务器没起来，其实 TCP 能连、握手被劫**。实测 `GRPC_ENABLE_HTTP_PROXY=0` 单独设**无效**，起作用的是绕行列表 | opt-in 校验脚本自己把 `127.0.0.1,localhost` 加进 `no_proxy`/`NO_PROXY`（见 `scripts/verify_milvus_store.py`），不要在库代码里偷改进程环境 |
+| **拿 Milvus 的 delete 计数当业务删除数** | Lite 对不存在的主键写 tombstone 并返回 `len(pks)`，删不存在的行不是错误 | 存储层只报「请求了几行、服务端确认了」；`{added, updated, deleted}` 一律来自 manifest diff |
+| **把 `code=100` 当成「alias 还没发布」** | 100 被复用于多种「对象不存在」，若传输层故障恰好带上它，就会把一次连接失败读成「首次发布」，然后覆盖一个从未校验过的 collection | 只认消息里明说不存在的措辞（`not exist` / `not found`），码值不单独作数 |
+| **合并相邻小节时丢掉后续标题** | 「甲」「乙」两个兄弟小节合成一块，只有「甲」的路径留在 metadata，「乙」的标题在生成永久 chunk id 与向量之前就消失 | 只把**共同前缀**放进 metadata，各自剩余层级物化进被索引正文（`_materialize_sections`）；改这条会改 chunk 数，README 数字须重出 |
 | **README 里「企业级」目前是空头支票** | 尚缺实际延迟与监控验证，不能只凭功能清单作出承诺 | M8 交付 p50/p95/p99 + QPS，或把这个词软化 |
 
 ---

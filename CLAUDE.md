@@ -67,9 +67,24 @@ uv run mypy                       # strict
 | `crud-rag-subset/eval-expanded/emb_cache_4096.jsonl` | 523 MB | `scripts/probe_mrl_quality.py`，5,681 篇 @4096 维 |
 | `crud-rag-subset/eval-expanded/emb_cache_queries_4096.jsonl` | 220 MB | 同上 + `scripts/embed_queries.py`，2,394 条 query（**独立缓存**：Qwen3 非对称，query 带 instruct 前缀、doc 不带） |
 | `tidb-rag-curated/documents/` | 6.6 MB | `tidb-rag-curated/download_curated.ps1` |
+| `indexes/tidb/{dense_cache.jsonl,milvus.db,state.json}` | 尚未生成 | `scripts/build_index.py --embed --publish`（**唯一付费步骤**；默认 `--dry-run` 不联网不写库） |
 
 **嵌入缓存已存在，所以维度消融重跑是免费的**（`dimensions=n` 实测就是前缀切片，
 全部维度档共用这一份 4096 维向量）。缓存按批 append，中断可续。
+
+## Milvus 相关（可选依赖）
+
+`pymilvus==3.0.1` 在 `[project.optional-dependencies].milvus` 里，**默认环境和 CI 都不装**；
+`src/zhrag/store/milvus.py` 惰性导入，正常 import `zhrag.store` 不会碰它。真机验证用隔离环境：
+
+```bash
+PYTHONPATH=src .venv-verify-milvus/Scripts/python.exe scripts/verify_milvus_store.py
+```
+
+⚠️ **导出了 `HTTP_PROXY` 的 shell 里，Milvus Lite 连不上。** gRPC 遵循代理变量，而 Lite 的
+服务器就在回环上，于是握手被劫，报 `code=2, illegal connection params or server unavailable`
+——TCP 其实连得上，读起来却像服务器没起来。实测 `GRPC_ENABLE_HTTP_PROXY=0` **单独设无效**，
+起作用的是把 `127.0.0.1,localhost` 加进 `no_proxy`/`NO_PROXY`（校验脚本已自带）。
 
 ## 已知的技术债
 

@@ -33,6 +33,7 @@ import yaml
 
 __all__ = [
     "append_jsonl",
+    "read_bytes",
     "read_json",
     "read_jsonl",
     "read_text",
@@ -43,6 +44,17 @@ __all__ = [
 ]
 
 ENCODING = "utf-8"
+
+
+def read_bytes(path: str | Path) -> bytes:
+    """Read a file as raw bytes.
+
+    :func:`read_text` decodes with ``errors="replace"``, which is right for
+    display but destroys byte-level identity: a replaced byte hashes differently
+    from the original. Content hashes and upstream checksum verification must
+    therefore start here, not from decoded text.
+    """
+    return Path(path).read_bytes()
 
 
 def read_text(path: str | Path) -> str:

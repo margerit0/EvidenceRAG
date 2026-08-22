@@ -3,7 +3,8 @@
 面向中文语料的检索增强生成系统。项目的核心不是"又一个 RAG demo"，而是**一套能真正区分配置优劣的评估框架**，以及在此之上用实测数据驱动的每一个工程决策。
 
 > **状态**：评估层、语料层、词法检索、稠密检索、MRL 降维消融、RRF 融合与离线 rerank 深度消融均已完成并有测试覆盖；
-> 服务端混合检索（Milvus `hybrid_search`）及在线 rerank 管线集成进行中。
+> 在线链路（Milvus 存储适配器、两臂检索、客户端精确 RRF、重排编排、manifest 驱动的索引构建）已实现并通过真实 Milvus Lite 集成校验，
+> **TiDB 全量索引的付费嵌入与线上发布尚未执行**；服务端 `hybrid_search` 融合仍是待验证的优化路径。
 > 下方所有数字均为本仓库脚本在真实语料上跑出的结果，非引用。
 
 ---
@@ -157,18 +158,20 @@ TiDB 文档的 h2/h3 段落长度极不均匀（p50 = 332 字符，p90 = 1,743�
 | 策略 | n | p10 | p50 | p90 | max | <100 tok | 代码块截断 |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | 仅按标题切分 | 5,504 | 14 | 65 | 318 | 16,111 | **63.5%** | — |
-| 两阶段 target=400 | **1,725** | 169 | 375 | 747 | 10,914 | **5.3%** | **0** |
-| 两阶段 target=512 | 1,399 | 204 | 480 | 913 | 16,111 | 3.4% | 0 |
-| 两阶段 target=700 | 1,084 | 228 | 640 | 1,164 | 16,111 | 3.0% | 0 |
+| 两阶段 target=400 | **1,832** | 165 | 371 | 734 | 10,914 | **5.0%** | **0** |
+| 两阶段 target=512 | 1,486 | 215 | 476 | 890 | 16,111 | 3.2% | 0 |
+| 两阶段 target=700 | 1,154 | 224 | 645 | 1,165 | 16,111 | 2.7% | 0 |
 
 近**三分之二**的朴素切块小于 100 token（一个标题加一句话），embedding 后基本是噪声。
 两阶段策略 = 按标题层级切分 → 合并过小相邻段 + 按段落边界拆分超长段。
 
 代码块与表格在切分前被占位符保护、切分后还原，**实测三种 target 下代码块截断数均为 0**。这对本语料至关重要：检索强依赖 `tiup cluster deploy` 这类标识符的精确匹配。
 
-选定 target=400：共 1,725 个 chunk、793,449 tokens。其中 273 个（15.8%）超过 `hard_max`，因为单个代码块或表格本身就超预算——这是有意为之，Qwen3-Embedding-8B 的 32k 上下文放得下，而把表格与表头拆开的代价更大。
+合并相邻小节时，只有共同的标题前缀留在 metadata 里，各小节剩余的标题层级会写进被索引的正文。否则「甲」「乙」两个兄弟小节合成一块后，「乙」的标题会在生成永久 chunk ID 与向量之前就消失。
 
-向量存储量：**4096 维 float32 仅 28.3 MB**，MRL 截断到 1024 维只要 7.1 MB。规模完全不构成向量库选型的约束。
+选定 target=400：共 1,832 个 chunk、829,140 tokens。其中 282 个（15.4%）超过 `hard_max`，因为单个代码块或表格本身就超预算——这是有意为之，Qwen3-Embedding-8B 的 32k 上下文放得下，而把表格与表头拆开的代价更大。
+
+向量存储量：**4096 维 float32 仅 30.0 MB**，MRL 截断到 1024 维只要 7.5 MB。规模完全不构成向量库选型的约束。
 
 ### 分块尺寸必须用对的 tokenizer 估算
 
@@ -427,6 +430,36 @@ Qwen3 的技术报告没有发布任何维度-质量曲线（arXiv v3 全文里 
 > —— Cloudflare 拦截 `Python-urllib/3.x` 默认 UA（`error code 1010`），以及 key 分组的时段限制。
 > 两者都不是鉴权失败，不读 response body 会误判成 key 有问题。
 
+### 在线链路：把离线证据原样搬上去，而不是搬一个像它的东西
+
+离线冻结的配置是「dense-4096 与 char-bigram BM25 各取 100 → 等权 RRF k=10/depth=100 →
+一次性送 100 篇给 reranker → 只用前 50 个分数改排序」。在线实现里有三处**容易在不知不觉中偏离**它：
+
+**① 稀疏检索不能交给数据库去分词。** Milvus 的 BM25 function 会重新切词并估算它自己的 IDF，
+Lite 上的 IDF 还是 segment 局部的。所以文档侧在客户端算完整的 BM25 贡献存进 `SPARSE_FLOAT_VECTOR`，
+查询侧是去重词的二值向量，metric 用 `IP` —— 内积**就是**本地 BM25 的分数（`tests/test_sparse.py` 逐查询对齐）。
+代价是 BM25 统计量全局耦合：新增一个 chunk 会改变每一行的 IDF 与平均长度，所以**每次构建都整体重算稀疏向量**，
+不能只更新变化的那篇文档。
+
+**② 融合放在客户端，而不是 `RRFRanker`。** 公式一致，但并列名次的顺序不一致：本地实现用
+`math.fsum` + 文档 id 打破并列，服务端按先到顺序；且服务端的最终 `limit` 会在并列边界上直接丢掉一个，
+事后补不回来。所以默认路径是两臂分别取回、调用仓库已有的 `reciprocal_rank_fusion`；
+`hybrid_search` 保留为通过 arm/fusion 对齐测试之后的优化项。
+
+**③ 「top-50」是应用深度，不是请求形状。** 离线那一行是**发了 100 篇**再取前 50 个分数，
+不是发 50 篇。二者的 provider 输入不同，结论不能互换，所以 `OnlineSettings` 把
+`rerank_request_depth=100` 与 `rerank_apply_depth=50` 显式分成两个字段。
+同理，`benchmark_exact()`（新闻语料、dense-4096）与面向 TiDB 文档的 `product()` profile 分别命名、分别指纹 ——
+CRUD-RAG 上测出的 +6.06pp 不会因为换了语料就自动成立。
+
+在线核心不导入 `pymilvus`、不读 `.env`、不碰文件系统：编码器、存储、reranker 和时钟都是注入的 Protocol，
+所以默认 CI 不需要 API key、语料或原生依赖就能验证请求形状、融合顺序、失败边界与各阶段耗时。
+真实 Milvus Lite 的 schema / 两臂 / alias / 重开由 opt-in 的 `scripts/verify_milvus_store.py` 覆盖。
+
+> **索引构建是先建后切。** `scripts/build_index.py` 把整批期望行写进一个带版本号的 shadow collection，
+> 校验行数与抽样回读之后才切 alias，最后才落盘成功状态；任何一步失败，线上 alias 与状态文件都不动。
+> 干跑（不联网、不写库）：450 篇 evergreen 文档 → **1,832 chunks**、**75,620** 个 bigram 词表。
+
 ---
 
 ## 已实现
@@ -456,6 +489,14 @@ src/zhrag/
     cache.py              忽略的 append-only 配对分数缓存 + provenance sidecar
   retrieval/
     fusion.py            RRF 融合（可加权、可指定融合深度）
+    online.py            在线编排：两臂各取 100 → 本地精确 RRF → 请求 100 / 应用 50 的重排
+    adapters.py          provider 与在线 Protocol 的唯一接缝（instruction 必须显式传入）
+  store/
+    base.py              与厂商无关的 ChunkRecord / ArmHit / Passage 与 VectorStore Protocol
+    milvus.py            惰性导入的 pymilvus 适配器：固定 schema、完整行 upsert、alias 切换
+  lexical/
+    sparse.py            客户端 char-bigram BM25 稀疏向量（与本地 BM25 内积等价）
+  ingest.py              manifest 校验、稳定身份、scope 隔离与文档级 delta
 scripts/
   build_eval_corpus.py   由 raw/split_merged.json 生成 5,681 篇语料与 qrels
   run_lexical_sweep.py   重新生成上方三张检索表（全部 2,394 条，分层）
@@ -467,10 +508,12 @@ scripts/
   compare_dense_bm25.py  dense 与 BM25 逐查询对齐：列联表 / RRF / arity 分层 / 配对检验（不联网）
   evaluate_rerank.py     top-100 断点续评分 + top-50/100 离线重排与分层配对检验
   smoke_milvus_lite.py   Milvus Lite 在 Windows + Python 3.13 的冒烟测试
-tests/                   325 个单元测试
+  verify_milvus_store.py 正式 store 的 Milvus Lite 集成校验（schema / 两臂 / alias / 重开）
+  build_index.py         manifest → chunk → 稀疏重建 → shadow collection → alias 切换（默认干跑）
+tests/                   420 个单元测试
 ```
 
-质量门禁：`pytest` 325 passed · `ruff check` 全通过 · `ruff format --check` 全通过 · `mypy --strict` 无告警。
+质量门禁：`pytest` 420 passed · `ruff check` 全通过 · `ruff format --check` 全通过 · `mypy --strict` 无告警。
 
 README 中每一个数字都由上述脚本生成，没有手工誊写。这不是洁癖：早期原型用固定 1.15 字符/token 估算，得出的 chunk 数与最终实现相差 2.4 倍；而最初那次 BM25 饱和实验是一次性脚本跑的、从未提交，导致 README 里的核心结论一度**无法被任何人复现**。
 

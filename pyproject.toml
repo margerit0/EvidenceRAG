@@ -18,6 +18,10 @@ dev = [
     "types-pyyaml>=6.0",
 ]
 
+milvus = [
+    "pymilvus==3.0.1",
+]
+
 verify = [
     "bert-score==0.3.13",
     "jieba>=0.42.1",

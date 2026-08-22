@@ -7,9 +7,9 @@ with :func:`zhrag.tokens.estimate_tokens` (regenerate via
 
     strategy                     n     p10   p50    p90     max   <100tok  broken
     headers only             5,504      14    65    318  16,111     63.5%       -
-    two-stage target=400     1,725     169   375    747  10,914      5.3%       0
-    two-stage target=512     1,399     204   480    913  16,111      3.4%       0
-    two-stage target=700     1,084     228   640  1,164  16,111      3.0%       0
+    two-stage target=400     1,832     165   371    734  10,914      5.0%       0
+    two-stage target=512     1,486     215   476    890  16,111      3.2%       0
+    two-stage target=700     1,154     224   645  1,165  16,111      2.7%       0
 
 Nearly two thirds of header-only chunks fall under 100 tokens -- a bare heading
 and one sentence -- because the corpus's h2/h3 sections have a median of just 332
@@ -26,7 +26,7 @@ all three target sizes. Retrieval on this corpus depends on exact matches
 against identifiers like ``tiup cluster deploy``, and a code block truncated
 mid-token destroys that.
 
-Residual: at target=400, 273 of 1,725 chunks (15.8%) still exceed
+Residual: at target=400, 282 of 1,832 chunks (15.4%) still exceed
 ``hard_max_tokens`` because a single masked block is larger than the budget --
 the biggest is a 16k-token generated table. They stay oversized by design;
 Qwen3-Embedding-8B's 32k context accepts them, and splitting a table away from
@@ -135,6 +135,43 @@ def _unmask(text: str, blocks: list[str]) -> str:
     return _SENTINEL_RE.sub(lambda m: blocks[int(m.group(1))], text)
 
 
+def _common_heading_path(sections: list[Section]) -> tuple[str, ...]:
+    """Return the heading prefix shared by every section in one chunk."""
+    if not sections:
+        return ()
+    common = list(sections[0].heading_path)
+    for section in sections[1:]:
+        shared = 0
+        for left, right in zip(common, section.heading_path, strict=False):
+            if left != right:
+                break
+            shared += 1
+        del common[shared:]
+        if not common:
+            break
+    return tuple(common)
+
+
+def _materialize_sections(sections: list[Section]) -> tuple[tuple[str, ...], str]:
+    """Preserve every branch heading when several small sections are merged.
+
+    A chunk still carries the shared heading prefix as metadata. Each section's
+    remaining suffix is embedded in the body, so merging siblings cannot discard
+    every heading after the first one. A single section keeps the historical
+    representation exactly: its full path stays in metadata and its body is not
+    rewritten.
+    """
+    path = _common_heading_path(sections)
+    parts: list[str] = []
+    for section in sections:
+        suffix = section.heading_path[len(path) :]
+        if suffix:
+            parts.append(f"{' > '.join(suffix)}\n\n{section.body}")
+        else:
+            parts.append(section.body)
+    return path, "\n\n".join(parts)
+
+
 def split_by_headings(body: str) -> list[Section]:
     """Split on ATX headings, carrying the full heading path down the tree."""
     sections: list[Section] = []
@@ -191,9 +228,9 @@ def chunk_markdown(
     """Chunk one Markdown document.
 
     ``target_tokens=400`` is the chosen operating point for this corpus: it
-    yields p50=375 / p90=747 tokens with 5.3% undersized chunks. 512 and 700
-    trim waste only marginally further (3.4%, 3.0%) while pushing p90 to 913 and
-    1,164, which costs generator context on every query for little recall gain.
+    yields p50=371 / p90=734 tokens with 5.0% undersized chunks. 512 and 700
+    trim waste only marginally further (3.2%, 2.7%) while pushing p90 to 890 and
+    1,165, which costs generator context on every query for little recall gain.
     """
     if target_tokens < 1 or hard_max_tokens < target_tokens:
         raise ValueError(
@@ -209,11 +246,11 @@ def chunk_markdown(
             base.setdefault(key, front[key])
 
     out: list[Chunk] = []
-    pending: list[str] = []
-    pending_path: tuple[str, ...] = ()
+    pending: list[Section] = []
 
-    def emit(path: tuple[str, ...], parts: list[str]) -> None:
-        text = _unmask("\n\n".join(parts).strip(), blocks)
+    def emit(sections: list[Section]) -> None:
+        path, materialized = _materialize_sections(sections)
+        text = _unmask(materialized.strip(), blocks)
         if text:
             out.append(Chunk(text, path, len(out), token_counter(text), dict(base)))
 
@@ -223,20 +260,20 @@ def chunk_markdown(
         if size > hard_max_tokens:
             # Oversized: flush what is pending, then split on paragraph breaks.
             if pending:
-                emit(pending_path, pending)
-                pending, pending_path = [], ()
+                emit(pending)
+                pending = []
             for group in _split_paragraphs(section.body, target_tokens, token_counter):
-                emit(section.heading_path, group)
+                emit([Section(section.heading_path, "\n\n".join(group))])
             continue
 
-        if pending and token_counter("\n\n".join([*pending, section.body])) > target_tokens:
-            emit(pending_path, pending)
-            pending, pending_path = [], ()
+        proposed = [*pending, section]
+        _, materialized = _materialize_sections(proposed)
+        if pending and token_counter(materialized) > target_tokens:
+            emit(pending)
+            pending = []
 
-        if not pending:
-            pending_path = section.heading_path
-        pending.append(section.body)
+        pending.append(section)
 
     if pending:
-        emit(pending_path, pending)
+        emit(pending)
     return out
