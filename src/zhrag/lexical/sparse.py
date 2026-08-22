@@ -16,20 +16,26 @@ from bisect import bisect_left
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
+from zhrag.io_utils import read_json, write_json
 from zhrag.lexical.analyzers import char_ngram
 from zhrag.lexical.bm25 import BM25Params
 
 __all__ = [
+    "SPARSE_INDEX_SCHEMA",
     "SparseBuild",
     "SparseIndex",
     "SparseVector",
     "build_sparse_index",
+    "read_sparse_index",
     "sparse_dot",
+    "write_sparse_index",
 ]
 
 type SparseVector = tuple[tuple[int, float], ...]
 
+SPARSE_INDEX_SCHEMA = "zhrag-sparse-index-v1"
 _ANALYZE = char_ngram(2)
 _DEFAULT_PARAMS = BM25Params()
 _FINGERPRINT_SCHEMA = "zhrag-char-bigram-bm25-v1"
@@ -209,3 +215,59 @@ def sparse_dot(left: SparseVector, right: SparseVector) -> float:
         else:
             right_position += 1
     return math.fsum(products)
+
+
+def write_sparse_index(path: str | Path, index: SparseIndex) -> None:
+    """Persist the vocabulary and corpus statistics beside the collection.
+
+    Without this, querying a published collection would require the original
+    documents plus an identical re-chunking pass, because a query vector's term
+    indexes are only meaningful against the vocabulary the documents were encoded
+    with. The file is derived data and stays gitignored.
+    """
+    write_json(
+        path,
+        {
+            "schema": SPARSE_INDEX_SCHEMA,
+            "fingerprint": index.fingerprint,
+            "document_count": index.document_count,
+            "average_document_length": index.average_document_length,
+            "k1": index.params.k1,
+            "b": index.params.b,
+            "terms": list(index.terms),
+            "inverse_document_frequency": list(index.inverse_document_frequency),
+        },
+        indent=None,
+    )
+
+
+def read_sparse_index(path: str | Path) -> SparseIndex:
+    """Load a persisted vocabulary, rejecting anything written by other code."""
+    raw = read_json(path)
+    if not isinstance(raw, dict) or raw.get("schema") != SPARSE_INDEX_SCHEMA:
+        raise ValueError(f"{path}: not a {SPARSE_INDEX_SCHEMA} file")
+    missing = [
+        name
+        for name in (
+            "fingerprint",
+            "document_count",
+            "average_document_length",
+            "k1",
+            "b",
+            "terms",
+            "inverse_document_frequency",
+        )
+        if name not in raw
+    ]
+    if missing:
+        raise ValueError(f"{path}: sparse index is missing {', '.join(missing)}")
+    return SparseIndex(
+        terms=tuple(str(term) for term in raw["terms"]),
+        inverse_document_frequency=tuple(
+            float(value) for value in raw["inverse_document_frequency"]
+        ),
+        document_count=int(raw["document_count"]),
+        average_document_length=float(raw["average_document_length"]),
+        params=BM25Params(k1=float(raw["k1"]), b=float(raw["b"])),
+        fingerprint=str(raw["fingerprint"]),
+    )

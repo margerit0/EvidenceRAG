@@ -74,9 +74,11 @@ def read_json(path: str | Path) -> Any:
     return json.loads(read_text(path))
 
 
-def write_json(path: str | Path, obj: Any, *, indent: int = 2) -> None:
+def write_json(path: str | Path, obj: Any, *, indent: int | None = 2) -> None:
     # ensure_ascii=False keeps Chinese readable in the artifact, which matters
-    # because eval results get committed and reviewed by humans.
+    # because eval results get committed and reviewed by humans. Machine-only
+    # artifacts (a 75k-term vocabulary) pass indent=None: one line per file is
+    # several times smaller and nobody reads it by eye anyway.
     write_text(path, json.dumps(obj, ensure_ascii=False, indent=indent, sort_keys=True) + "\n")
 
 

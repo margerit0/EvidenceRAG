@@ -67,7 +67,8 @@ uv run mypy                       # strict
 | `crud-rag-subset/eval-expanded/emb_cache_4096.jsonl` | 523 MB | `scripts/probe_mrl_quality.py`，5,681 篇 @4096 维 |
 | `crud-rag-subset/eval-expanded/emb_cache_queries_4096.jsonl` | 220 MB | 同上 + `scripts/embed_queries.py`，2,394 条 query（**独立缓存**：Qwen3 非对称，query 带 instruct 前缀、doc 不带） |
 | `tidb-rag-curated/documents/` | 6.6 MB | `tidb-rag-curated/download_curated.ps1` |
-| `indexes/tidb/{dense_cache.jsonl,milvus.db,state.json}` | 尚未生成 | `scripts/build_index.py --embed --publish`（**唯一付费步骤**；默认 `--dry-run` 不联网不写库） |
+| `indexes/tidb/dense_cache.jsonl` | 161 MB | `scripts/build_index.py --embed --publish`，1,832 chunks @4096 维（**唯一付费步骤**；默认 `--dry-run` 不联网不写库） |
+| `indexes/tidb/{sparse_index.json,state.json,milvus.db}` | 2.1 MB / 263 KB / — | 同上；词表随发布路径落盘，查询端按 `state.json` 的 fingerprint 校验后才启动 |
 
 **嵌入缓存已存在，所以维度消融重跑是免费的**（`dimensions=n` 实测就是前缀切片，
 全部维度档共用这一份 4096 维向量）。缓存按批 append，中断可续。

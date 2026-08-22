@@ -456,9 +456,21 @@ CRUD-RAG 上测出的 +6.06pp 不会因为换了语料就自动成立。
 所以默认 CI 不需要 API key、语料或原生依赖就能验证请求形状、融合顺序、失败边界与各阶段耗时。
 真实 Milvus Lite 的 schema / 两臂 / alias / 重开由 opt-in 的 `scripts/verify_milvus_store.py` 覆盖。
 
+**④ 词表必须跟着集合一起落盘。** 查询向量的 term index 只有在**构建文档时用的那份词表**下才有意义；
+换一份词表，内积就会打到恰好占着那些位置的词上——**排序静默出错，不报错**。所以发布路径会把
+vocabulary + IDF 写成 `sparse_index.json`，查询端加载后先比对 `state.json` 里的 fingerprint，不一致直接拒绝启动。
+（只有发布成功才写这个文件：否则查询端可能加载到一份没有任何在线集合与之对应的词表。）
+
 > **索引构建是先建后切。** `scripts/build_index.py` 把整批期望行写进一个带版本号的 shadow collection，
 > 校验行数与抽样回读之后才切 alias，最后才落盘成功状态；任何一步失败，线上 alias 与状态文件都不动。
-> 干跑（不联网、不写库）：450 篇 evergreen 文档 → **1,832 chunks**、**75,620** 个 bigram 词表。
+> **实际构建（2026-08-22）**：450 篇 evergreen 文档 → **1,832 chunks**、**75,620** 个 bigram 词表，
+> 1,832 条 4096 维向量、115 个批次、**零重试零错误**；重跑一次是 `unchanged=450`、`reusable=1,832/1,832`，
+> 零新增请求——幂等性由 chunk id 而非时间戳保证。
+>
+> 单条查询的端到端冒烟（`scripts/query_index.py`，「如何用 BR 做全量快照备份？」）：两臂各 100、重合 68、
+> 融合 132 个候选；重排把「快照备份使用指南 > 对集群进行快照备份」从融合第 17 位提到第 1 位。
+> 阶段耗时 encode 2.2s / search 1.0s / fuse 0.1ms / fetch 26ms / **rerank 11.8s**（100 篇一次请求）。
+> ⚠️ 这是**一条查询的观察**，不是延迟基准也不是质量证据——p50/p95/QPS 属于 M8，TiDB 上的检索质量尚未评测。
 
 ---
 
@@ -510,10 +522,11 @@ scripts/
   smoke_milvus_lite.py   Milvus Lite 在 Windows + Python 3.13 的冒烟测试
   verify_milvus_store.py 正式 store 的 Milvus Lite 集成校验（schema / 两臂 / alias / 重开）
   build_index.py         manifest → chunk → 稀疏重建 → shadow collection → alias 切换（默认干跑）
-tests/                   420 个单元测试
+  query_index.py         在线组合根：嵌入 + 词表 + Milvus alias + 重排，打印排序与各阶段耗时
+tests/                   423 个单元测试
 ```
 
-质量门禁：`pytest` 420 passed · `ruff check` 全通过 · `ruff format --check` 全通过 · `mypy --strict` 无告警。
+质量门禁：`pytest` 423 passed · `ruff check` 全通过 · `ruff format --check` 全通过 · `mypy --strict` 无告警。
 
 README 中每一个数字都由上述脚本生成，没有手工誊写。这不是洁癖：早期原型用固定 1.15 字符/token 估算，得出的 chunk 数与最终实现相差 2.4 倍；而最初那次 BM25 饱和实验是一次性脚本跑的、从未提交，导致 README 里的核心结论一度**无法被任何人复现**。
 

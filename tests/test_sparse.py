@@ -3,10 +3,21 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 
-from zhrag.lexical import BM25, BM25Params, build_sparse_index, char_ngram, sparse_dot
+from zhrag.io_utils import write_json
+from zhrag.lexical import (
+    BM25,
+    SPARSE_INDEX_SCHEMA,
+    BM25Params,
+    build_sparse_index,
+    char_ngram,
+    read_sparse_index,
+    sparse_dot,
+    write_sparse_index,
+)
 
 CORPUS = {
     "a": "TiDB 向量检索支持余弦距离。",
@@ -111,3 +122,40 @@ class TestBoundaries:
     def test_rejects_non_string_text(self) -> None:
         with pytest.raises(TypeError, match="texts"):
             build_sparse_index({"a": 1})  # type: ignore[dict-item]
+
+
+class TestPersistence:
+    def test_round_trip_preserves_query_encoding_exactly(self, tmp_path: Path) -> None:
+        build = build_sparse_index(CORPUS)
+        path = tmp_path / "sparse_index.json"
+        write_sparse_index(path, build.index)
+        loaded = read_sparse_index(path)
+
+        assert loaded == build.index
+        for query in ("向量检索", "TiDB 距离", "不存在词", ""):
+            assert loaded.encode_query(query) == build.index.encode_query(query)
+
+    def test_a_reloaded_index_still_reproduces_local_bm25(self, tmp_path: Path) -> None:
+        build = build_sparse_index(CORPUS)
+        path = tmp_path / "sparse_index.json"
+        write_sparse_index(path, build.index)
+        loaded = read_sparse_index(path)
+
+        local = BM25(analyzer=char_ngram(2)).index(list(CORPUS), list(CORPUS.values()))
+        expected = dict(local.search("向量检索", k=len(CORPUS)))
+        query = loaded.encode_query("向量检索")
+        for document_id in CORPUS:
+            got = sparse_dot(query, build.vector_for(document_id))
+            assert got == pytest.approx(expected.get(document_id, 0.0), abs=1e-12)
+
+    def test_rejects_foreign_and_incomplete_files(self, tmp_path: Path) -> None:
+        write_json(tmp_path / "other.json", {"schema": "something-else"})
+        with pytest.raises(ValueError, match=SPARSE_INDEX_SCHEMA):
+            read_sparse_index(tmp_path / "other.json")
+
+        write_json(
+            tmp_path / "partial.json",
+            {"schema": SPARSE_INDEX_SCHEMA, "terms": [], "fingerprint": "x"},
+        )
+        with pytest.raises(ValueError, match="missing"):
+            read_sparse_index(tmp_path / "partial.json")

@@ -41,7 +41,7 @@ from zhrag.ingest import (
     scope_fingerprint,
     write_state,
 )
-from zhrag.lexical import build_sparse_index
+from zhrag.lexical import build_sparse_index, write_sparse_index
 from zhrag.lexical.sparse import SparseBuild
 from zhrag.providers.embedding import EmbeddingClient, EmbeddingConfig, load_env, load_or_embed
 from zhrag.store import ChunkRecord, MilvusConfig, MilvusStore
@@ -225,6 +225,9 @@ def _build(
     finally:
         store.close()
 
+    # The vocabulary is written only on the publishing path: a query encoder must
+    # never be able to load a vocabulary that no live collection was built with.
+    write_sparse_index(args.artifacts / "sparse_index.json", sparse.index)
     _publish(args, planned, sparse, scope, collection_name)
     return 0
 
