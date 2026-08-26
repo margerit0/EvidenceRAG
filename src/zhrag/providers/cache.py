@@ -13,9 +13,12 @@ from zhrag.io_utils import append_jsonl, read_json, read_jsonl, write_json
 __all__ = [
     "PairScore",
     "append_pair_scores",
+    "load_cache_provenance",
     "load_pair_score_provenance",
     "load_pair_scores",
+    "prepare_cache_sidecar",
     "prepare_pair_score_cache",
+    "validate_cache_sidecar",
     "validate_pair_score_cache",
 ]
 
@@ -29,48 +32,79 @@ class PairScore:
     score: float
 
 
-def prepare_pair_score_cache(cache: Path, provenance: Mapping[str, object]) -> None:
-    """Create or validate the sidecar that makes cached scores reusable."""
+def prepare_cache_sidecar(
+    cache: Path,
+    provenance: Mapping[str, object],
+    *,
+    label: str,
+) -> None:
+    """Create or validate the sidecar that makes a cache reusable.
+
+    An append-only cache keyed by an id alone cannot tell which model, prompt or
+    settings produced a row. Reusing one after any of those changed mixes two
+    populations into one artifact and reports it as a single run, so the sidecar
+    is written once and every later run must match it exactly.
+    """
     expected = dict(provenance)
     sidecar = _sidecar(cache)
-    has_scores = cache.exists() and cache.stat().st_size > 0
+    has_rows = cache.exists() and cache.stat().st_size > 0
     if sidecar.exists():
         raw = read_json(sidecar)
         if not isinstance(raw, dict):
-            raise SystemExit(f"! malformed rerank cache metadata: {sidecar}")
+            raise SystemExit(f"! malformed {label} metadata: {sidecar}")
         if raw != expected:
-            if not has_scores:
+            if not has_rows:
                 write_json(sidecar, expected, indent=2)
                 return
             raise SystemExit(
-                f"! rerank cache metadata drift: {sidecar}\n  cached={raw}\n  current={expected}"
+                f"! {label} metadata drift: {sidecar}\n  cached={raw}\n  current={expected}"
             )
         return
-    if has_scores:
-        raise SystemExit(f"! refusing to adopt rerank cache without provenance: {cache}")
+    if has_rows:
+        raise SystemExit(f"! refusing to adopt {label} without provenance: {cache}")
     write_json(sidecar, expected, indent=2)
+
+
+def load_cache_provenance(cache: Path, *, label: str) -> dict[str, object]:
+    """Read an existing cache sidecar without creating or modifying it."""
+    sidecar = _sidecar(cache)
+    if not sidecar.exists():
+        raise SystemExit(f"! {label} provenance is absent: {sidecar}")
+    raw = read_json(sidecar)
+    if not isinstance(raw, dict):
+        raise SystemExit(f"! malformed {label} metadata: {sidecar}")
+    return raw
+
+
+def validate_cache_sidecar(
+    cache: Path,
+    provenance: Mapping[str, object],
+    *,
+    label: str,
+) -> None:
+    """Validate an existing cache sidecar without changing filesystem state."""
+    recorded = load_cache_provenance(cache, label=label)
+    expected = dict(provenance)
+    if recorded != expected:
+        raise SystemExit(
+            f"! {label} metadata drift: {_sidecar(cache)}\n"
+            f"  cached={recorded}\n  current={expected}"
+        )
+
+
+def prepare_pair_score_cache(cache: Path, provenance: Mapping[str, object]) -> None:
+    """Create or validate the sidecar that makes cached scores reusable."""
+    prepare_cache_sidecar(cache, provenance, label="rerank cache")
 
 
 def load_pair_score_provenance(cache: Path) -> dict[str, object]:
     """Read an existing score sidecar without creating or modifying it."""
-    sidecar = _sidecar(cache)
-    if not sidecar.exists():
-        raise SystemExit(f"! rerank cache provenance is absent: {sidecar}")
-    raw = read_json(sidecar)
-    if not isinstance(raw, dict):
-        raise SystemExit(f"! malformed rerank cache metadata: {sidecar}")
-    return raw
+    return load_cache_provenance(cache, label="rerank cache")
 
 
 def validate_pair_score_cache(cache: Path, provenance: Mapping[str, object]) -> None:
     """Validate an existing cache sidecar without changing filesystem state."""
-    recorded = load_pair_score_provenance(cache)
-    expected = dict(provenance)
-    if recorded != expected:
-        raise SystemExit(
-            f"! rerank cache metadata drift: {_sidecar(cache)}\n"
-            f"  cached={recorded}\n  current={expected}"
-        )
+    validate_cache_sidecar(cache, provenance, label="rerank cache")
 
 
 def load_pair_scores(cache: Path) -> dict[tuple[str, str], float]:

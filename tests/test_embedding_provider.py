@@ -30,9 +30,11 @@ from zhrag.providers.embedding import (
     EmbeddingClient,
     EmbeddingConfig,
     backoff_seconds,
+    load_embedding_provenance,
     load_env,
     load_or_embed,
     resolve_embeddings_url,
+    validate_embedding_cache,
 )
 
 CONFIG = EmbeddingConfig(url="https://relay.example/v1/embeddings", key="k", model="test-model")
@@ -375,6 +377,25 @@ class TestLoadOrEmbed:
 
 
 class TestCacheSidecar:
+    def test_read_only_validation_loads_exact_model_and_prompt(self, tmp_path: Path) -> None:
+        cache = tmp_path / "c.jsonl"
+        write_json(cache.with_suffix(".jsonl.meta.json"), {"model": "m", "prompt": "P:"})
+
+        assert load_embedding_provenance(cache) == {"model": "m", "prompt": "P:"}
+        validate_embedding_cache(cache, model="m", prompt="P:")
+
+    def test_read_only_validation_rejects_absent_or_drifted_provenance(
+        self, tmp_path: Path
+    ) -> None:
+        cache = tmp_path / "c.jsonl"
+        with pytest.raises(SystemExit, match="provenance is absent"):
+            validate_embedding_cache(cache, model="m", prompt="")
+        assert not cache.with_suffix(".jsonl.meta.json").exists()
+
+        write_json(cache.with_suffix(".jsonl.meta.json"), {"model": "m", "prompt": "old"})
+        with pytest.raises(SystemExit, match="different settings"):
+            validate_embedding_cache(cache, model="m", prompt="new")
+
     def test_a_model_switch_is_refused_rather_than_silently_mixed(self, tmp_path: Path) -> None:
         """The killer case: vectors are keyed on id alone, so a changed
         Embedding_MODEL_NAME would serve the previous model's output and every

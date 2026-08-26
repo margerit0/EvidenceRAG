@@ -1,10 +1,20 @@
 from zhrag.providers.cache import (
     PairScore,
     append_pair_scores,
+    load_cache_provenance,
     load_pair_score_provenance,
     load_pair_scores,
+    prepare_cache_sidecar,
     prepare_pair_score_cache,
+    validate_cache_sidecar,
     validate_pair_score_cache,
+)
+from zhrag.providers.chat import (
+    REASONING_EFFORTS,
+    ChatClient,
+    ChatConfig,
+    ChatReply,
+    resolve_chat_url,
 )
 from zhrag.providers.embedding import (
     QUERY_PROMPT,
@@ -12,9 +22,11 @@ from zhrag.providers.embedding import (
     EmbeddingClient,
     EmbeddingConfig,
     backoff_seconds,
+    load_embedding_provenance,
     load_env,
     load_or_embed,
     resolve_embeddings_url,
+    validate_embedding_cache,
 )
 from zhrag.providers.rerank import (
     DEFAULT_RERANK_INSTRUCTION,
@@ -28,7 +40,11 @@ from zhrag.providers.rerank import (
 __all__ = [
     "DEFAULT_RERANK_INSTRUCTION",
     "QUERY_PROMPT",
+    "REASONING_EFFORTS",
     "BatchEmbedder",
+    "ChatClient",
+    "ChatConfig",
+    "ChatReply",
     "EmbeddingClient",
     "EmbeddingConfig",
     "PairScore",
@@ -38,12 +54,18 @@ __all__ = [
     "append_pair_scores",
     "backoff_seconds",
     "estimate_rerank_tokens",
+    "load_cache_provenance",
+    "load_embedding_provenance",
     "load_env",
     "load_or_embed",
     "load_pair_score_provenance",
     "load_pair_scores",
+    "prepare_cache_sidecar",
     "prepare_pair_score_cache",
+    "resolve_chat_url",
     "resolve_embeddings_url",
     "resolve_rerank_url",
+    "validate_cache_sidecar",
+    "validate_embedding_cache",
     "validate_pair_score_cache",
 ]

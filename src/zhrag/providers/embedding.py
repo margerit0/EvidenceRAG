@@ -49,9 +49,11 @@ __all__ = [
     "EmbeddingConfig",
     "backoff_seconds",
     "explain_http_error",
+    "load_embedding_provenance",
     "load_env",
     "load_or_embed",
     "resolve_embeddings_url",
+    "validate_embedding_cache",
 ]
 
 #: Asymmetric by design. Qwen3's document prompt is the empty string; adding a
@@ -238,6 +240,38 @@ class BatchEmbedder(Protocol):
 
 def _meta_path(cache: Path) -> Path:
     return cache.with_suffix(cache.suffix + ".meta.json")
+
+
+def load_embedding_provenance(cache: Path) -> dict[str, object]:
+    """Read an embedding cache's model/prompt sidecar without modifying it."""
+    meta = _meta_path(cache)
+    if not meta.exists():
+        raise SystemExit(f"! embedding cache provenance is absent: {meta}")
+    try:
+        recorded = read_json(meta)
+    except ValueError as exc:
+        raise SystemExit(f"! {meta.name} is not readable JSON: {exc}") from exc
+    if not isinstance(recorded, dict):
+        raise SystemExit(f"! {meta.name} should hold a JSON object, found {type(recorded)}.")
+    return recorded
+
+
+def validate_embedding_cache(cache: Path, *, model: str, prompt: str) -> None:
+    """Validate an existing embedding cache without adopting or changing it."""
+    recorded = load_embedding_provenance(cache)
+    expected = {"model": model, "prompt": prompt}
+    drift = [
+        (key, recorded.get(key), value)
+        for key, value in expected.items()
+        if recorded.get(key) != value
+    ]
+    if drift:
+        detail = "; ".join(f"{key}: cache has {was!r}, expected {now!r}" for key, was, now in drift)
+        raise SystemExit(
+            f"! {cache.name} was written under different settings.\n"
+            f"  {detail}\n"
+            "  Read-only evaluation cannot adopt or rewrite embedding provenance."
+        )
 
 
 def _check_or_write_meta(cache: Path, model: str, prompt: str, log: Callable[[str], None]) -> None:

@@ -13,10 +13,12 @@ import pytest
 
 from zhrag.io_utils import (
     append_jsonl,
+    exclusive_lock,
     read_json,
     read_jsonl,
     read_text,
     read_yaml,
+    replace_files,
     write_json,
     write_jsonl,
     write_text,
@@ -24,6 +26,55 @@ from zhrag.io_utils import (
 from zhrag.tokens import cjk_ratio, estimate_tokens
 
 CHINESE = "向量搜索：使用 `tiup cluster deploy` 部署 TiDB 集群。—— 全角标点／测试"
+
+
+class TestExclusiveLock:
+    def test_refuses_a_second_writer_and_cleans_up(self, tmp_path: Path) -> None:
+        lock = tmp_path / "build.lock"
+        with exclusive_lock(lock):
+            assert lock.exists()
+            with pytest.raises(SystemExit, match="another writer"), exclusive_lock(lock):
+                raise AssertionError("unreachable")
+        assert not lock.exists()
+
+    def test_cleans_up_after_an_exception(self, tmp_path: Path) -> None:
+        lock = tmp_path / "build.lock"
+        with pytest.raises(RuntimeError, match="boom"), exclusive_lock(lock):
+            raise RuntimeError("boom")
+        assert not lock.exists()
+
+
+class TestReplaceFiles:
+    def test_replaces_a_bundle_in_order(self, tmp_path: Path) -> None:
+        first = tmp_path / "first.tmp"
+        marker = tmp_path / "marker.tmp"
+        write_text(first, "new data")
+        write_text(marker, "new marker")
+        data_target = tmp_path / "data.jsonl"
+        marker_target = tmp_path / "report.json"
+        write_text(data_target, "old data")
+        write_text(marker_target, "old marker")
+
+        replace_files(((first, data_target), (marker, marker_target)))
+
+        assert read_text(data_target) == "new data"
+        assert read_text(marker_target) == "new marker"
+        assert not first.exists()
+        assert not marker.exists()
+
+    def test_validates_every_staged_file_before_replacing_any(self, tmp_path: Path) -> None:
+        present = tmp_path / "present.tmp"
+        missing = tmp_path / "missing.tmp"
+        first_target = tmp_path / "first.json"
+        second_target = tmp_path / "second.json"
+        write_text(present, "new")
+        write_text(first_target, "old")
+
+        with pytest.raises(FileNotFoundError, match=r"missing\.tmp"):
+            replace_files(((present, first_target), (missing, second_target)))
+
+        assert read_text(first_target) == "old"
+        assert present.exists()
 
 
 class TestAppendJsonl:
