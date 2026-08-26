@@ -26,7 +26,7 @@
 | **embedding** | **Qwen/Qwen3-Embedding-8B** @ One Hub relay；本地保留 4096 维缓存，部署候选为 MRL 1024 维 | 已实测 4096→1024 的 R@1 仅 −0.50pp、Holm p=0.684，存储降 75%；中转站行为与 SiliconFlow 不能混用 | Qwen3-Embedding-4B。改选条件：有可用 endpoint 后，在相同语料与 query 上做配对检验，而不是引用 C-MTEB 的跨模型点估计 |
 | **rerank** | **Qwen/Qwen3-Reranker-8B** @ One Hub relay，传 `instruction`，部署窗口候选 **top-50** | 已在冻结的 dense-4096 hybrid 上完成 top-50/100 分层消融：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp（p=1.32e−09）；top-100 未显著优于 top-50 | 4B 对照取消：当前中转站不提供。若换 provider，必须新建独立 fingerprint/cache，不能与现有 8B 分数混用 |
 | **LLM（生成）** | Qwen 系（你已有 key） | 与 embedding/rerank 同族，叙事一致 | — |
-| **LLM（评判）** | **DeepSeek-V3 类 或 Kimi**，必须≠生成模型 | 自偏好偏差已被因果证实（GPT-4 自评胜率 +10%，Claude-v1 +25%；Panickssery et al. 2404.13076 证明自我识别能力与自偏好强度线性相关）。deepeval 内置 `deepseek_model.py` / `kimi_model.py` | 任一非 Qwen 家族强中文模型 |
+| **LLM（评判）** | 当前 TiDB pooled qrels：与 QG 相同的 `gpt-5.6-sol`、`reasoning_effort=high`；未来生成侧对比实验仍要求独立 judge | 本轮可用配置只有同一请求模型，因此报告明确写 **self-agreement / synthetic labels**，不冒充独立复核；若要提升标签可信度，应在冻结 pool 上补不同模型复判或人工校准 | DeepSeek-V3 类或 Kimi 等非生成模型；切换后必须新建 provenance/cache，不与现有判断混用 |
 | **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,832，p50 371，p90 734，欠长块 5.0%，代码块破损 0 | 必须补跑 256/400/800 sweep 出曲线（验证分块目标的选择依据） |
 | **检索管线** | dense(4096/1024, HNSW, COSINE) + sparse(char-bigram BM25, **IP**) 双字段 → 服务端 `hybrid_search` + `RRFRanker` → 客户端 Qwen3-Reranker-8B 重排 top-50 | 三段式，每段可单独消融；top-50 由 top-100 未检出额外收益的实测决定 | **WeightedRanker 是必测项而非备选**：离线实测等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），加权 0.3/0.7 才显著（16 胜 4 负，p=0.047）。反过来 `RRFRanker` 的 **k 几乎不影响结果**（60→10 只动 0.1pp），不值得占消融表一列。Qdrant 的 dbsf 仍可作对照 |
 | **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | Milvus 内置 `chinese` analyzer 就是 jieba，且默认 `mode="search"` = `cut_for_search`——正是你实测最差的 73.4%，比 char bigram 的 75.9% 低 2.5 分。**开服务端分词器会让系统变差**。另外可绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的坑 | 无（这是本项目最有说服力的设计决策之一） |
@@ -179,19 +179,24 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 
 **核心原则：CRUD-RAG 是尺子，TiDB 是产品。尺子上调参，产品上展示，两者数据永不混流。**
 
-| | `crud-rag-subset`（5,681 篇干扰语料） | `tidb-rag-curated`（500 篇 / 450 篇入库 / 1,832 chunks） |
+<!-- BEGIN TIDB-CORPUS-EVAL-STATUS -->
+| | `crud-rag-subset`（5,681 篇干扰语料） | `tidb-rag-curated`（450 篇 / 450 篇入库 / 1,832 chunks） |
 |---|---|---|
-| **角色** | **评测集**——所有数字来源 | **部署集**——公网 demo 与工程化能力展示 |
-| **有无 gold label** | 有（`evidence_document_id`，免费） | 无 |
-| **在它上面调什么** | 检索配置：analyzer、fusion 权重、rerank 深度、MRL 维度 | **什么都不调** |
-| **在它上面测什么** | R@1 / MRR@10 / nDCG@10 / ALL-gold@10 + paired bootstrap | 端到端 p50/p95/p99 延迟、QPS、增量重建、alias 原子换索引、Bad Case 归因 |
+| **角色** | **探索性检索 benchmark**——现有消融数字来源 | **部署集 + 合成 pooled qrels**——公网 demo 与域内评测输入 |
+| **有无 gold label** | 有上游 `evidence_document_id` | **无上游人工 gold**；已有 direct/paraphrase QG、四系统 pooling、rank-blinded LLM judge 形成的合成 qrels |
+| **在它上面调什么** | 已探索 analyzer、fusion 权重、rerank 深度、MRL 维度 | 当前冻结配置，不用这批 query 反向调参；若要调，先拆 dev/test 或明确为探索性 |
+| **在它上面测什么** | R@1 / MRR@10 / nDCG@10 / ALL-gold@10 + 配对检验 | 待生成系统级指标、direct/paraphrase 与词面重叠分层；另测延迟/QPS/重建 |
+
+当前 TiDB qrels 覆盖 490 个 pair / 980 条 query / 24,525 个 pooled candidates。
+四条冻结 run 的 top-1/top-10 候选均已判断，但 **100% judged coverage 不是 100% retrieval quality**；在系统级指标与 95% CI / 配对检验产出前，不从覆盖率推导质量结论。
+<!-- END TIDB-CORPUS-EVAL-STATUS -->
 
 ### 怎么避免看起来像过拟合
 
 1. **配置冻结点写死**：README 明确写「所有超参在 CRUD-RAG 5,681 文档评测集上选定，选定后冻结，原样部署到 TiDB 语料，未在 TiDB 上做任何调参」。这句话本身就是方法论声明。
 2. **dev/test 边界必须按事实描述**：早期计划是 1doc(800) 做 dev、2docs+3docs 只最终上报，但后续 arity 分层、RRF 审计与 rerank 深度消融已经查看了全部 2,394 条。现有数字因此是**探索性 benchmark 结果，不是未触碰的 test 泛化估计**；发布前若要声称泛化，必须另建 held-out split 或外部语料，不能继续沿用这条已失效的计划。
 3. **报告置信区间**：**消融表每一行带 95% CI，配置间差异带 p 值与 win/loss**。✅ `paired_bootstrap_test` 已于 2026-08-19 审计（详见 §13）：配对重采样 query、单尾、Holm 已实现；另修了蒙特卡洛分辨率下界与 `observed<=0` 的保守短路，并为二元指标加了精确 McNemar。**一个带 CI 与 win/loss 的 +1.2pt 是工程结论；一个裸的 +1.2pt 是噪声** —— 本项目的 dense vs BM25 正是「裸看 +2.1pt 像结论、配对检验后是噪声」的实例。
-4. **TiDB 侧只报无标注可测的量**：延迟、吞吐、chunk 分布、代码块完整率、增量重建的 `{added, updated, deleted, skipped}` 计数。**不要在 TiDB 上编造检索指标**。
+4. **TiDB 侧按标签来源限定结论**：无标注量继续报告延迟、吞吐、chunk 分布、代码块完整率与增量重建计数；合成 pooled qrels 可用于域内系统指标，但必须显式标为合成标签，并与上游人工 gold 隔离。**不要把 judged coverage 写成质量，也不要把合成 qrels 写成人工标注。**
 5. **两个语料及其派生物都不入库**：`.gitignore` 覆盖语料目录，向量、chunk、rerank pair score 与可能复述原文的 QG 输出同样不得提交；许可边界记录在 `DATA_LICENSE.md`。
 
 ---
@@ -296,7 +301,7 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 
 ### 6.3 LLM-judge 设计
 
-- **判官 ≠ 生成模型**（Qwen 生成 → DeepSeek/Kimi 评判）。
+- **区分两条 judge 链路**：当前 TiDB pooled qrels 的生成、验证与相关性判断都由已配置的 `gpt-5.6-sol` 完成，必须标为同模型 self-agreement 与合成标签；M9 的生成侧系统对比仍要求判官 ≠ 被评估生成模型（例如 Qwen 生成 → DeepSeek/Kimi 评判）。
 - **RAGQuestEval 自己重实现**（约 60 行）：question generation 用强模型跑**一次**并 commit 结果 JSON（CRUD-RAG 原实现按 `data_point['ID']` 缓存到 `{task}_quest_gt_save.json`），整个消融矩阵**只付一次 QG 的钱**；per-config 的 QA 步是受限抽取任务（「用一两个词或者非常简短的语句回答」，temperature=0.1，max_new_tokens=1280），中档模型足够。
 - **无法回答的哨兵字符串是 `无法推断`，做的是精确相等比较**。判官回「无法推断。」带句号就会被算作「答上了」，静默抬高 recall。**必须先归一化再比较，并记录近似哨兵的命中率**。
 - README 里写明 judge 模型 + temperature + 日期。judge drift 会无声地作废跨轮次对比。
@@ -321,7 +326,9 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 | **M0** | 仓库卫生 + CI | **1.0** | `.github/workflows/ci.yml`（ubuntu + windows 双 leg，windows 不设 PYTHONUTF8）；ruff 加 PLW1514；删除 `_research_*.py` / `_enc_test.txt`；`DATA_LICENSE.md` | CI 绿；ruff 0 error；测试通过率 100% |
 | **M1** | Protocol + registry + YAML config | **1.5** | `retrieval/base.py`（4 个 Protocol）、`registry.py`、`config.py`（pydantic-settings，`extra='forbid'`）、`experiments/*.yaml` | 现有 BM25 零改动通过 Protocol；1 条命令跑通 1 个 config |
 | **M2** | **Milvus store + provider 客户端 ✅ 2026-08-22** | **1.0** | ✅ `store/{base,milvus}.py`（vendor-neutral Protocol + 惰性导入的 pymilvus 适配器）；✅ `providers/{http,embedding,rerank,cache}.py`（One Hub/OpenAI-compatible transport、7 次长退避、严格响应校验、断点缓存与 provenance sidecar） | ✅ 适配器有 fake-client 契约测试（默认环境不 import pymilvus）；✅ 真实 Milvus Lite 集成通过 `scripts/verify_milvus_store.py`（schema 幂等、完整行 upsert、dense/sparse 两臂、fetch 定序、alias 切换、close 后重开）；`pymilvus==3.0.1` 收进可选 extra |
-| **M3** | **TiDB 全量索引 ✅ 2026-08-22** | **1.5** | ✅ `ingest.py` + `scripts/build_index.py` + `scripts/query_index.py`（manifest 校验、稳定 source key、chunk id = sha256(key, ordinal, contextual_text)、shadow collection + alias 切换、全局 sparse 重建并落盘词表、dense 按 chunk id 复用） | 450 篇 evergreen → **1,832 chunks** 已索引并发布（alias `tidb_chunks` → `tidb_chunks_v1`）：1,832 条 4096 维向量 / 115 批 / 零重试；重跑为 `unchanged=450`、`reusable=1,832/1,832`、零新增请求。端到端单查询冒烟通过（两臂各 100、重合 68、融合 132）。**TiDB 上的检索质量尚未评测**——没有 qrels，R@1/MRR 只在 CRUD-RAG 上有 |
+<!-- BEGIN M3-TIDB-EVAL-STATUS -->
+| **M3** | **TiDB 全量索引 + 合成 pooled qrels ✅ 2026-08-25** | **1.5** | ✅ `ingest.py` + `scripts/build_index.py` + `scripts/query_index.py`；✅ `scripts/build_tidb_{queries,pool,qrels}.py`（双表面 QG、四系统 pool、显式 finalize） | 450 篇 evergreen → **1,832 chunks** 已索引发布；合成评测集为 **490 pairs / 980 queries / 24,525 pooled candidates / 3,287 judge batches**。四系统 top-1/top-10 判断覆盖完整，但系统级指标尚待离线计算；无上游人工 gold |
+<!-- END M3-TIDB-EVAL-STATUS -->
 | **M4** | 混合检索 + RRF | ~~1.0~~ **0.5** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | **离线部分已完成 2026-08-19，分层于 2026-08-20 补齐**（`scripts/compare_dense_bm25.py` + `retrieval/fusion.py`）：1doc hybrid **79.9 / 0.881** vs BM25 75.9（p=1.6e-03，显著）vs dense 78.0（Holm p=0.231，不显著）；多证据上 dense 的完整证据召回更强，而同一 RRF 在 arity=3 ALL@10 比 dense 低 5.11pp。在线链路已用客户端精确 RRF 落地（`retrieval/online.py`，两臂各 100 → 本地 RRF k=10/depth=100）；M4 剩把融合搬进 Milvus 服务端并复现数字（服务端 tie 顺序与本地 doc-id tie-break 不保证一致，属优化路径而非默认精确路径） |
 | **M5** | **Rerank + 深度消融：离线部分 ✅ 2026-08-21** | **1.5** | ✅ `providers/rerank.py` + `providers/cache.py` + `eval/rerank.py` + `scripts/evaluate_rerank.py`；✅ 在线 stage 已接入 `retrieval/online.py`（**请求深度 100 / 应用深度 50** 分开建模） | 冻结 G（dense-4096 hybrid）统一评分 239,400 对：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp@50 / +7.41pp@100；arity=2 无显著增益；top-100 未显著胜 top-50。4B 对照因 provider 无模型而取消 |
 | **M6** | ~~MRL 消融（原创）~~ **✅ 已完成 2026-08-19** | ~~1.0~~ **0.3** | `scripts/probe_mrl_quality.py`：4096→64 七档 + 逐维方差 + 配对检验 | 存储 93.1 MB → 23.3 MB（1024 维）；**1024 维 −0.50pp 不显著（p=0.684），仅 64 维显著劣化 −4.25pp（Holm p=0.001†；蒙特卡洛地板标记）** |

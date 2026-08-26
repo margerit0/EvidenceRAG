@@ -2,10 +2,13 @@
 
 面向中文语料的检索增强生成系统。项目的核心不是"又一个 RAG demo"，而是**一套能真正区分配置优劣的评估框架**，以及在此之上用实测数据驱动的每一个工程决策。
 
-> **状态**：评估层、语料层、词法检索、稠密检索、MRL 降维消融、RRF 融合与离线 rerank 深度消融均已完成并有测试覆盖；
-> 在线链路（Milvus 存储适配器、两臂检索、客户端精确 RRF、重排编排、manifest 驱动的索引构建）已实现并通过真实 Milvus Lite 集成校验，
-> **TiDB 全量索引的付费嵌入与线上发布尚未执行**；服务端 `hybrid_search` 融合仍是待验证的优化路径。
+<!-- BEGIN TIDB-EVAL-STATUS -->
+> **状态**：评估层、语料层、词法/稠密检索、MRL、RRF 与离线 rerank 深度消融均已完成；
+> 在线检索链路已通过真实 Milvus Lite 校验，TiDB evergreen 索引也已付费嵌入并发布：
+> **450 篇文档 / 1,832 chunks**。另已构建 **490 组 direct/paraphrase、980 条 query** 的合成 pooled qrels；
+> 系统级 TiDB R@1 / MRR@10 / nDCG@10 尚未从该 qrels 计算，服务端 `hybrid_search` 融合仍是待验证的优化路径。
 > 下方所有数字均为本仓库脚本在真实语料上跑出的结果，非引用。
+<!-- END TIDB-EVAL-STATUS -->
 
 ---
 
@@ -470,7 +473,18 @@ vocabulary + IDF 写成 `sparse_index.json`，查询端加载后先比对 `state
 > 单条查询的端到端冒烟（`scripts/query_index.py`，「如何用 BR 做全量快照备份？」）：两臂各 100、重合 68、
 > 融合 132 个候选；重排把「快照备份使用指南 > 对集群进行快照备份」从融合第 17 位提到第 1 位。
 > 阶段耗时 encode 2.2s / search 1.0s / fuse 0.1ms / fetch 26ms / **rerank 11.8s**（100 篇一次请求）。
-> ⚠️ 这是**一条查询的观察**，不是延迟基准也不是质量证据——p50/p95/QPS 属于 M8，TiDB 上的检索质量尚未评测。
+> ⚠️ 这是**一条查询的观察**，不是延迟基准也不是质量证据——p50/p95/QPS 属于 M8；
+> TiDB 合成 qrels 已就绪，但系统级检索指标仍待从该 qrels 计算。
+
+<!-- BEGIN TIDB-EVAL-EVIDENCE -->
+> **TiDB 合成评测集（本地报告生成）**：从已发布的 1,832 个 chunk 中按主题确定性抽样 500 个，双阶段生成并验证后保留 490 个完整 pair（direct / paraphrase 各 490 条）。
+> 四条冻结 run 在两种表面形式上按系统 top-20 取并集，并强制纳入生成 chunk，得到 24,525 个 pair-candidate 判断槽（每 pair 23–74）。
+> rank-blinded、固定顺序的 LLM judge 共完成 3,287 个 batch；原始 grade 0/1/2 为 18,840/4,347/1,338。
+> 生成 chunk 与 grade 2 规则不一致 1/490（0.204%）。四系统 top-1/top-10 均达到 100% **已判断覆盖**。
+> **边界**：这些是同一请求模型完成生成、验证与相关性判断的合成 pooled labels，不是 TiDB 上游人工 gold；100% 表示候选已被判断，不是检索准确率。
+> 当前还没有系统质量表。若用这批 query 继续调参，必须另拆 dev/test，或把结果明确标为探索性。
+> 生成 chunk 是构题后由独立 verification pass 验证的证据；即使相关性 judge 给 0/1，发布 qrels 仍将其保留为 verified gold。pool 外文档保持未判断。
+<!-- END TIDB-EVAL-EVIDENCE -->
 
 ---
 
@@ -494,10 +508,14 @@ src/zhrag/
                          + Holm-Bonferroni 多重比较校正
     retrieval.py         共享的 BM25 / dense run 构造、嵌入缓存读取与逐查询指标
     rerank.py            rerank 窗口语义、覆盖检查、输入指纹与四个配对检验族
+    qgen.py              TiDB 分层抽样、双表面 QG、严格解析与双阶段验证
+    tidb_runs.py         冻结四系统 run、确定性排序、RRF 与 rerank 应用语义
+    pool.py              pair-level pooling、rank-blinded 判断顺序与 multi-gold qrels
   providers/
     http.py               One Hub JSON transport：显式 UA、长退避、Retry-After、隐私化错误
     embedding.py          共享嵌入客户端：配置 / 批缓存 / 模型与 prompt sidecar
     rerank.py             Qwen3 rerank 请求与完整响应校验
+    chat.py               LLM_* chat completion：高推理强度、JSON 与截断校验
     cache.py              忽略的 append-only 配对分数缓存 + provenance sidecar
   retrieval/
     fusion.py            RRF 融合（可加权、可指定融合深度）
@@ -523,10 +541,16 @@ scripts/
   verify_milvus_store.py 正式 store 的 Milvus Lite 集成校验（schema / 两臂 / alias / 重开）
   build_index.py         manifest → chunk → 稀疏重建 → shadow collection → alias 切换（默认干跑）
   query_index.py         在线组合根：嵌入 + 词表 + Milvus alias + 重排，打印排序与各阶段耗时
-tests/                   423 个单元测试
+  build_tidb_queries.py  分层抽样 → 生成 direct/paraphrase → 独立验证 → 发布 query pair
+  build_tidb_pool.py     冻结 BM25/dense/RRF/rerank runs 并构造 pair-level 判断池
+  build_tidb_qrels.py    rank-blinded 判断缓存；只有 --finalize 发布 qrels/report
+  sync_tidb_eval_docs.py 校验本地聚合报告/JUnit 并同步 tracked 文档（支持 --check）
+<!-- BEGIN QUALITY-GATE-STATUS -->
+tests/                   612 个单元测试
 ```
 
-质量门禁：`pytest` 423 passed · `ruff check` 全通过 · `ruff format --check` 全通过 · `mypy --strict` 无告警。
+质量门禁：`pytest` 612 passed · `ruff check` 全通过 · `ruff format --check` 全通过 · `mypy --strict` 无告警。
+<!-- END QUALITY-GATE-STATUS -->
 
 README 中每一个数字都由上述脚本生成，没有手工誊写。这不是洁癖：早期原型用固定 1.15 字符/token 估算，得出的 chunk 数与最终实现相差 2.4 倍；而最初那次 BM25 饱和实验是一次性脚本跑的、从未提交，导致 README 里的核心结论一度**无法被任何人复现**。
 
@@ -612,6 +636,20 @@ uv run python scripts/evaluate_rerank.py                         # dry-run：先
 uv run python scripts/evaluate_rerank.py --score --max-queries 1 # 付费 smoke
 uv run python scripts/evaluate_rerank.py --score                 # 仅补齐缺失 query
 uv run python scripts/evaluate_rerank.py --analyze --resamples 100000
+
+# 9. TiDB 合成评测集。无 flag 都是离线计划/状态检查；付费步骤必须显式开启。
+uv run python scripts/build_tidb_queries.py                       # 计划 QG，不调用 chat
+uv run python scripts/build_tidb_queries.py --generate            # 付费生成 + 验证，可续跑
+uv run python scripts/build_tidb_pool.py                           # 离线状态/构池（缓存须完整）
+uv run python scripts/build_tidb_pool.py --embed --rerank          # 仅补齐付费缓存
+uv run python scripts/build_tidb_qrels.py                          # 只检查，不发布
+uv run python scripts/build_tidb_qrels.py --judge                  # 只补判断 cache，不发布
+uv run python scripts/build_tidb_qrels.py --finalize               # 离线显式发布 qrels/report
+
+# 10. 文档中的 TiDB 聚合状态和测试数来自本地报告，不手工誊抄。
+uv run pytest --junitxml=indexes/tidb/eval/pytest.xml
+uv run python scripts/sync_tidb_eval_docs.py
+uv run python scripts/sync_tidb_eval_docs.py --check
 ```
 
 第 6 步把 4096 维文档向量缓存到 `eval-expanded/emb_cache_4096.jsonl`（当前约 523 MB，

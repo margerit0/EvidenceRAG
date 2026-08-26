@@ -60,15 +60,25 @@ uv run mypy                       # strict
 
 ## 已在磁盘上的派生产物（gitignored，新机器需重建）
 
+<!-- BEGIN TIDB-LOCAL-ARTIFACTS -->
 | 路径 | 大小 | 怎么来的 |
-|---|---|---|
+| --- | --- | --- |
 | `crud-rag-subset/raw/split_merged.json` | 26 MB | `crud-rag-subset/build_subset.ps1` |
 | `crud-rag-subset/eval-expanded/{corpus,qrels}.jsonl` | 11 MB | `scripts/build_eval_corpus.py`（不联网） |
 | `crud-rag-subset/eval-expanded/emb_cache_4096.jsonl` | 523 MB | `scripts/probe_mrl_quality.py`，5,681 篇 @4096 维 |
-| `crud-rag-subset/eval-expanded/emb_cache_queries_4096.jsonl` | 220 MB | 同上 + `scripts/embed_queries.py`，2,394 条 query（**独立缓存**：Qwen3 非对称，query 带 instruct 前缀、doc 不带） |
+| `crud-rag-subset/eval-expanded/emb_cache_queries_4096.jsonl` | 220 MB | 同上 + `scripts/embed_queries.py`，2,394 条 query（独立 prompt） |
 | `tidb-rag-curated/documents/` | 6.6 MB | `tidb-rag-curated/download_curated.ps1` |
-| `indexes/tidb/dense_cache.jsonl` | 161 MB | `scripts/build_index.py --embed --publish`，1,832 chunks @4096 维（**唯一付费步骤**；默认 `--dry-run` 不联网不写库） |
-| `indexes/tidb/{sparse_index.json,state.json,milvus.db}` | 2.1 MB / 263 KB / — | 同上；词表随发布路径落盘，查询端按 `state.json` 的 fingerprint 校验后才启动 |
+| `indexes/tidb/dense_cache.jsonl` | 161 MB | `scripts/build_index.py --embed --publish`，1,832 chunks（付费） |
+| `indexes/tidb/{sparse_index.json,state.json,milvus.db}` | 2.1 MB / 263 KB / — | 同上；发布词表、状态与本地库 |
+| `indexes/tidb/eval/{generation,verification}_cache.jsonl` 等 | — | `scripts/build_tidb_queries.py --generate/--verify`；490 pairs / 980 queries（付费 chat） |
+| `indexes/tidb/eval/query_embeddings_4096.jsonl` | — | `scripts/build_tidb_pool.py --embed`（付费 embedding） |
+| `indexes/tidb/eval/rerank_scores_top100.jsonl` | — | `scripts/build_tidb_pool.py --rerank`（付费 rerank） |
+| `indexes/tidb/eval/{runs,pool}.jsonl`、`pool_report.json` | — | `scripts/build_tidb_pool.py`；24,525 slots（离线） |
+| `indexes/tidb/eval/judging_cache.jsonl` | — | `scripts/build_tidb_qrels.py --judge`；3,287 batches（付费） |
+| `indexes/tidb/eval/qrels.jsonl`、`qrels_report.json` | — | `scripts/build_tidb_qrels.py --finalize`；980 qrels（离线） |
+
+以上全部是本地输入或派生产物，均不得提交。TiDB 链路的付费步骤不止索引 embedding：还包括 QG/验证、query embedding、rerank 与 qrels judging；缓存完整后的 pool、finalize、指标计算和文档同步才是离线步骤。
+<!-- END TIDB-LOCAL-ARTIFACTS -->
 
 **嵌入缓存已存在，所以维度消融重跑是免费的**（`dimensions=n` 实测就是前缀切片，
 全部维度档共用这一份 4096 维向量）。缓存按批 append，中断可续。
