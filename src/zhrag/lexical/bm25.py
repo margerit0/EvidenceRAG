@@ -55,13 +55,20 @@ class BM25:
             raise ValueError(f"doc_ids ({len(doc_ids)}) and texts ({len(texts)}) differ in length")
         if not doc_ids:
             raise ValueError("cannot index an empty corpus")
+        if len(set(doc_ids)) != len(doc_ids):
+            raise ValueError("doc_ids must be unique")
+        if any(not isinstance(doc_id, str) or not doc_id for doc_id in doc_ids):
+            raise ValueError("doc_ids must be non-empty strings")
+        if any(not isinstance(text, str) for text in texts):
+            raise TypeError("texts must be strings")
 
-        self._doc_ids = list(doc_ids)
+        order = sorted(range(len(doc_ids)), key=lambda index: doc_ids[index])
+        self._doc_ids = [doc_ids[index] for index in order]
         self._postings = defaultdict(list)
         self._lengths = []
 
-        for i, text in enumerate(texts):
-            tf = Counter(self.analyzer(text))
+        for i, index in enumerate(order):
+            tf = Counter(self.analyzer(texts[index]))
             self._lengths.append(sum(tf.values()))
             for term, freq in tf.items():
                 self._postings[term].append((i, freq))
@@ -78,6 +85,10 @@ class BM25:
         """Return the top-``k`` ``(doc_id, score)`` pairs, highest score first."""
         if not self._doc_ids:
             raise RuntimeError("index() must be called before search()")
+        if not isinstance(query, str):
+            raise TypeError("query must be a string")
+        if isinstance(k, bool) or not isinstance(k, int) or k < 1:
+            raise ValueError("k must be a positive integer")
 
         k1, b = self.params.k1, self.params.b
         scores: dict[int, float] = defaultdict(float)
@@ -91,7 +102,7 @@ class BM25:
                 norm = 1 - b + b * self._lengths[doc] / self._avgdl
                 scores[doc] += idf * (freq * (k1 + 1)) / (freq + k1 * norm)
 
-        top = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:k]
+        top = sorted(scores.items(), key=lambda kv: (-kv[1], self._doc_ids[kv[0]]))[:k]
         return [(self._doc_ids[doc], score) for doc, score in top]
 
     @property

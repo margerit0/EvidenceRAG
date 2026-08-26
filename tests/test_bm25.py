@@ -64,6 +64,15 @@ class TestSearch:
         twice = dict(index.search("向量 向量", k=4))
         assert once == twice
 
+    def test_equal_scores_break_on_document_id_not_input_order(self) -> None:
+        index = BM25().index(["z", "a"], ["相同文本", "相同文本"])
+        assert [doc_id for doc_id, _ in index.search("相同", k=2)] == ["a", "z"]
+
+    @pytest.mark.parametrize("k", [0, -1])
+    def test_rejects_non_positive_k(self, index: BM25, k: int) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            index.search("向量", k=k)
+
 
 class TestIndexLifecycle:
     def test_search_before_index_is_an_error(self) -> None:
@@ -77,6 +86,10 @@ class TestIndexLifecycle:
     def test_rejects_length_mismatch(self) -> None:
         with pytest.raises(ValueError, match="differ in length"):
             BM25().index(["a"], ["x", "y"])
+
+    def test_rejects_duplicate_document_ids(self) -> None:
+        with pytest.raises(ValueError, match="unique"):
+            BM25().index(["a", "a"], ["x", "y"])
 
     def test_reports_size_and_vocabulary(self, index: BM25) -> None:
         assert len(index) == 4

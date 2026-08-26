@@ -316,3 +316,17 @@ class TestFingerprints:
     def test_input_hash_rejects_a_missing_candidate_document(self) -> None:
         with pytest.raises(ValueError, match="absent"):
             rerank_input_fingerprint([_query()], [["missing"]], {}, depth=1)
+
+    def test_fingerprints_reject_duplicate_candidate_prefixes(self) -> None:
+        query = _query()
+        with pytest.raises(ValueError, match="duplicate"):
+            candidate_run_fingerprint([query], [["a", "a"]], depth=2)
+        with pytest.raises(ValueError, match="duplicate"):
+            rerank_input_fingerprint([query], [["a", "a"]], {"a": "text"}, depth=2)
+
+    @pytest.mark.parametrize("depth", [0, -1])
+    def test_fingerprints_reject_non_positive_depth(self, depth: int) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            candidate_run_fingerprint([_query()], [["a"]], depth=depth)
+        with pytest.raises(ValueError, match="positive"):
+            rerank_input_fingerprint([_query()], [["a"]], {"a": "text"}, depth=depth)

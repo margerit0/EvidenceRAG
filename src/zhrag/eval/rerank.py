@@ -185,18 +185,29 @@ def candidate_run_fingerprint(
     depth: int,
 ) -> str:
     """Hash ordered query ids and ordered candidate ids without corpus text."""
+    if isinstance(depth, bool) or not isinstance(depth, int) or depth < 1:
+        raise ValueError("depth must be a positive integer")
     if len(queries) != len(candidates):
         raise ValueError(f"query/candidate length mismatch: {len(queries)} vs {len(candidates)}")
     digest = hashlib.sha256()
     _update(digest, "zhrag-candidate-run-v1")
     _update(digest, str(depth))
+    seen_queries: set[str] = set()
     for query, run in zip(queries, candidates, strict=True):
+        if query.query_id in seen_queries:
+            raise ValueError(f"duplicate query id {query.query_id!r}")
+        seen_queries.add(query.query_id)
         if len(run) < depth:
             raise ValueError(
                 f"{query.query_id} has only {len(run)} candidates, fewer than depth={depth}"
             )
+        selected = run[:depth]
+        if len(set(selected)) != len(selected):
+            raise ValueError(f"{query.query_id}: candidate prefix contains duplicate ids")
         _update(digest, query.query_id)
-        for doc_id in run[:depth]:
+        for doc_id in selected:
+            if not isinstance(doc_id, str) or not doc_id:
+                raise ValueError(f"{query.query_id}: candidate id must be a non-empty string")
             _update(digest, doc_id)
     return digest.hexdigest()
 
@@ -209,23 +220,34 @@ def rerank_input_fingerprint(
     depth: int,
 ) -> str:
     """Hash every query/document text sent to the reranker in request order."""
+    if isinstance(depth, bool) or not isinstance(depth, int) or depth < 1:
+        raise ValueError("depth must be a positive integer")
     if len(queries) != len(candidates):
         raise ValueError(f"query/candidate length mismatch: {len(queries)} vs {len(candidates)}")
     digest = hashlib.sha256()
     _update(digest, "zhrag-rerank-input-v1")
     _update(digest, str(depth))
+    seen_queries: set[str] = set()
     for query, run in zip(queries, candidates, strict=True):
+        if query.query_id in seen_queries:
+            raise ValueError(f"duplicate query id {query.query_id!r}")
+        seen_queries.add(query.query_id)
         if len(run) < depth:
             raise ValueError(
                 f"{query.query_id} has only {len(run)} candidates, fewer than depth={depth}"
             )
+        selected = run[:depth]
+        if len(set(selected)) != len(selected):
+            raise ValueError(f"{query.query_id}: candidate prefix contains duplicate ids")
         _update(digest, query.query_id)
         _update(digest, query.question)
-        for doc_id in run[:depth]:
+        for doc_id in selected:
             try:
                 text = corpus[doc_id]
             except KeyError as exc:
                 raise ValueError(f"candidate {doc_id} is absent from the corpus") from exc
+            if not isinstance(text, str):
+                raise TypeError(f"candidate {doc_id} text is not a string")
             _update(digest, doc_id)
             _update(digest, text)
     return digest.hexdigest()

@@ -68,18 +68,34 @@ def load_embedding_matrix(
     returned missing-id list tells the caller whether an optional analysis can
     run; callers must not score the corresponding zero rows.
     """
+    if isinstance(width, bool) or not isinstance(width, int) or width < 1:
+        raise ValueError("width must be a positive integer")
+    if len(set(ids)) != len(ids) or any(
+        not isinstance(item_id, str) or not item_id for item_id in ids
+    ):
+        raise ValueError("embedding ids must be unique non-empty strings")
     position = {item_id: i for i, item_id in enumerate(ids)}
     matrix = np.zeros((len(ids), width), dtype=np.float32)
     seen: set[str] = set()
-    for row in read_jsonl(cache):
-        item_id = row["doc_id"]
+    for lineno, row in enumerate(read_jsonl(cache), 1):
+        item_id = row.get("doc_id")
+        if not isinstance(item_id, str) or not item_id:
+            raise SystemExit(f"! {cache.name}:{lineno}: malformed doc_id {item_id!r}")
         i = position.get(item_id)
         if i is None:
             continue
-        vector = row["embedding"]
+        vector = row.get("embedding")
+        if not isinstance(vector, list):
+            raise SystemExit(f"! {cache.name}:{lineno}: embedding is not an array")
         if len(vector) != width:
             raise SystemExit(f"! {cache.name}: {item_id} has width {len(vector)}, not {width}")
-        matrix[i] = vector
+        try:
+            values = np.asarray(vector, dtype=np.float32)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SystemExit(f"! {cache.name}:{lineno}: embedding is not numeric") from exc
+        if not np.all(np.isfinite(values)):
+            raise SystemExit(f"! {cache.name}:{lineno}: embedding contains non-finite values")
+        matrix[i] = values
         seen.add(item_id)
 
     missing = [item_id for item_id in ids if item_id not in seen]
@@ -109,20 +125,39 @@ def dense_runs(
     *,
     depth: int,
 ) -> list[list[str]]:
-    """Rank every query by cosine over already L2-normalised vectors."""
+    """Rank every query by cosine with a deterministic document-id tie-break.
+
+    ``argpartition`` alone chooses an arbitrary member when a score tie straddles
+    the requested cut-off, and its subsequent quicksort is not stable. Exact ties
+    are uncommon for dense floats but real for zero/OOV vectors and quantized
+    backends; allowing them to depend on array layout makes candidate pools drift
+    across corpus order and NumPy versions. Lexicographic sort on ``(-score,
+    doc_id)`` matches the lexical and RRF contracts and keeps the top-N boundary
+    reproducible.
+    """
+    if isinstance(depth, bool) or not isinstance(depth, int) or depth < 1:
+        raise ValueError("depth must be a positive integer")
+    if query_matrix.ndim != 2 or doc_matrix.ndim != 2:
+        raise ValueError("query and document matrices must be two-dimensional")
     if len(query_matrix) == 0:
         return []
     selected = min(depth, len(doc_ids))
     if selected < 1:
         raise ValueError("doc_ids must be non-empty")
+    if len(set(doc_ids)) != len(doc_ids):
+        raise ValueError("doc_ids must be unique")
+    if doc_matrix.shape[0] != len(doc_ids):
+        raise ValueError("doc_matrix row count does not match doc_ids")
+    if query_matrix.shape[1] != doc_matrix.shape[1]:
+        raise ValueError("query and document embedding widths differ")
+    if not np.all(np.isfinite(query_matrix)) or not np.all(np.isfinite(doc_matrix)):
+        raise ValueError("query and document matrices must contain only finite values")
     similarities = query_matrix @ doc_matrix.T
-    top = np.argpartition(-similarities, selected - 1, axis=1)[:, :selected]
-    ordered = np.take_along_axis(
-        top,
-        np.argsort(-np.take_along_axis(similarities, top, 1), axis=1),
-        1,
-    )
-    return [[doc_ids[i] for i in row] for row in ordered]
+    ids = np.asarray(doc_ids, dtype=object)
+    return [
+        [doc_ids[index] for index in np.lexsort((ids, -scores))[:selected]]
+        for scores in similarities
+    ]
 
 
 def per_query_metrics(
