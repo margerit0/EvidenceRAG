@@ -54,6 +54,7 @@ from zhrag.eval.metrics import (
     paired_bootstrap_test,
     recall_at_k,
 )
+from zhrag.eval.retrieval import prefix_l2_normalize
 from zhrag.io_utils import read_jsonl
 from zhrag.providers.embedding import (
     QUERY_PROMPT,
@@ -143,14 +144,6 @@ def _rank(
     return [[doc_ids[i] for i in row] for row in ordered]
 
 
-def _slice_matrix(matrix: NDArray[np.float32], dim: int) -> NDArray[np.float32]:
-    """Prefix slice + row-wise L2 renormalise -- Qwen3's own truncate_dim."""
-    if dim >= matrix.shape[1]:
-        return matrix
-    prefix = matrix[:, :dim]
-    return prefix / np.linalg.norm(prefix, axis=1, keepdims=True)
-
-
 def report_retrieval(
     doc_matrix: NDArray[np.float32],
     doc_ids: list[str],
@@ -172,7 +165,13 @@ def report_retrieval(
     per_query: dict[int, list[float]] = {}
 
     for dim in DIMS:
-        ranked = _rank(_slice_matrix(query_matrix, dim), _slice_matrix(doc_matrix, dim), doc_ids)
+        queries_at_dim = (
+            query_matrix if dim == query_matrix.shape[1] else prefix_l2_normalize(query_matrix, dim)
+        )
+        docs_at_dim = (
+            doc_matrix if dim == doc_matrix.shape[1] else prefix_l2_normalize(doc_matrix, dim)
+        )
+        ranked = _rank(queries_at_dim, docs_at_dim, doc_ids)
         pairs = list(zip(ranked, queries, strict=True))
         n = len(pairs)
         # Keep the per-query vector: the paired test needs the same queries in

@@ -229,21 +229,25 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 **行（最小可交付的 12 行）**：
 
 ```
-A. bm25-bigram          @5681, chunk=400, rerank=none      ← 基线，已有 75.9 / 0.857
-B. bm25-jieba-precise    @5681, chunk=400, rerank=none      ← 已有 74.8
-C. bm25-jieba-search     @5681, chunk=400, rerank=none      ← 已有 73.4
-D. dense-4096            @5681, chunk=400, rerank=none      ← ✅ 已测 78.0 / 0.866
-E. dense-1024 (MRL)      @5681, chunk=400, rerank=none      ← ✅ 已测 77.5 / 0.861（p=0.684，不显著劣于 D）
-F. dense-512  (MRL)      @5681, chunk=400, rerank=none      ← ✅ 已测 78.4 / 0.864（p=0.684）
-G. hybrid-rrf (A+D)      @5681, chunk=400, rerank=none      ← ✅ 已测（离线）79.9 / 0.881；vs A +4.00pp（p=1.6e-03，显著）；vs D +1.87pp（Holm p=0.231，不显著）
-G'. hybrid-rrf 加权 .3/.7 @5681, chunk=400, rerank=none     ← ✅ 已测（离线）79.5 / 0.878；vs D +1.50pp（16 胜 4 负，Holm p=0.047，全表唯一显著优于 D）
-H. hybrid-rrf (A+E)      @5681, chunk=400, rerank=none      ← 待跑：dense-1024 hybrid，必须与 G 分开命名
-I. G + rerank-8b@50      @5681, chunk=400                   ← ✅ 已测：按 arity 报告；当前部署候选
-J. G + rerank-8b@100     @5681, chunk=400                   ← ✅ 已测：未显著优于 I
+A. bm25-bigram          @5681, unit=document, chunk=N/A, rerank=none      ← 基线，已有 75.9 / 0.857
+B. bm25-jieba-precise    @5681, unit=document, chunk=N/A, rerank=none      ← 已有 74.8
+C. bm25-jieba-search     @5681, unit=document, chunk=N/A, rerank=none      ← 已有 73.4
+D. dense-4096            @5681, unit=document, chunk=N/A, rerank=none      ← ✅ 已测 78.0 / 0.866
+E. dense-1024 (MRL)      @5681, unit=document, chunk=N/A, rerank=none      ← ✅ 已测 77.5 / 0.861（p=0.684，不显著劣于 D）
+F. dense-512  (MRL)      @5681, unit=document, chunk=N/A, rerank=none      ← ✅ 已测 78.4 / 0.864（p=0.684）
+G. hybrid-rrf (A+D)      @5681, unit=document, chunk=N/A, rerank=none      ← ✅ 已测（离线）79.9 / 0.881；vs A +4.00pp（p=1.6e-03，显著）；vs D +1.87pp（Holm p=0.231，不显著）
+G'. hybrid-rrf 加权 .3/.7 @5681, unit=document, chunk=N/A, rerank=none     ← ✅ 已测（离线）79.5 / 0.878；vs D +1.50pp（16 胜 4 负，Holm p=0.047，全表唯一显著优于 D）
+H. hybrid-rrf (A+E)      @5681, unit=document, chunk=N/A, rerank=none      ← ✅ 已独立离线运行；结果见下方报告生成区
+I. G + rerank-8b@50      @5681, unit=document, chunk=N/A                   ← ✅ 已测：按 arity 报告；当前部署候选
+J. G + rerank-8b@100     @5681, unit=document, chunk=N/A                   ← ✅ 已测：未显著优于 I
 K. ~~4B vs 8B~~                                             ← ❌ 取消：中转站没有 4B（见 §4.5）
 L. H + rerank-8b@50      @5681, chunk=256 / 800             ← 待跑；先完成独立 H baseline 与 chunk sweep
-M. bm25-bigram           @500,  chunk=400, rerank=none      ← 饱和对照行，98.0 / 0.990
+M. bm25-bigram           @500,  unit=document, chunk=N/A, rerank=none      ← 饱和对照行，98.0 / 0.990
 ```
+
+<!-- BEGIN H-HYBRID-MRL1024-STATUS -->
+H（A+dense-1024）已独立离线完成：1doc R@1 **79.6% [76.8%, 82.4%]**、MRR@10 **0.878 [0.860, 0.894]**；同次重建的 G R@1 **79.9% [77.0%, 82.6%]**。efficacy / binary 5/12 reject；efficacy / continuous 7/12 reject；retention / binary 1/6 reject；retention / continuous 1/6 reject。H−G 是双尾 difference test，不是 non-inferiority/equivalence；I/J 仍绑定 dense-4096 的 G 与原 rerank cache。
+<!-- END H-HYBRID-MRL1024-STATUS -->
 
 > **D/E/F 已于 2026-08-19 实测完成**（`scripts/probe_mrl_quality.py`，800 条 1doc 查询）。
 > 三个结论改变了后续排期：
@@ -251,12 +255,13 @@ M. bm25-bigram           @500,  chunk=400, rerank=none      ← 饱和对照行�
 > 1. **dense 只比 BM25 高 2.1pp，且已证不显著**（78.0 vs 75.9；配对 95% CI [−0.88, +5.12]pp，
 >    McNemar 精确双尾 p = 0.199）。头条指标不能靠 dense 单臂 —— 但**融合的理由反而更硬了**：
 >    两臂 R@1 列联表 538 / 69 / 86 / 107，φ = 0.455，**并集 oracle 上限 86.6%**。G 行已把其中
->    4.00pp 兑现（对 A 显著）；I/J 已在 G 上完成，H 仍是独立的 1024 维后续实验。
+>    4.00pp 兑现（对 A 显著）；I/J 已在 G 上完成；H 已作为独立 1024 维实验运行，结果由上方
+>    `H-HYBRID-MRL1024-STATUS` 报告区生成。
 > 2. **M6（MRL 消融）实际已经做完**，且零 API 成本：1024 维 −0.50pp（p=0.684）、128 维 −1.00pp
 >    （p=0.521）、**只有 64 维显著劣化**（−4.25pp，Holm p=0.001†；† 表示 0/10,000
 >    零分布样本达到观测值的 add-one 蒙特卡洛地板，不是 `<` 上界）。存储 93.1 MB → 23.3 MB（−75%）。
-> 3. 因此 **E 而非 D 应作为未来 H 行的 dense 臂**：质量无显著差异，存储少 75%，索引与查询都更快。
->    但已完成的 I/J 付费实验明确建立在 G（dense-4096）上；不能事后把它们改名成 H。
+> 3. 因此 **E 而非 D 被用于独立 H 行的 dense 臂**：存储少 75%，H 的实际质量与配对检验由上方
+>    认证报告区生成。但已完成的 I/J 付费实验明确建立在 G（dense-4096）上；不能事后把它们改名成 H。
 
 **M 行必须存在，且和 A 行贴在一起。** 这是全篇最重要的排版决策——非技术筛选人看到孤零零的 75.9% 会当成退化。
 
@@ -329,7 +334,9 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 <!-- BEGIN M3-TIDB-EVAL-STATUS -->
 | **M3** | **TiDB 全量索引 + 合成 pooled qrels + 离线质量 ✅ 2026-08-26** | **1.5** | ✅ `ingest.py` + `scripts/build_index.py` + `scripts/query_index.py`；✅ `scripts/build_tidb_{queries,pool,qrels}.py`；✅ `evaluate_tidb_retrieval.py` | 450 篇 evergreen → **1,832 chunks**；**490 pairs / 980 queries / 24,525 pooled candidates**。overall binary nDCG@10：BM25 0.701 / dense 0.793 / RRF 0.796 / rerank 0.914；以 245 个 source cluster 为重采样单位的 95% CI + 两个预声明 4-test 双尾 source-cluster bootstrap/Holm family。无上游人工 gold；本地 exact RRF 不代表服务端 hybrid_search |
 <!-- END M3-TIDB-EVAL-STATUS -->
-| **M4** | 混合检索 + RRF | ~~1.0~~ **0.5** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | **离线部分已完成 2026-08-19，分层于 2026-08-20 补齐**（`scripts/compare_dense_bm25.py` + `retrieval/fusion.py`）：1doc hybrid **79.9 / 0.881** vs BM25 75.9（p=1.6e-03，显著）vs dense 78.0（Holm p=0.231，不显著）；多证据上 dense 的完整证据召回更强，而同一 RRF 在 arity=3 ALL@10 比 dense 低 5.11pp。在线链路已用客户端精确 RRF 落地（`retrieval/online.py`，两臂各 100 → 本地 RRF k=10/depth=100）；M4 剩把融合搬进 Milvus 服务端并复现数字（服务端 tie 顺序与本地 doc-id tie-break 不保证一致，属优化路径而非默认精确路径） |
+<!-- BEGIN H-HYBRID-MRL1024-M4 -->
+| **M4** | 混合检索 + RRF | ~~1.0~~ **0.5** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | **离线部分已完成 2026-08-19，分层于 2026-08-20 补齐**（`scripts/compare_dense_bm25.py` + `retrieval/fusion.py`）：1doc hybrid **79.9 / 0.881** vs BM25 75.9（p=1.6e-03，显著）vs dense 78.0（Holm p=0.231，不显著）；多证据上 dense 的完整证据召回更强，而同一 RRF 在 arity=3 ALL@10 比 dense 低 5.11pp。在线链路已用客户端精确 RRF 落地（`retrieval/online.py`，两臂各 100 → 本地 RRF k=10/depth=100）；H（A+dense-1024）已独立离线运行：1doc R@1 **79.6% [76.8%, 82.4%]** / MRR@10 **0.878 [0.860, 0.894]**，同次重建的 G R@1 **79.9% [77.0%, 82.6%]**。H−G 只作双尾 difference test，I/J 仍绑定 G；M4 剩把融合搬进 Milvus 服务端并复现数字（服务端 tie 顺序与本地 doc-id tie-break 不保证一致，属优化路径而非默认精确路径） |
+<!-- END H-HYBRID-MRL1024-M4 -->
 | **M5** | **Rerank + 深度消融：离线部分 ✅ 2026-08-21** | **1.5** | ✅ `providers/rerank.py` + `providers/cache.py` + `eval/rerank.py` + `scripts/evaluate_rerank.py`；✅ 在线 stage 已接入 `retrieval/online.py`（**请求深度 100 / 应用深度 50** 分开建模） | 冻结 G（dense-4096 hybrid）统一评分 239,400 对：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp@50 / +7.41pp@100；arity=2 无显著增益；top-100 未显著胜 top-50。4B 对照因 provider 无模型而取消 |
 | **M6** | ~~MRL 消融（原创）~~ **✅ 已完成 2026-08-19** | ~~1.0~~ **0.3** | `scripts/probe_mrl_quality.py`：4096→64 七档 + 逐维方差 + 配对检验 | 存储 93.1 MB → 23.3 MB（1024 维）；**1024 维 −0.50pp 不显著（p=0.684），仅 64 维显著劣化 −4.25pp（Holm p=0.001†；蒙特卡洛地板标记）** |
 | **M7** | chunk sweep | **0.5** | 256/400/800 | 「为什么是 400」有曲线不是故事 |
@@ -563,6 +570,9 @@ zhrag/
 - [x] **hybrid 到底能不能在你的 5,681 语料上打赢 char-bigram BM25 的 75.9%。** **能，且显著。** 离线 RRF 融合 dense-4096 与 BM25 两条 run：**R@1 79.9% / MRR@10 0.881**，对 BM25 **+4.00pp**（65 胜 33 负，McNemar 精确 p = **1.6e-03**）。同时**修正了本条此前的一个错误结论**：dense 单臂并没有「赢」——+2.12pp、95% CI **[−0.88, +5.12]pp**、p = **0.199**，**不显著**。当初「两臂接近不等于融合无用」的判断被证实了：列联表 538 / 69 / 86 / 107，φ = 0.455，并集 oracle 上限 **86.6%**；且一臂 rank-1 落空时 gold 在另一臂里 83–88% 落在前 3、掉出 top-100 的是 0.0%。三条工程结论：**融合深度 10 与 100 的逐查询 R@1 逐位相同**（0/800 条 top-1 改变）；k 从 60 调到 10 只动 0.1pp；**唯一有效的旋钮是权重**（0.3/0.7 是全表唯一显著优于 dense 单臂的配置，16 胜 4 负，Holm p=0.047）。复现：`uv run python scripts/compare_dense_bm25.py`（不联网）。⚠️ 四个融合配置是在同一批 800 条上选出又汇报的，最好那行是上界不是泛化估计。
 - [x] **2docs/3docs 分层结果。** 已于 2026-08-20 完成。按实际 gold 数分组（809 / 802 / 783）后，dense vs BM25 的 `hit@1` 为 +1.98 / +0.37 / +4.34pp，配对 95% CI 为 [−0.99,+4.94] / [−3.37,+4.36] / [+0.64,+8.17]pp，12 项二元 family 经 Holm 后 p=1.000 / 1.000 / 0.176，均不显著；但 `ALL-gold@10` 在 arity=2/3 分别 **+6.48pp**（95% CI [+4.24,+8.73]，Holm p=2.81e-07）与 **+15.71pp**（[+12.90,+18.52]，p=1.66e-27）。结论是 **dense 强在找齐证据，不强在把任一证据排第一**。1doc 选出的 RRF k=10/depth=100 在 arity=3 的 ALL@10 又比 dense **低 5.11pp**（[−7.02,−3.19]，6 项 Holm p=1.67e-06），而 hit@1 为 −0.77pp（[−3.58,+2.04]，Holm p=1.000），差异不显著；一套 RRF 配置不能直接外推。复现：`uv run python scripts/compare_dense_bm25.py`（不联网）。
 - [x] **rerank 能否在 hybrid 的 79.9% 之上再拿到显著增量。** **已于 2026-08-21 在冻结的 G（dense-4096 + char-bigram BM25，等权 RRF k=10/depth=100）上完成。** 对全部 2,394 条 query 的 top-100 候选统一打分一次（239,400 个 pair），再离线比较 top-50/100。arity=1 的 `hit@1` 79.7%→85.8%，**+6.06pp**（95% CI [+3.34,+8.78]，91 胜 42 负，12 项 Holm p=**0.0003**）；arity=3 的 `ALL@10` 79.3%→86.5%@50 / 86.7%@100，分别 **+7.15pp**（[+4.98,+9.32]，p=**1.32e-09**）与 **+7.41pp**（[+5.24,+9.58]，p=**4.93e-10**）；arity=2 没有 efficacy 项通过校正。top-100 对 top-50 的四个 depth family 中没有显著结果，三个 arity 的 `hit@1` 完全相同，故当前部署证据选择 **top-50**。这不是 dense-1024 结果；H 必须另跑、另存 fingerprint。另有未量化 stationarity 限制：评分跨多个时间段续跑，query 顺序与 arity 相关，而 relay 不暴露后端 revision；未观察到漂移，但跨 arity 解读依赖端点稳定。复现分析：`uv run python scripts/evaluate_rerank.py --analyze --resamples 100000`（完整本地缓存下不联网、不读 key）。
+<!-- BEGIN H-HYBRID-MRL1024-CHECKLIST -->
+- [x] **H：dense-1024 + char-bigram BM25 的独立等权 exact RRF 基线。** 已在 5,681 篇完整文档 / 2,394 条 query 上从同一 4096 维 cache 双侧前缀切片并重归一化，零 API、无 rerank；1doc nDCG@10 **0.908 [0.895, 0.921]**。H−G 两个 retention family 共 2/12 项通过 Holm；未拒绝项只写“未检测到差异”，不写“无损/等价”。复现：`scripts/evaluate_h_hybrid_mrl1024.py`。
+<!-- END H-HYBRID-MRL1024-CHECKLIST -->
 - [ ] **RAGAS / DeepEval 内置指标提示词在中文上的校准度。** 研究只验证了管道（`base_url` 支持、`adapt_instruction` 语义、DeepSeek/Kimi 类），**零中文评测**。人工标 ~50 行，先测判官与你的一致率。
 
 **部署与生态待验证事项**

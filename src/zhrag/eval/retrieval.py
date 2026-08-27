@@ -31,6 +31,7 @@ __all__ = [
     "load_embedding_matrix",
     "load_queries",
     "per_query_metrics",
+    "prefix_l2_normalize",
 ]
 
 
@@ -105,6 +106,40 @@ def load_embedding_matrix(
             "  Populate the embedding cache before running this analysis."
         )
     return matrix, missing
+
+
+def prefix_l2_normalize(
+    matrix: NDArray[np.float32],
+    width: int,
+) -> NDArray[np.float32]:
+    """Prefix-slice every row and L2-normalize it without mutating the source.
+
+    Qwen3's MRL truncation applies the dimensional prefix before the final
+    normalization.  Loading the full cache first is deliberate: a cache file
+    containing native 1024-d rows would be a different paid run, not this
+    experiment's client-side ablation.
+    """
+    if isinstance(width, bool) or not isinstance(width, int) or width < 1:
+        raise ValueError("width must be a positive integer")
+    if matrix.ndim != 2:
+        raise ValueError("embedding matrix must be two-dimensional")
+    if width > matrix.shape[1]:
+        raise ValueError(f"requested width {width} exceeds source width {matrix.shape[1]}")
+    if not np.all(np.isfinite(matrix)):
+        raise ValueError("embedding matrix must contain only finite values")
+
+    prefix = np.array(matrix[:, :width], dtype=np.float32, copy=True)
+    if not np.all(np.isfinite(prefix)):
+        raise ValueError("embedding prefix is not representable as finite float32")
+    norms = np.linalg.norm(prefix, axis=1, keepdims=True)
+    if not np.all(np.isfinite(norms)):
+        raise ValueError("embedding prefix has a non-finite L2 norm")
+    if np.any(norms == 0):
+        raise ValueError("embedding prefix has a zero L2 norm")
+    normalized = prefix / norms
+    if normalized.dtype != np.float32:
+        normalized = normalized.astype(np.float32)
+    return normalized
 
 
 def bm25_runs(

@@ -434,6 +434,84 @@ Qwen3 的技术报告没有发布任何维度-质量曲线（arXiv v3 全文里 
 > —— Cloudflare 拦截 `Python-urllib/3.x` 默认 UA（`error code 1010`），以及 key 分组的时段限制。
 > 两者都不是鉴权失败，不读 response body 会误判成 key 有问题。
 
+<!-- BEGIN H-HYBRID-MRL1024-EVIDENCE -->
+### H：dense-1024 + BM25 的独立 hybrid 基线
+
+H 已在 **5,681 篇完整新闻文档 / 2,394 条 query** 上独立运行。文档和 query 都从同一份已冻结 4096 维 cache 取前 1024 维后逐行 L2 重归一化；A/E 各取 top-100，再做等权客户端 exact RRF (`k=10`，无 rerank、零 API 调用)。G 由同一 4096 维矩阵离线重建，只作 retention difference reference；I/J 仍是 G 上的付费 rerank，未改名。
+
+**历史 1doc 对齐（n=800；不重复进入显著性 family）**
+
+| arm | R@1 [95% CI] | MRR@10 [95% CI] | nDCG@10 [95% CI] |
+|---|---:|---:|---:|
+| A：BM25 char-bigram | 75.9% [72.9%, 78.9%] | 0.857 [0.838, 0.874] | 0.893 [0.879, 0.906] |
+| E：dense-1024 | 77.5% [74.5%, 80.4%] | 0.861 [0.842, 0.879] | 0.894 [0.880, 0.909] |
+| H：A+E exact RRF | 79.6% [76.8%, 82.4%] | 0.878 [0.860, 0.894] | 0.908 [0.895, 0.921] |
+| G：A+dense-4096 exact RRF | 79.9% [77.0%, 82.6%] | 0.881 [0.863, 0.898] | 0.911 [0.898, 0.924] |
+
+**全部 query 按实际 gold arity 分层（每格均为 mean [pointwise 95% CI]）**
+
+| arity | n | arm | R@1 | hit@1 | ALL@10 | MRR@10 | nDCG@10 |
+|---:|---:|---|---:|---:|---:|---:|---:|
+| 1 | 809 | A：BM25 char-bigram | 75.6% [72.7%, 78.6%] | 75.6% [72.7%, 78.6%] | 99.5% [98.9%, 99.9%] | 0.854 [0.835, 0.872] | 0.889 [0.875, 0.903] |
+|  |  | E：dense-1024 | 77.1% [74.3%, 80.0%] | 77.1% [74.3%, 80.0%] | 99.1% [98.4%, 99.8%] | 0.858 [0.840, 0.877] | 0.891 [0.877, 0.906] |
+|  |  | H：A+E exact RRF | 79.5% [76.8%, 82.3%] | 79.5% [76.8%, 82.3%] | 99.8% [99.4%, 100.0%] | 0.875 [0.858, 0.893] | 0.906 [0.893, 0.919] |
+|  |  | G：A+dense-4096 exact RRF | 79.7% [76.9%, 82.4%] | 79.7% [76.9%, 82.4%] | 99.8% [99.4%, 100.0%] | 0.879 [0.861, 0.896] | 0.909 [0.896, 0.921] |
+| 2 | 802 | A：BM25 char-bigram | 35.2% [33.6%, 36.8%] | 70.4% [67.2%, 73.6%] | 87.4% [85.0%, 89.7%] | 0.817 [0.796, 0.838] | 0.796 [0.780, 0.812] |
+|  |  | E：dense-1024 | 35.7% [34.2%, 37.3%] | 71.4% [68.3%, 74.6%] | 93.0% [91.3%, 94.8%] | 0.832 [0.813, 0.851] | 0.822 [0.809, 0.836] |
+|  |  | H：A+E exact RRF | 36.2% [34.6%, 37.7%] | 72.3% [69.2%, 75.4%] | 93.3% [91.4%, 95.0%] | 0.838 [0.819, 0.857] | 0.831 [0.817, 0.844] |
+|  |  | G：A+dense-4096 exact RRF | 35.1% [33.5%, 36.7%] | 70.2% [67.1%, 73.3%] | 93.8% [92.0%, 95.4%] | 0.827 [0.809, 0.846] | 0.827 [0.813, 0.840] |
+| 3 | 783 | A：BM25 char-bigram | 22.7% [21.6%, 23.8%] | 68.2% [64.9%, 71.5%] | 68.7% [65.5%, 71.9%] | 0.799 [0.778, 0.821] | 0.748 [0.730, 0.766] |
+|  |  | E：dense-1024 | 24.1% [23.1%, 25.2%] | 72.4% [69.2%, 75.5%] | 83.1% [80.5%, 85.7%] | 0.839 [0.819, 0.857] | 0.816 [0.801, 0.830] |
+|  |  | H：A+E exact RRF | 24.1% [23.0%, 25.1%] | 72.3% [69.1%, 75.4%] | 80.5% [77.7%, 83.3%] | 0.836 [0.817, 0.855] | 0.805 [0.790, 0.820] |
+|  |  | G：A+dense-4096 exact RRF | 23.9% [22.9%, 25.0%] | 71.8% [68.7%, 75.0%] | 79.3% [76.5%, 82.1%] | 0.835 [0.816, 0.854] | 0.804 [0.788, 0.818] |
+
+**预声明检验**：双尾；连续指标用 10,000 次 centred paired query bootstrap，二元指标用 exact McNemar；四个 family 各自 Holm。
+
+| family | arity | contrast | metric | delta [paired 95% CI] | W/L/T | raw p | Holm p |
+|---|---:|---|---|---:|---:|---:|---:|
+| efficacy / binary | 1 | H − A | hit@1 | +3.83pp [+1.48, +6.18] | 64/33/712 | 0.0022 | 0.0215 * |
+| efficacy / binary | 1 | H − A | ALL@10 | +0.25pp [+0.00, +0.62] | 2/0/807 | 0.5000 | 1.0000 |
+| efficacy / binary | 1 | H − E | hit@1 | +2.35pp [+0.49, +4.33] | 41/22/746 | 0.0226 | 0.1580 |
+| efficacy / binary | 1 | H − E | ALL@10 | +0.62pp [+0.12, +1.24] | 5/0/804 | 0.0625 | 0.3750 |
+| efficacy / binary | 2 | H − A | hit@1 | +1.87pp [-1.00, +4.74] | 74/59/669 | 0.2246 | 1.0000 |
+| efficacy / binary | 2 | H − A | ALL@10 | +5.86pp [+4.11, +7.73] | 52/5/745 | 6.40e-11 | 7.04e-10 * |
+| efficacy / binary | 2 | H − E | hit@1 | +0.87pp [-2.00, +3.62] | 70/63/669 | 0.6030 | 1.0000 |
+| efficacy / binary | 2 | H − E | ALL@10 | +0.25pp [-1.12, +1.62] | 17/15/770 | 0.8601 | 1.0000 |
+| efficacy / binary | 3 | H − A | hit@1 | +4.09pp [+1.40, +6.77] | 74/42/667 | 0.0038 | 0.0343 * |
+| efficacy / binary | 3 | H − A | ALL@10 | +11.75pp [+9.45, +14.18] | 96/4/683 | 6.45e-24 | 7.74e-23 * |
+| efficacy / binary | 3 | H − E | hit@1 | -0.13pp [-3.07, +2.94] | 70/71/642 | 1.0000 | 1.0000 |
+| efficacy / binary | 3 | H − E | ALL@10 | -2.68pp [-4.47, -0.89] | 15/36/732 | 0.0046 | 0.0368 * |
+| efficacy / continuous | 1 | H − A | MRR@10 | +0.0218 [+0.0083, +0.0354] | 96/61/652 | 0.0020 | 0.0140 * |
+| efficacy / continuous | 1 | H − A | nDCG@10 | +0.0168 [+0.0065, +0.0270] | 96/61/652 | 0.0016 | 0.0128 * |
+| efficacy / continuous | 1 | H − E | MRR@10 | +0.0176 [+0.0065, +0.0289] | 82/51/676 | 0.0031 | 0.0186 * |
+| efficacy / continuous | 1 | H − E | nDCG@10 | +0.0148 [+0.0063, +0.0235] | 82/51/676 | 0.0012 | 0.0108 * |
+| efficacy / continuous | 2 | H − A | MRR@10 | +0.0204 [+0.0047, +0.0368] | 131/78/593 | 0.0134 | 0.0590 |
+| efficacy / continuous | 2 | H − A | nDCG@10 | +0.0344 [+0.0245, +0.0445] | 292/157/353 | 1.00e-04† | 0.0012† * |
+| efficacy / continuous | 2 | H − E | MRR@10 | +0.0054 [-0.0110, +0.0211] | 103/90/609 | 0.5056 | 1.0000 |
+| efficacy / continuous | 2 | H − E | nDCG@10 | +0.0083 [-0.0008, +0.0173] | 265/200/337 | 0.0722 | 0.2166 |
+| efficacy / continuous | 3 | H − A | MRR@10 | +0.0369 [+0.0212, +0.0527] | 129/62/592 | 1.00e-04† | 0.0012† * |
+| efficacy / continuous | 3 | H − A | nDCG@10 | +0.0568 [+0.0476, +0.0660] | 382/143/258 | 1.00e-04† | 0.0012† * |
+| efficacy / continuous | 3 | H − E | MRR@10 | -0.0023 [-0.0186, +0.0145] | 92/95/596 | 0.7900 | 1.0000 |
+| efficacy / continuous | 3 | H − E | nDCG@10 | -0.0107 [-0.0189, -0.0024] | 241/276/266 | 0.0118 | 0.0590 |
+| retention / binary | 1 | H − G | hit@1 | -0.25pp [-1.36, +0.87] | 9/11/789 | 0.8238 | 1.0000 |
+| retention / binary | 1 | H − G | ALL@10 | +0.00pp [+0.00, +0.00] | 0/0/809 | 1.0000 | 1.0000 |
+| retention / binary | 2 | H − G | hit@1 | +2.12pp [+0.62, +3.62] | 26/9/767 | 0.0060 | 0.0359 * |
+| retention / binary | 2 | H − G | ALL@10 | -0.50pp [-1.25, +0.12] | 2/6/794 | 0.2891 | 1.0000 |
+| retention / binary | 3 | H − G | hit@1 | +0.51pp [-0.89, +1.92] | 18/14/751 | 0.5966 | 1.0000 |
+| retention / binary | 3 | H − G | ALL@10 | +1.15pp [+0.00, +2.30] | 15/6/762 | 0.0784 | 0.3918 |
+| retention / continuous | 1 | H − G | MRR@10 | -0.0033 [-0.0092, +0.0027] | 14/22/773 | 0.2848 | 1.0000 |
+| retention / continuous | 1 | H − G | nDCG@10 | -0.0025 [-0.0070, +0.0019] | 14/22/773 | 0.2673 | 1.0000 |
+| retention / continuous | 2 | H − G | MRR@10 | +0.0105 [+0.0029, +0.0181] | 43/26/733 | 0.0079 | 0.0474 * |
+| retention / continuous | 2 | H − G | nDCG@10 | +0.0039 [-0.0001, +0.0081] | 83/73/646 | 0.0594 | 0.2970 |
+| retention / continuous | 3 | H − G | MRR@10 | +0.0015 [-0.0061, +0.0088] | 29/32/722 | 0.6842 | 1.0000 |
+| retention / continuous | 3 | H − G | nDCG@10 | +0.0017 [-0.0020, +0.0053] | 115/107/561 | 0.3557 | 1.0000 |
+
+校正后拒绝数：efficacy / binary 5/12；efficacy / continuous 7/12；retention / binary 1/6；retention / continuous 1/6。
+H 与 G 检测到经校正差异：arity=2 hit@1、arity=2 MRR@10；方向必须结合 delta 读取。
+
+> `R@1` 在 arity=2/3 是分数型、上限分别为 1/2 与 1/3，只作描述，未塞进 McNemar。`†` 是 add-one Monte Carlo floor，不是严格 `<` 上界。全部 2,394 条 query 已参与既往探索，因此这是 exploratory benchmark，不是未触碰 test；CI 是 pointwise，结论只绑定本次 cache fingerprints。
+<!-- END H-HYBRID-MRL1024-EVIDENCE -->
+
 ### 在线链路：把离线证据原样搬上去，而不是搬一个像它的东西
 
 离线冻结的配置是「dense-4096 与 char-bigram BM25 各取 100 → 等权 RRF k=10/depth=100 →
@@ -534,6 +612,7 @@ vocabulary + IDF 写成 `sparse_index.json`，查询端加载后先比对 `state
 ```
 src/zhrag/
   io_utils.py            单一 UTF-8 文件 I/O 出入口（含增量缓存用的 append_jsonl）
+  embedding_contract.py  provider-neutral 的 embedding cache provenance 合同
   tokens.py              按 Qwen3 tokenizer 实测标定的中英双分量 token 估算
   lexical/
     analyzers.py         字符 n-gram / jieba（可选）/ 并集
@@ -547,7 +626,8 @@ src/zhrag/
                          + 精确 McNemar（二元指标，无地板、无种子）
                          + 逐查询胜/负/平计数
                          + Holm-Bonferroni 多重比较校正
-    retrieval.py         共享的 BM25 / dense run 构造、嵌入缓存读取与逐查询指标
+    retrieval.py         共享的 BM25 / dense run 构造、嵌入缓存读取、MRL 前缀 L2 与逐查询指标
+    hybrid_mrl1024.py    H 的冻结 A/E/H/G run、query bootstrap、四族配对检验与聚合报告认证
     rerank.py            rerank 窗口语义、覆盖检查、输入指纹与四个配对检验族
     qgen.py              TiDB 分层抽样、双表面 QG、严格解析与双阶段验证
     tidb_runs.py         冻结四系统 run、确定性排序、RRF 与 rerank 应用语义
@@ -588,11 +668,13 @@ scripts/
   build_tidb_qrels.py    rank-blinded 判断缓存；只有 --finalize 发布 qrels/report
   evaluate_tidb_retrieval.py 只读冻结 runs/qrels，离线生成聚合质量报告
   sync_tidb_eval_docs.py 校验本地聚合报告/JUnit 并同步 tracked 文档（支持 --check）
+  evaluate_h_hybrid_mrl1024.py 只读完整 4096 cache，离线重建 A/E/H/G 并生成聚合报告
+  sync_h_hybrid_mrl1024_docs.py 重算认证 H 报告并同步 tracked 文档（支持 --check）
 <!-- BEGIN QUALITY-GATE-STATUS -->
-tests/                   703 个单元测试
+tests/                   747 个单元测试
 ```
 
-质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 703 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
+质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 747 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
 <!-- END QUALITY-GATE-STATUS -->
 
 README 中每一个数字都由上述脚本生成，没有手工誊写。这不是洁癖：早期原型用固定 1.15 字符/token 估算，得出的 chunk 数与最终实现相差 2.4 倍；而最初那次 BM25 饱和实验是一次性脚本跑的、从未提交，导致 README 里的核心结论一度**无法被任何人复现**。
@@ -694,6 +776,11 @@ uv run python scripts/evaluate_tidb_retrieval.py --resamples 10000 --seed 0  # �
 uv run pytest --junitxml=indexes/tidb/eval/pytest.xml
 uv run python scripts/sync_tidb_eval_docs.py
 uv run python scripts/sync_tidb_eval_docs.py --check
+
+# 11. 独立 H（A+dense-1024）基线：只读完整本地 cache，严格离线；缺失/漂移即失败。
+uv run python scripts/evaluate_h_hybrid_mrl1024.py --resamples 10000 --seed 0
+uv run python scripts/sync_h_hybrid_mrl1024_docs.py
+uv run python scripts/sync_h_hybrid_mrl1024_docs.py --check
 ```
 
 第 6 步把 4096 维文档向量缓存到 `eval-expanded/emb_cache_4096.jsonl`（当前约 523 MB，

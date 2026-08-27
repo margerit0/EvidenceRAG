@@ -471,6 +471,22 @@ class TestSynchronization:
         assert tuple(read_text(path) for path in (readme, architecture, claude)) == before
         assert not list(tmp_path.glob("*.sync.tmp"))
 
+    def test_refuses_to_run_while_another_docs_sync_holds_the_shared_lock(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner()
+        _reports(tmp_path)
+        _docs(tmp_path)
+        lock = tmp_path / runner.DOCS_LOCK
+        write_text(lock, "pid=123\n")
+
+        with pytest.raises(SystemExit, match="another writer"):
+            runner.synchronize(_args(runner, tmp_path))
+
+        assert read_text(lock) == "pid=123\n"
+        assert not (tmp_path / "indexes" / "tidb" / "eval" / runner.ARTIFACT_LOCK).exists()
+
     def test_refuses_to_run_while_a_bundle_writer_holds_the_shared_lock(
         self,
         tmp_path: Path,

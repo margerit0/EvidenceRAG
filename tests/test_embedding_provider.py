@@ -23,9 +23,19 @@ from typing import Any
 
 import pytest
 
+from zhrag.embedding_contract import (
+    QUERY_PROMPT as CONTRACT_QUERY_PROMPT,
+)
+from zhrag.embedding_contract import (
+    load_embedding_provenance as contract_load_embedding_provenance,
+)
+from zhrag.embedding_contract import (
+    validate_embedding_cache as contract_validate_embedding_cache,
+)
 from zhrag.io_utils import read_json, read_jsonl, write_json, write_text
 from zhrag.providers.embedding import (
     MAX_RETRY_AFTER,
+    QUERY_PROMPT,
     RETRY_STATUS,
     EmbeddingClient,
     EmbeddingConfig,
@@ -377,6 +387,11 @@ class TestLoadOrEmbed:
 
 
 class TestCacheSidecar:
+    def test_provider_keeps_the_provider_neutral_contract_exports(self) -> None:
+        assert QUERY_PROMPT == CONTRACT_QUERY_PROMPT
+        assert load_embedding_provenance is contract_load_embedding_provenance
+        assert validate_embedding_cache is contract_validate_embedding_cache
+
     def test_read_only_validation_loads_exact_model_and_prompt(self, tmp_path: Path) -> None:
         cache = tmp_path / "c.jsonl"
         write_json(cache.with_suffix(".jsonl.meta.json"), {"model": "m", "prompt": "P:"})

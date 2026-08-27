@@ -30,6 +30,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from zhrag.embedding_contract import (
+    QUERY_PROMPT,
+    embedding_provenance_path,
+    load_embedding_provenance,
+    validate_embedding_cache,
+)
 from zhrag.io_utils import append_jsonl, read_json, read_jsonl, read_text, write_json
 from zhrag.providers.http import (
     MAX_RETRY_AFTER,
@@ -55,14 +61,6 @@ __all__ = [
     "resolve_embeddings_url",
     "validate_embedding_cache",
 ]
-
-#: Asymmetric by design. Qwen3's document prompt is the empty string; adding a
-#: prefix to both sides silently costs several points of R@1 and raises nothing.
-#: The instruction is English even though the corpus is Chinese -- Qwen's own
-#: advice, because the training-time instructions were English.
-QUERY_PROMPT = (
-    "Instruct: Given a Chinese question, retrieve the news passage that answers it\nQuery:"
-)
 
 
 def _flush_print(message: str) -> None:
@@ -238,42 +236,6 @@ class BatchEmbedder(Protocol):
     ) -> list[list[float]]: ...
 
 
-def _meta_path(cache: Path) -> Path:
-    return cache.with_suffix(cache.suffix + ".meta.json")
-
-
-def load_embedding_provenance(cache: Path) -> dict[str, object]:
-    """Read an embedding cache's model/prompt sidecar without modifying it."""
-    meta = _meta_path(cache)
-    if not meta.exists():
-        raise SystemExit(f"! embedding cache provenance is absent: {meta}")
-    try:
-        recorded = read_json(meta)
-    except ValueError as exc:
-        raise SystemExit(f"! {meta.name} is not readable JSON: {exc}") from exc
-    if not isinstance(recorded, dict):
-        raise SystemExit(f"! {meta.name} should hold a JSON object, found {type(recorded)}.")
-    return recorded
-
-
-def validate_embedding_cache(cache: Path, *, model: str, prompt: str) -> None:
-    """Validate an existing embedding cache without adopting or changing it."""
-    recorded = load_embedding_provenance(cache)
-    expected = {"model": model, "prompt": prompt}
-    drift = [
-        (key, recorded.get(key), value)
-        for key, value in expected.items()
-        if recorded.get(key) != value
-    ]
-    if drift:
-        detail = "; ".join(f"{key}: cache has {was!r}, expected {now!r}" for key, was, now in drift)
-        raise SystemExit(
-            f"! {cache.name} was written under different settings.\n"
-            f"  {detail}\n"
-            "  Read-only evaluation cannot adopt or rewrite embedding provenance."
-        )
-
-
 def _check_or_write_meta(cache: Path, model: str, prompt: str, log: Callable[[str], None]) -> None:
     """Refuse to mix vectors from two models, or two prompt conventions, in one cache.
 
@@ -293,7 +255,7 @@ def _check_or_write_meta(cache: Path, model: str, prompt: str, log: Callable[[st
     from the adoption point forward; it simply cannot speak for what came
     before, and now says so.
     """
-    meta = _meta_path(cache)
+    meta = embedding_provenance_path(cache)
     current: dict[str, object] = {"model": model, "prompt": prompt}
     if meta.exists():
         try:

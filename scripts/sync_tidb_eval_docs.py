@@ -50,6 +50,7 @@ QGEN_SCHEMA = "zhrag-tidb-qgen-v1"
 POOL_SCHEMA = "zhrag-tidb-runs-v1"
 QRELS_SCHEMA = "zhrag-tidb-qrels-v1"
 ARTIFACT_LOCK = ".artifacts.lock"
+DOCS_LOCK = ".docs.lock"
 DOCUMENT_EMBEDDING_PROFILE = "qwen3-embedding-8b-tidb-doc-4096-v1"
 
 
@@ -964,9 +965,13 @@ def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
 
 
 def synchronize(args: argparse.Namespace) -> tuple[Path, ...]:
-    # The shared artifact lock is held across authentication *and* publication so
-    # a bundle writer cannot swap runs/qrels between recomputation and rendering.
-    with exclusive_lock(args.artifacts / "eval" / ARTIFACT_LOCK):
+    # Every documentation synchronizer takes the repository-wide docs lock first,
+    # then its artifact lock. The fixed order serializes replacement of the three
+    # shared tracked documents without introducing a cross-report deadlock.
+    with (
+        exclusive_lock(args.readme.parent / DOCS_LOCK),
+        exclusive_lock(args.artifacts / "eval" / ARTIFACT_LOCK),
+    ):
         status = load_status(args.artifacts)
         rendered = [(target.path, *_render_target(target, status)) for target in _targets(args)]
         stale = tuple(path for path, before, after in rendered if before != after)

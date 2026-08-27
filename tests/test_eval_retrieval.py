@@ -5,7 +5,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from zhrag.eval.retrieval import dense_runs, load_embedding_matrix
+from zhrag.eval.retrieval import (
+    dense_runs,
+    load_embedding_matrix,
+    prefix_l2_normalize,
+)
 from zhrag.io_utils import append_jsonl
 
 
@@ -53,6 +57,41 @@ class TestLoadEmbeddingMatrix:
         append_jsonl(cache, [{"doc_id": "a", "embedding": [1.0]}])
         with pytest.raises(ValueError, match="unique"):
             load_embedding_matrix(cache, ["a", "a"], width=1)
+
+
+class TestPrefixL2Normalize:
+    def test_uses_only_the_prefix_and_returns_unit_float32_rows(self) -> None:
+        matrix = np.asarray([[3.0, 4.0, 999.0], [0.0, 5.0, -999.0]], dtype=np.float32)
+        original = matrix.copy()
+
+        got = prefix_l2_normalize(matrix, 2)
+
+        assert got.dtype == np.float32
+        assert got.shape == (2, 2)
+        assert np.allclose(got, [[0.6, 0.8], [0.0, 1.0]])
+        assert np.allclose(np.linalg.norm(got, axis=1), 1.0)
+        assert np.array_equal(matrix, original)
+        assert not np.shares_memory(got, matrix)
+
+    def test_full_width_still_returns_an_independent_normalized_matrix(self) -> None:
+        matrix = np.asarray([[3.0, 4.0]], dtype=np.float32)
+        got = prefix_l2_normalize(matrix, 2)
+        assert np.allclose(got, [[0.6, 0.8]])
+        assert not np.shares_memory(got, matrix)
+
+    @pytest.mark.parametrize("width", [0, -1, True, 4])
+    def test_rejects_invalid_or_overwide_width(self, width: object) -> None:
+        matrix = np.ones((1, 3), dtype=np.float32)
+        with pytest.raises(ValueError, match=r"positive|exceeds"):
+            prefix_l2_normalize(matrix, width)  # type: ignore[arg-type]
+
+    def test_rejects_non_matrix_zero_prefix_and_non_finite_source(self) -> None:
+        with pytest.raises(ValueError, match="two-dimensional"):
+            prefix_l2_normalize(np.ones(2, dtype=np.float32), 1)
+        with pytest.raises(ValueError, match="zero"):
+            prefix_l2_normalize(np.asarray([[0.0, 0.0, 1.0]], dtype=np.float32), 2)
+        with pytest.raises(ValueError, match="finite"):
+            prefix_l2_normalize(np.asarray([[1.0, 2.0, np.nan]], dtype=np.float32), 2)
 
 
 class TestDenseRuns:

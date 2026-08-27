@@ -6,6 +6,19 @@ from zhrag.eval.crud import (
     harvest_documents,
     sample_corpus,
 )
+from zhrag.eval.hybrid_mrl1024 import (
+    A_LABEL,
+    ARM_LABELS,
+    E_LABEL,
+    G_LABEL,
+    H_LABEL,
+    HYBRID_MRL1024_SCHEMA,
+    HybridInputs,
+    build_hybrid_mrl1024_runs,
+    evaluate_hybrid_mrl1024,
+    load_hybrid_mrl1024_inputs,
+    validate_hybrid_mrl1024_report,
+)
 from zhrag.eval.metrics import (
     BootstrapCI,
     WinLossTie,
@@ -80,8 +93,14 @@ from zhrag.eval.tidb_runs import (
 )
 
 __all__ = [
+    "ARM_LABELS",
+    "A_LABEL",
     "DENSE_LABEL",
+    "E_LABEL",
     "GRADE_LABELS",
+    "G_LABEL",
+    "HYBRID_MRL1024_SCHEMA",
+    "H_LABEL",
     "JUDGING_CACHE_KEY_SCHEMA",
     "JUDGING_INSTRUCTIONS",
     "LEXICAL_LABEL",
@@ -98,6 +117,7 @@ __all__ = [
     "TIDB_QUALITY_SCHEMA",
     "TIDB_RUNS_SCHEMA",
     "BootstrapCI",
+    "HybridInputs",
     "JudgedQuery",
     "PooledQuery",
     "QrelPair",
@@ -112,6 +132,7 @@ __all__ = [
     "bootstrap_ci",
     "bootstrap_p_floor",
     "build_dense_runs",
+    "build_hybrid_mrl1024_runs",
     "build_lexical_runs",
     "build_pool",
     "build_queries",
@@ -121,6 +142,7 @@ __all__ = [
     "clustered_paired_bootstrap_test",
     "document_id",
     "evaluate",
+    "evaluate_hybrid_mrl1024",
     "evaluate_tidb_quality",
     "graded_ndcg_at_k",
     "harvest_documents",
@@ -132,6 +154,7 @@ __all__ = [
     "judging_instructions_fingerprint",
     "judging_order",
     "judging_prompt",
+    "load_hybrid_mrl1024_inputs",
     "mcnemar_exact",
     "mrr_at_k",
     "ndcg_at_k",
@@ -148,6 +171,7 @@ __all__ = [
     "runs_fingerprint",
     "sample_corpus",
     "score_tidb_pairs",
+    "validate_hybrid_mrl1024_report",
     "validate_quality_report",
     "win_loss_tie",
 ]

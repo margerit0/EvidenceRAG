@@ -81,6 +81,12 @@ uv run mypy                       # strict
 以上全部是本地输入或派生产物，均不得提交。TiDB 链路的付费步骤不止索引 embedding：还包括 QG/验证、query embedding、rerank 与 qrels judging；缓存完整后的 pool、finalize、指标计算和文档同步才是离线步骤。
 <!-- END TIDB-LOCAL-ARTIFACTS -->
 
+<!-- BEGIN H-HYBRID-MRL1024-ARTIFACT -->
+- `crud-rag-subset/eval-expanded/h_hybrid_rrf_mrl1024_report.json` — `scripts/evaluate_h_hybrid_mrl1024.py`；5,681 docs / 2,394 queries，4096→1024 双侧前缀 L2 重归一化，A/E/H/G 聚合 CI + paired tests/Holm（完全离线）。
+
+该报告、有效矩阵 fingerprints 与所有输入继续位于目录级 gitignore 边界；cache miss 会失败，不会读取 `.env` 或调用 embedding/rerank provider。
+<!-- END H-HYBRID-MRL1024-ARTIFACT -->
+
 TiDB canonical artifact 的 publisher 先拿各自 operation lock，再只在最终本地发布阶段拿
 `indexes/tidb/eval/.artifacts.lock`；evaluator 与文档同步则在 load → 重算认证 → publish 全程持有
 该共享锁。付费 API 调用不包在共享锁内。`replace_files()` 保证 Python 异常时回滚且 marker 最后发布，
