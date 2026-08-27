@@ -384,10 +384,12 @@ class TestArtifactBundle:
                 for label in (LEXICAL_LABEL, DENSE_LABEL, RRF_LABEL, RERANK_LABEL)
             },
         )
+        eval_root = tmp_path / "eval"
         targets: list[str] = []
         original_replace = runner.replace_files
 
         def record_replacements(staged: tuple[tuple[Path, Path], ...]) -> None:
+            assert (eval_root / runner.ARTIFACT_LOCK).is_file()
             pairs = tuple(staged)
             targets.extend(Path(target).name for _source, target in pairs)
             original_replace(pairs)
@@ -408,7 +410,8 @@ class TestArtifactBundle:
         assert pool[0]["questions"] == ["direct问题", "paraphrase问题"]
         assert pool[0]["answer"] == "答案"
         assert targets == ["runs.jsonl", "pool.jsonl", "pool_report.json"]
-        assert read_json(tmp_path / "eval" / "pool_report.json")["pairs"] == 1
+        assert read_json(eval_root / "pool_report.json")["pairs"] == 1
+        assert not (eval_root / runner.ARTIFACT_LOCK).exists()
 
     def test_failed_staging_keeps_previous_bundle_and_cleans_temporary_files(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

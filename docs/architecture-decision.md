@@ -185,10 +185,10 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 | **角色** | **探索性检索 benchmark**——现有消融数字来源 | **部署集 + 合成 pooled qrels**——公网 demo 与域内评测输入 |
 | **有无 gold label** | 有上游 `evidence_document_id` | **无上游人工 gold**；已有 direct/paraphrase QG、四系统 pooling、rank-blinded LLM judge 形成的合成 qrels |
 | **在它上面调什么** | 已探索 analyzer、fusion 权重、rerank 深度、MRL 维度 | 当前冻结配置，不用这批 query 反向调参；若要调，先拆 dev/test 或明确为探索性 |
-| **在它上面测什么** | R@1 / MRR@10 / nDCG@10 / ALL-gold@10 + 配对检验 | 待生成系统级指标、direct/paraphrase 与词面重叠分层；另测延迟/QPS/重建 |
+| **在它上面测什么** | R@1 / MRR@10 / nDCG@10 / ALL-gold@10 + 配对检验 | 已完成 Hit@1 / R@1 / MRR@10 / binary+graded nDCG@10、source-cluster bootstrap、direct/paraphrase 与描述性词面重叠分层；延迟/QPS/重建仍待测 |
 
-当前 TiDB qrels 覆盖 490 个 pair / 980 条 query / 24,525 个 pooled candidates。
-四条冻结 run 的 top-1/top-10 候选均已判断，但 **100% judged coverage 不是 100% retrieval quality**；在系统级指标与 95% CI / 配对检验产出前，不从覆盖率推导质量结论。
+当前 TiDB qrels 覆盖 490 个 pair / 980 条 query / 24,525 个 pooled candidates，分属 245 个 `gold_source_key` 源聚类。
+四条冻结 run 的 top-1/top-10 候选均已判断，但 **100% judged coverage 不是 100% retrieval quality**；质量表已用 source-clustered 95% CI、双尾配对 source-cluster bootstrap 与 Holm 校正生成。
 <!-- END TIDB-CORPUS-EVAL-STATUS -->
 
 ### 怎么避免看起来像过拟合
@@ -327,7 +327,7 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 | **M1** | Protocol + registry + YAML config | **1.5** | `retrieval/base.py`（4 个 Protocol）、`registry.py`、`config.py`（pydantic-settings，`extra='forbid'`）、`experiments/*.yaml` | 现有 BM25 零改动通过 Protocol；1 条命令跑通 1 个 config |
 | **M2** | **Milvus store + provider 客户端 ✅ 2026-08-22** | **1.0** | ✅ `store/{base,milvus}.py`（vendor-neutral Protocol + 惰性导入的 pymilvus 适配器）；✅ `providers/{http,embedding,rerank,cache}.py`（One Hub/OpenAI-compatible transport、7 次长退避、严格响应校验、断点缓存与 provenance sidecar） | ✅ 适配器有 fake-client 契约测试（默认环境不 import pymilvus）；✅ 真实 Milvus Lite 集成通过 `scripts/verify_milvus_store.py`（schema 幂等、完整行 upsert、dense/sparse 两臂、fetch 定序、alias 切换、close 后重开）；`pymilvus==3.0.1` 收进可选 extra |
 <!-- BEGIN M3-TIDB-EVAL-STATUS -->
-| **M3** | **TiDB 全量索引 + 合成 pooled qrels ✅ 2026-08-25** | **1.5** | ✅ `ingest.py` + `scripts/build_index.py` + `scripts/query_index.py`；✅ `scripts/build_tidb_{queries,pool,qrels}.py`（双表面 QG、四系统 pool、显式 finalize） | 450 篇 evergreen → **1,832 chunks** 已索引发布；合成评测集为 **490 pairs / 980 queries / 24,525 pooled candidates / 3,287 judge batches**。四系统 top-1/top-10 判断覆盖完整，但系统级指标尚待离线计算；无上游人工 gold |
+| **M3** | **TiDB 全量索引 + 合成 pooled qrels + 离线质量 ✅ 2026-08-26** | **1.5** | ✅ `ingest.py` + `scripts/build_index.py` + `scripts/query_index.py`；✅ `scripts/build_tidb_{queries,pool,qrels}.py`；✅ `evaluate_tidb_retrieval.py` | 450 篇 evergreen → **1,832 chunks**；**490 pairs / 980 queries / 24,525 pooled candidates**。overall binary nDCG@10：BM25 0.701 / dense 0.793 / RRF 0.796 / rerank 0.914；以 245 个 source cluster 为重采样单位的 95% CI + 两个预声明 4-test 双尾 source-cluster bootstrap/Holm family。无上游人工 gold；本地 exact RRF 不代表服务端 hybrid_search |
 <!-- END M3-TIDB-EVAL-STATUS -->
 | **M4** | 混合检索 + RRF | ~~1.0~~ **0.5** | 客户端 char-bigram → SPARSE_FLOAT_VECTOR（IP）；`hybrid_search` + RRFRanker | **离线部分已完成 2026-08-19，分层于 2026-08-20 补齐**（`scripts/compare_dense_bm25.py` + `retrieval/fusion.py`）：1doc hybrid **79.9 / 0.881** vs BM25 75.9（p=1.6e-03，显著）vs dense 78.0（Holm p=0.231，不显著）；多证据上 dense 的完整证据召回更强，而同一 RRF 在 arity=3 ALL@10 比 dense 低 5.11pp。在线链路已用客户端精确 RRF 落地（`retrieval/online.py`，两臂各 100 → 本地 RRF k=10/depth=100）；M4 剩把融合搬进 Milvus 服务端并复现数字（服务端 tie 顺序与本地 doc-id tie-break 不保证一致，属优化路径而非默认精确路径） |
 | **M5** | **Rerank + 深度消融：离线部分 ✅ 2026-08-21** | **1.5** | ✅ `providers/rerank.py` + `providers/cache.py` + `eval/rerank.py` + `scripts/evaluate_rerank.py`；✅ 在线 stage 已接入 `retrieval/online.py`（**请求深度 100 / 应用深度 50** 分开建模） | 冻结 G（dense-4096 hybrid）统一评分 239,400 对：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp@50 / +7.41pp@100；arity=2 无显著增益；top-100 未显著胜 top-50。4B 对照因 provider 无模型而取消 |
@@ -384,6 +384,7 @@ zhrag/
 │   │   ├── metrics.py              # ✅ R@k / MRR / nDCG / ALL-gold / bootstrap
 │   │   ├── retrieval.py            # ✅ BM25/dense run 与共享逐查询指标
 │   │   ├── rerank.py               # ✅ 窗口语义 / 指纹 / 四个预声明配对检验族
+│   │   ├── tidb_quality.py         # ✅ pair-aware TiDB 指标 / CI / bootstrap-Holm / 分层
 │   │   ├── metrics_gen.py          # 🆕 jieba 词级 BLEU/ROUGE + BERTScore-zh
 │   │   ├── quest_eval.py           # 🆕 RAGQuestEval 自实现（~60 行）
 │   │   └── runner.py               # 🆕 遍历 experiments/*.yaml -> results/*.jsonl
@@ -404,6 +405,7 @@ zhrag/
 │   ├── corpus_stats.py             # ✅
 │   ├── compare_dense_bm25.py       # ✅ dense/BM25/RRF 与 arity 分层
 │   ├── evaluate_rerank.py          # ✅ top-100 断点评分 + top-50/100 离线分析
+│   ├── evaluate_tidb_retrieval.py  # ✅ 冻结 runs/qrels 的 pair-aware 离线质量报告
 │   ├── download_corpora.py         # 🆕 首次运行 stdout 打印许可声明
 │   ├── build_index.py              # 🆕
 │   └── bench.py                    # 🆕 p50/p95/p99 + QPS
@@ -510,6 +512,7 @@ zhrag/
 | **`padding_side` 不是 `'left'`（自建推理时）** | 右 padding + `hidden[:, -1]` → 短样本拿到 pad token 向量，全错且无异常 | 用模型卡的 `last_token_pool()`（按 attention_mask 分支） |
 | **DeepInfra `normalize` 默认 false** | 未归一化的 4096 维向量进 cosine 索引 = 排序错误、无报错。SiliconFlow 干脆没文档说归一化默认值 | 第一次响应就 `np.linalg.norm()` 自检 |
 | **只发布集合、不发布词表** | 查询向量的 term index 只在建库那份词表下有意义；换一份就打到恰好占位的词上，**排序静默出错**。而词表默认只活在构建进程的内存里 | 发布路径把 vocabulary+IDF 写成 `sparse_index.json`，查询端先比对 `state.json` 的 fingerprint 再启动；**只有发布成功才写**，否则查询端会加载到没有在线集合与之对应的词表 |
+| **把多个 `os.replace()` 当成 bundle transaction，或检查 writer lock 后无锁读取** | 第二个文件替换失败会留下新旧混合 bundle；检查与读取之间也可能被另一个 publisher 换包，使报告认证基于不同版本的输入 | canonical writer 先拿各自 operation lock，再只在最终发布阶段拿 `eval/.artifacts.lock`；evaluator / docs sync 在 load → 重算认证 → publish 全程持有共享锁。`replace_files()` 遇 Python 异常会逆序回滚，report/state marker 最后发布；这只是 exception safety，**不声称进程强杀下的 crash-atomic transaction** |
 | **给稀疏字段挂 `FunctionType.BM25`** | Milvus 会重新分词并**覆盖你预计算的向量** | 用 `SPARSE_INVERTED_INDEX` + `metric_type="IP"`，**不挂** BM25 function。Qdrant 上的对称坑：权重里已含 IDF 就别开 `idf` modifier，否则双重计算 |
 | **Milvus Lite 的 BM25 IDF 是 segment 局部的** | Lite 的分数在 Standalone/Zilliz 上复现不出来，指标静默失真 | 走客户端稀疏向量（本方案已规避）；若非要用服务端 BM25，出指标的那一遍只在 Standalone 跑 |
 | **Milvus Lite 对 data_dir 加文件锁，单进程** | 并行 eval worker 会死锁或报错 | 每个 worker 独立 data_dir，或 eval 跑 WSL2 Standalone |

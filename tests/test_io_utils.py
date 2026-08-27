@@ -7,6 +7,7 @@ CI, so the round-trip assertions are deliberately explicit about encoding.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,62 @@ class TestReplaceFiles:
 
         assert read_text(first_target) == "old"
         assert present.exists()
+
+    def test_rolls_back_every_target_when_a_replacement_raises(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        staged = [tmp_path / f"s{index}.tmp" for index in range(3)]
+        targets = [tmp_path / f"t{index}.json" for index in range(3)]
+        for index, (source, target) in enumerate(zip(staged, targets, strict=True)):
+            write_text(source, f"new {index}")
+            write_text(target, f"old {index}")
+        real_replace = os.replace
+        calls = {"n": 0}
+
+        def flaky(source: object, target: object) -> None:
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise OSError("injected replacement failure")
+            real_replace(source, target)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(os, "replace", flaky)
+
+        with pytest.raises(OSError, match="injected replacement failure"):
+            replace_files(list(zip(staged, targets, strict=True)))
+
+        monkeypatch.undo()
+        assert [read_text(path) for path in targets] == ["old 0", "old 1", "old 2"]
+        assert not list(tmp_path.glob("*.rollback"))
+
+    def test_rollback_removes_targets_that_did_not_exist(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        first_source = tmp_path / "first.tmp"
+        second_source = tmp_path / "second.tmp"
+        write_text(first_source, "new")
+        write_text(second_source, "new")
+        fresh_target = tmp_path / "fresh.json"
+        second_target = tmp_path / "second.json"
+        real_replace = os.replace
+
+        def flaky(source: object, target: object) -> None:
+            if Path(str(target)) == second_target:
+                raise OSError("injected replacement failure")
+            real_replace(source, target)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(os, "replace", flaky)
+
+        with pytest.raises(OSError, match="injected replacement failure"):
+            replace_files(((first_source, fresh_target), (second_source, second_target)))
+
+        monkeypatch.undo()
+        assert not fresh_target.exists()
+        assert not second_target.exists()
+        assert not list(tmp_path.glob("*.rollback"))
 
 
 class TestAppendJsonl:

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 import random
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -27,7 +27,10 @@ __all__ = [
     "all_gold_at_k",
     "bootstrap_ci",
     "bootstrap_p_floor",
+    "clustered_bootstrap_ci",
+    "clustered_paired_bootstrap_test",
     "evaluate",
+    "graded_ndcg_at_k",
     "hit_at_k",
     "holm_bonferroni",
     "holm_floor_flags",
@@ -94,14 +97,52 @@ def mrr_at_k(ranked: Sequence[str], gold: Sequence[str], k: int = 10) -> float:
     return 0.0
 
 
+def _validate_unique_ranked(ranked: Sequence[str], k: int) -> None:
+    prefix = ranked[:k]
+    if len(set(prefix)) != len(prefix):
+        raise ValueError(f"ranked top-{k} must not contain duplicate document ids")
+
+
 def ndcg_at_k(ranked: Sequence[str], gold: Sequence[str], k: int = 10) -> float:
     """Binary-relevance nDCG@k with the standard ``1/log2(rank+1)`` discount."""
     _validate(k)
+    _validate_unique_ranked(ranked, k)
     goldset = set(gold)
     if not goldset:
         raise ValueError("gold must be non-empty")
     dcg = sum(1.0 / math.log2(i + 1) for i, doc in enumerate(ranked[:k], start=1) if doc in goldset)
     ideal = sum(1.0 / math.log2(i + 1) for i in range(1, min(k, len(goldset)) + 1))
+    return dcg / ideal
+
+
+def graded_ndcg_at_k(
+    ranked: Sequence[str],
+    grades: Mapping[str, int],
+    k: int = 10,
+) -> float:
+    """Graded nDCG@k with exponential gain ``2**grade - 1``.
+
+    A missing document receives zero gain, but callers must first prove that the
+    evaluated prefix is fully judged. This metric cannot distinguish an explicit
+    zero from an absent judgement by itself.
+    """
+    _validate(k)
+    _validate_unique_ranked(ranked, k)
+    gains: dict[str, int] = {}
+    for doc_id, grade in grades.items():
+        if not isinstance(doc_id, str) or not doc_id:
+            raise ValueError("grade ids must be non-empty strings")
+        if isinstance(grade, bool) or not isinstance(grade, int) or grade < 0:
+            raise ValueError(f"grade for {doc_id!r} must be a non-negative integer")
+        gains[doc_id] = (1 << grade) - 1
+    positive = sorted((gain for gain in gains.values() if gain > 0), reverse=True)
+    if not positive:
+        raise ValueError("grades must contain at least one positive relevance grade")
+    dcg = sum(
+        gains.get(doc_id, 0) / math.log2(rank + 1)
+        for rank, doc_id in enumerate(ranked[:k], start=1)
+    )
+    ideal = sum(gain / math.log2(rank + 1) for rank, gain in enumerate(positive[:k], start=1))
     return dcg / ideal
 
 
@@ -123,16 +164,18 @@ def bootstrap_ci(
     resamples: int = 10_000,
     seed: int = 0,
 ) -> BootstrapCI:
-    """Percentile bootstrap confidence interval over per-query scores.
+    """Percentile bootstrap confidence interval over independent score units.
 
     Report intervals rather than bare point estimates: at n=500 an *unpaired*
     comparison needs several points of separation before the intervals stop
     overlapping. Note this is the weaker of the two tools here -- for comparing
     ablation arms that share a query set, use :func:`paired_bootstrap_test`,
-    which is far more sensitive.
+    which is far more sensitive. Correlated observations must first be reduced
+    to independent cluster-level values before calling this function.
     """
-    if not scores:
-        raise ValueError("scores must be non-empty")
+    _validate_bootstrap_scores(scores, name="scores", resamples=resamples)
+    if not 0.0 < confidence < 1.0:
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
     rng = random.Random(seed)
     n = len(scores)
     means = sorted(sum(rng.choices(scores, k=n)) / n for _ in range(resamples))
@@ -143,6 +186,117 @@ def bootstrap_ci(
         high=means[min(int((1 - alpha) * resamples), resamples - 1)],
         n=n,
     )
+
+
+def _validate_bootstrap_scores(
+    scores: Sequence[float],
+    *,
+    name: str,
+    resamples: int,
+) -> None:
+    if not scores:
+        raise ValueError("scores must be non-empty")
+    if resamples < 1:
+        raise ValueError(f"resamples must be >= 1, got {resamples}")
+    if any(not math.isfinite(score) for score in scores):
+        raise ValueError(f"{name} must contain only finite values")
+
+
+def _cluster_groups[Cluster: Hashable](
+    values: Sequence[float],
+    clusters: Sequence[Cluster],
+    *,
+    name: str,
+) -> tuple[tuple[float, ...], ...]:
+    if len(values) != len(clusters):
+        raise ValueError(f"{name}/clusters length mismatch: {len(values)} vs {len(clusters)}")
+    if not values:
+        raise ValueError(f"{name} must be non-empty")
+    grouped: dict[Cluster, list[float]] = {}
+    for value, cluster in zip(values, clusters, strict=True):
+        try:
+            grouped.setdefault(cluster, []).append(value)
+        except TypeError as exc:
+            raise ValueError("clusters must contain hashable values") from exc
+    return tuple(tuple(grouped[cluster]) for cluster in grouped)
+
+
+def _resampled_cluster_mean(
+    groups: Sequence[Sequence[float]],
+    rng: random.Random,
+) -> float:
+    sampled = rng.choices(groups, k=len(groups))
+    total = sum(sum(group) for group in sampled)
+    count = sum(len(group) for group in sampled)
+    return total / count
+
+
+def clustered_bootstrap_ci[Cluster: Hashable](
+    scores: Sequence[float],
+    clusters: Sequence[Cluster],
+    *,
+    confidence: float = 0.95,
+    resamples: int = 10_000,
+    seed: int = 0,
+) -> BootstrapCI:
+    """Cluster bootstrap CI with a pair-weighted point estimate.
+
+    Clusters, rather than individual observations, are sampled with replacement.
+    Every selected cluster contributes all of its original observations, so the
+    bootstrap distribution permits arbitrary within-cluster dependence while the
+    reported point estimate remains the ordinary observation-weighted mean.
+    """
+    _validate_bootstrap_scores(scores, name="scores", resamples=resamples)
+    if not 0.0 < confidence < 1.0:
+        raise ValueError(f"confidence must be in (0, 1), got {confidence}")
+    groups = _cluster_groups(scores, clusters, name="scores")
+    rng = random.Random(seed)
+    means = sorted(_resampled_cluster_mean(groups, rng) for _ in range(resamples))
+    alpha = (1 - confidence) / 2
+    return BootstrapCI(
+        mean=sum(scores) / len(scores),
+        low=means[int(alpha * resamples)],
+        high=means[min(int((1 - alpha) * resamples), resamples - 1)],
+        n=len(groups),
+    )
+
+
+def clustered_paired_bootstrap_test[Cluster: Hashable](
+    baseline: Sequence[float],
+    treatment: Sequence[float],
+    clusters: Sequence[Cluster],
+    *,
+    alternative: Literal["greater", "two-sided"] = "greater",
+    resamples: int = 10_000,
+    seed: int = 0,
+) -> float:
+    """Centred paired cluster-bootstrap p-value.
+
+    Treatment-minus-baseline differences stay paired inside each cluster. The
+    null centres the observation-weighted differences globally, then samples
+    whole clusters with replacement and compares their pooled mean statistic.
+    """
+    if len(baseline) != len(treatment):
+        raise ValueError(f"length mismatch: {len(baseline)} vs {len(treatment)}")
+    if alternative not in ("greater", "two-sided"):
+        raise ValueError(f"alternative must be 'greater' or 'two-sided', got {alternative!r}")
+    _validate_bootstrap_scores(baseline, name="baseline", resamples=resamples)
+    _validate_bootstrap_scores(treatment, name="treatment", resamples=resamples)
+    diffs = [right - left for left, right in zip(baseline, treatment, strict=True)]
+    observed = sum(diffs) / len(diffs)
+    centred = [difference - observed for difference in diffs]
+    groups = _cluster_groups(centred, clusters, name="differences")
+    rng = random.Random(seed)
+
+    def extreme(sampled: float) -> bool:
+        if alternative == "two-sided":
+            return abs(sampled) >= abs(observed)
+        return sampled >= observed
+
+    at_least_as_extreme = sum(
+        1 for _ in range(resamples) if extreme(_resampled_cluster_mean(groups, rng))
+    )
+    return (at_least_as_extreme + 1) / (resamples + 1)
 
 
 def bootstrap_p_floor(resamples: int) -> float:
@@ -166,62 +320,43 @@ def paired_bootstrap_test(
     baseline: Sequence[float],
     treatment: Sequence[float],
     *,
+    alternative: Literal["greater", "two-sided"] = "greater",
     resamples: int = 10_000,
     seed: int = 0,
 ) -> float:
-    """One-sided paired bootstrap p-value for ``treatment > baseline``.
+    """Centred paired-bootstrap p-value for one- or two-sided alternatives.
 
-    Queries are resampled as pairs, which is what makes this *paired*: the two
-    systems saw identical queries, so the per-query difference is far less noisy
-    than either system's absolute score. This is standard practice in IR and is
-    the right test for an ablation table where every arm shares a query set.
+    Score units are resampled as pairs, which is what makes this *paired*: the
+    two systems saw identical observations, so their difference is less noisy
+    than either system's absolute score. Correlated observations must first be
+    reduced to independent cluster-level values.
 
-    Sensitivity depends on how correlated the arms are, not on the headline gap
-    alone. At n=500 a +1pp gain where nothing regresses is detectable; the same
-    +1pp net gain is not, once some queries improve and others break. Report the
-    :func:`win_loss_tie` counts alongside the p-value so the reader can tell
-    which case they are looking at.
-
-    Two properties worth knowing before quoting the number:
-
-    * **It is one-sided.** A p of 0.60 does not mean "baseline wins"; it means
-      "no evidence that treatment wins". Swap the arguments to ask the other
-      question, and say which direction was tested when reporting.
-    * **It has a resolution floor** of :func:`bootstrap_p_floor`. For a *binary*
-      metric prefer :func:`mcnemar_exact`, which is exact and has no floor.
+    ``alternative='greater'`` preserves the original one-sided contract for
+    ``treatment > baseline``. ``'two-sided'`` tests any non-zero mean difference
+    by comparing absolute statistics. Both forms have the add-one resolution
+    floor exposed by :func:`bootstrap_p_floor`; report effect sizes and
+    :func:`win_loss_tie` counts next to the p-value.
     """
     if len(baseline) != len(treatment):
         raise ValueError(f"length mismatch: {len(baseline)} vs {len(treatment)}")
-    if not baseline:
-        raise ValueError("scores must be non-empty")
+    if alternative not in ("greater", "two-sided"):
+        raise ValueError(f"alternative must be 'greater' or 'two-sided', got {alternative!r}")
+    _validate_bootstrap_scores(baseline, name="baseline", resamples=resamples)
+    _validate_bootstrap_scores(treatment, name="treatment", resamples=resamples)
 
     diffs = [t - b for b, t in zip(baseline, treatment, strict=True)]
     observed = sum(diffs) / len(diffs)
-
+    centred = [difference - observed for difference in diffs]
     rng = random.Random(seed)
     n = len(diffs)
-    # Centre the differences so the resampling distribution matches H0: mean = 0.
-    #
-    # A regression (observed <= 0) is *not* short-circuited to 1.0 here. That
-    # shortcut is conservative and never produces a false discovery, but it
-    # discards the distinction between "clearly worse" and "a hair below zero",
-    # and it feeds a family of identical 1.0s into Holm where the real values
-    # would have been spread out. The general path costs one more resampling
-    # loop and returns the actual one-sided p-value.
-    #
-    # The constant-difference case is worth knowing about because it is not
-    # symmetric. Centring leaves a zero-variance null, so every resample ties
-    # the observation and the test reduces to asking `0 >= observed`: exactly
-    # 1.0 when the constant is <= 0, and the floor -- the most significant value
-    # the estimator can emit -- when it is > 0, however tiny. A change that
-    # shifts every query by the same epsilon therefore reports as the strongest
-    # arm in the table. That is the bootstrap being asked a question it cannot
-    # answer (there is no per-query variation to resample), not a defect to
-    # patch here; report win/loss counts and the effect size next to any p-value
-    # and the case is self-evidently degenerate.
-    centred = [d - observed for d in diffs]
+
+    def extreme(sampled: float) -> bool:
+        if alternative == "two-sided":
+            return abs(sampled) >= abs(observed)
+        return sampled >= observed
+
     at_least_as_extreme = sum(
-        1 for _ in range(resamples) if sum(rng.choices(centred, k=n)) / n >= observed
+        1 for _ in range(resamples) if extreme(sum(rng.choices(centred, k=n)) / n)
     )
     return (at_least_as_extreme + 1) / (resamples + 1)
 
@@ -380,6 +515,22 @@ def mcnemar_exact(
     return min(1.0, 2 * min(lower, upper))
 
 
+def _ordered_pvalues(pvalues: Mapping[str, float]) -> list[tuple[str, float]]:
+    ordered: list[tuple[str, float]] = []
+    for name, value in pvalues.items():
+        if not isinstance(name, str) or not name:
+            raise ValueError("p-value names must be non-empty strings")
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or not 0.0 <= value <= 1.0
+        ):
+            raise ValueError(f"p-value for {name!r} must be finite and in [0, 1]")
+        ordered.append((name, float(value)))
+    return sorted(ordered, key=lambda item: (item[1], item[0]))
+
+
 def holm_floor_flags(
     raw: Mapping[str, float],
     raw_at_floor: Mapping[str, bool],
@@ -393,8 +544,10 @@ def holm_floor_flags(
     """
     if set(raw) != set(raw_at_floor):
         raise ValueError("raw p-values and floor flags must have identical keys")
+    if any(not isinstance(flag, bool) for flag in raw_at_floor.values()):
+        raise ValueError("floor flags must be boolean")
 
-    ordered = sorted(raw.items(), key=lambda item: item[1])
+    ordered = _ordered_pvalues(raw)
     running = 0.0
     running_at_floor = False
     floor_flags: dict[str, bool] = {}
@@ -438,7 +591,7 @@ def holm_bonferroni(
     if not 0 < alpha < 1:
         raise ValueError(f"alpha must be in (0, 1), got {alpha}")
 
-    ordered = sorted(pvalues.items(), key=lambda kv: kv[1])
+    ordered = _ordered_pvalues(pvalues)
     m = len(ordered)
     out: dict[str, tuple[float, bool]] = {}
     running = 0.0

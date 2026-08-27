@@ -88,6 +88,7 @@ RERANK_CACHE = EVAL / "rerank_scores_top100.jsonl"
 RUNS = EVAL / "runs.jsonl"
 POOL = EVAL / "pool.jsonl"
 POOL_REPORT = EVAL / "pool_report.json"
+ARTIFACT_LOCK = ".artifacts.lock"
 
 TARGET_TOKENS = 400
 HARD_MAX_TOKENS = 600
@@ -599,13 +600,16 @@ def _write_runs(
         write_jsonl(staged_runs, rows)
         write_jsonl(staged_pool, pools)
         write_json(staged_report, report)
-        replace_files(
-            (
-                (staged_runs, run_path),
-                (staged_pool, pool_path),
-                (staged_report, report_path),
+        # Shared bundle lock, acquired inside the .pool.lock operation lock, so a
+        # reader holding it never observes a half-replaced runs/pool/report set.
+        with exclusive_lock(eval_root / ARTIFACT_LOCK):
+            replace_files(
+                (
+                    (staged_runs, run_path),
+                    (staged_pool, pool_path),
+                    (staged_report, report_path),
+                )
             )
-        )
     finally:
         for path in staged:
             path.unlink(missing_ok=True)

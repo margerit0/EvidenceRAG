@@ -41,6 +41,7 @@ from zhrag.ingest import (
     scope_fingerprint,
     write_state,
 )
+from zhrag.io_utils import exclusive_lock, replace_files
 from zhrag.lexical import build_sparse_index, write_sparse_index
 from zhrag.lexical.sparse import SparseBuild
 from zhrag.providers.embedding import EmbeddingClient, EmbeddingConfig, load_env, load_or_embed
@@ -57,6 +58,7 @@ HARD_MAX_TOKENS = 600
 #: not transfer to this index and must not be reported as if they did.
 EMBEDDING_PROFILE = "qwen3-embedding-8b-tidb-doc-4096-v1"
 DENSE_WIDTH = 4096
+ARTIFACT_LOCK = ".artifacts.lock"
 
 
 def _reconfigure_streams() -> None:
@@ -159,33 +161,55 @@ def _write_and_verify(
 
 
 def _publish(
+    store: MilvusStore,
     args: argparse.Namespace,
+    *,
     planned: tuple[DocumentPlan, ...],
     sparse: SparseBuild,
     scope: Scope,
     collection_name: str,
 ) -> None:
-    write_state(
-        args.artifacts / "state.json",
-        IngestState(
-            scope=scope_fingerprint(scope),
-            chunker_fingerprint=chunker_fingerprint(
-                target_tokens=TARGET_TOKENS,
-                hard_max_tokens=HARD_MAX_TOKENS,
-            ),
-            embedding_profile=EMBEDDING_PROFILE,
-            sparse_fingerprint=sparse.index.fingerprint,
-            collection_name=collection_name,
-            documents={
-                plan.key: {
-                    "document_sha256": plan.document_sha256,
-                    "metadata_fingerprint": plan.metadata_fingerprint,
-                    "chunk_ids": list(plan.chunk_ids),
-                }
-                for plan in planned
-            },
+    """Switch the alias and publish its sparse/state bundle under one lock."""
+    sparse_target = args.artifacts / "sparse_index.json"
+    state_target = args.artifacts / "state.json"
+    staged_sparse = sparse_target.with_suffix(sparse_target.suffix + ".tmp")
+    staged_state = state_target.with_suffix(state_target.suffix + ".tmp")
+    staged = (staged_sparse, staged_state)
+    state = IngestState(
+        scope=scope_fingerprint(scope),
+        chunker_fingerprint=chunker_fingerprint(
+            target_tokens=TARGET_TOKENS,
+            hard_max_tokens=HARD_MAX_TOKENS,
         ),
+        embedding_profile=EMBEDDING_PROFILE,
+        sparse_fingerprint=sparse.index.fingerprint,
+        collection_name=collection_name,
+        documents={
+            plan.key: {
+                "document_sha256": plan.document_sha256,
+                "metadata_fingerprint": plan.metadata_fingerprint,
+                "chunk_ids": list(plan.chunk_ids),
+            }
+            for plan in planned
+        },
     )
+    try:
+        write_sparse_index(staged_sparse, sparse.index)
+        write_state(staged_state, state)
+        # The operation lock prevents two index builds from sharing these staged
+        # names. Acquire the cross-artifact lock before touching the live alias so
+        # a contending documentation/evaluation reader leaves the old index live.
+        with exclusive_lock(args.artifacts / "eval" / ARTIFACT_LOCK):
+            store.activate_alias(args.alias)
+            replace_files(
+                (
+                    (staged_sparse, sparse_target),
+                    (staged_state, state_target),
+                )
+            )
+    finally:
+        for path in staged:
+            path.unlink(missing_ok=True)
     print(f"published {args.alias} -> {collection_name}")
 
 
@@ -221,14 +245,17 @@ def _build(
         if not args.publish:
             print(f"built {collection_name}; re-run with --publish to switch {args.alias!r}")
             return 0
-        store.activate_alias(args.alias)
+        _publish(
+            store,
+            args,
+            planned=planned,
+            sparse=sparse,
+            scope=scope,
+            collection_name=collection_name,
+        )
     finally:
         store.close()
 
-    # The vocabulary is written only on the publishing path: a query encoder must
-    # never be able to load a vocabulary that no live collection was built with.
-    write_sparse_index(args.artifacts / "sparse_index.json", sparse.index)
-    _publish(args, planned, sparse, scope, collection_name)
     return 0
 
 
@@ -277,14 +304,15 @@ def main(argv: list[str] | None = None) -> int:
     if not args.embed:
         print("! refusing to embed without --embed (this step sends paid requests)")
         return 1
-    return _build(
-        args,
-        planned,
-        corpus,
-        sparse=sparse,
-        scope=scope,
-        collection_name=collection_name,
-    )
+    with exclusive_lock(args.artifacts / ".index.lock"):
+        return _build(
+            args,
+            planned,
+            corpus,
+            sparse=sparse,
+            scope=scope,
+            collection_name=collection_name,
+        )
 
 
 if __name__ == "__main__":

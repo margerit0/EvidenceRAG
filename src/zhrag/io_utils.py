@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import tempfile
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -73,6 +75,24 @@ def exclusive_lock(path: str | Path) -> Iterator[None]:
         lock.unlink(missing_ok=True)
 
 
+def _snapshot(target: Path) -> Path:
+    """Snapshot an existing target beside itself so publication can be undone.
+
+    A hard link is preferred because it is O(1) and shares the old inode, so the
+    later ``os.replace`` swaps only the directory entry. Filesystems without
+    hard links fall back to a copy.
+    """
+    fd, name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".rollback", dir=target.parent)
+    os.close(fd)
+    backup = Path(name)
+    backup.unlink()
+    try:
+        os.link(target, backup)
+    except (OSError, NotImplementedError):
+        shutil.copy2(target, backup)
+    return backup
+
+
 def replace_files(staged: Iterable[tuple[str | Path, str | Path]]) -> None:
     """Replace a validated bundle of files, publishing its marker last.
 
@@ -80,6 +100,12 @@ def replace_files(staged: Iterable[tuple[str | Path, str | Path]]) -> None:
     bundle's report/manifest. ``os.replace`` is atomic for each file on the same
     filesystem; publishing the marker last means readers never mistake a partial
     replacement for a complete new bundle after a crash between replacements.
+
+    If a replacement *raises*, every target already published in this call is
+    rolled back to its previous content and targets that did not exist before
+    are removed, so a failed bundle never publishes half of itself. This is
+    exception safety, not crash atomicity: a process killed mid-loop can still
+    leave a mixed bundle, which is why the marker is published last.
     """
     pairs = [(Path(source), Path(target)) for source, target in staged]
     if not pairs:
@@ -91,9 +117,29 @@ def replace_files(staged: Iterable[tuple[str | Path, str | Path]]) -> None:
     missing = [source for source in sources if not source.is_file()]
     if missing:
         raise FileNotFoundError(f"staged replacement is absent: {missing[0]}")
-    for source, target in pairs:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(source, target)
+
+    published: list[tuple[Path, Path | None]] = []
+    try:
+        for source, target in pairs:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            backup = _snapshot(target) if target.is_file() else None
+            try:
+                os.replace(source, target)
+            except BaseException:
+                if backup is not None:
+                    backup.unlink(missing_ok=True)
+                raise
+            published.append((target, backup))
+    except BaseException:
+        for target, backup in reversed(published):
+            if backup is None:
+                target.unlink(missing_ok=True)
+            else:
+                os.replace(backup, target)
+        raise
+    for _target, backup in published:
+        if backup is not None:
+            backup.unlink(missing_ok=True)
 
 
 def read_bytes(path: str | Path) -> bytes:

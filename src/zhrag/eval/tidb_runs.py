@@ -23,7 +23,7 @@ from numpy.typing import NDArray
 from zhrag.eval.rerank import rerank_prefix
 from zhrag.eval.retrieval import dense_runs
 from zhrag.lexical import SparseIndex, sparse_dot
-from zhrag.retrieval import reciprocal_rank_fusion
+from zhrag.retrieval.fusion import reciprocal_rank_fusion
 
 __all__ = [
     "DENSE_LABEL",

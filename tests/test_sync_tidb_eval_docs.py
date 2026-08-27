@@ -1,21 +1,20 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
+import os
 import sys
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
-from zhrag.io_utils import read_text, write_json, write_text
-
-RUN_LABELS = (
-    "bm25-char-bigram",
-    "dense-qwen3-4096",
-    "rrf-k10-depth100",
-    "rerank-qwen3-top50",
-)
+from test_tidb_quality import _Fixture
+from zhrag.eval.tidb_quality import PRIMARY_METRIC, RUN_LABELS
+from zhrag.io_utils import read_json, read_text, write_json, write_jsonl, write_text
 
 
 def _runner() -> ModuleType:
@@ -42,32 +41,36 @@ def _write_junit(path: Path, *, tests: int = 7, failures: int = 0, skipped: int 
     write_text(path, ET.tostring(root, encoding="unicode"))
 
 
-def _reports(root: Path, *, qrels_overrides: dict[str, object] | None = None) -> Path:
+def _reports(
+    root: Path,
+    *,
+    qrels_overrides: dict[str, object] | None = None,
+    qgen_overrides: dict[str, object] | None = None,
+    quality_mutator: Callable[[dict[str, Any]], None] | None = None,
+) -> Path:
+    fixture = _Fixture()
     artifacts = root / "indexes" / "tidb"
     eval_root = artifacts / "eval"
-    documents = {
-        "doc-a": {"chunk_ids": ["chunk-a", "chunk-b"]},
-        "doc-b": {"chunk_ids": ["chunk-c"]},
-    }
-    state = {
-        "schema": "zhrag-ingest-state-v1",
-        "collection_name": "tidb_chunks_v1",
-        "documents": documents,
-        "chunker_fingerprint": "chunker",
-        "embedding_profile": "qwen3-embedding-8b-tidb-doc-4096-v1",
-        "scope": "scope",
-        "sparse_fingerprint": "sparse",
-    }
+    state = copy.deepcopy(fixture.state)
+    state["chunker_fingerprint"] = "chunker"
+    state["scope"] = "scope"
+    state["sparse_fingerprint"] = "sparse"
     qgen = {
         "schema": "zhrag-tidb-qgen-v1",
         "sampled_chunks": 4,
-        "pairs_verified": 3,
+        "generator_model_requested": "same-model",
+        "generator_models_served": {"same-model": 4},
+        "verifier_model_requested": "same-model",
+        "verifier_models_served": {"same-model": 3},
+        "verification_independence": "same-requested-model self-agreement",
+        "reasoning_effort": "high",
+        "pairs_verified": 4,
         "pairs_dropped": 1,
-        "complete_pairs": 2,
-        "queries": 4,
-        "queries_by_variant": {"direct": 2, "paraphrase": 2},
+        "complete_pairs": 3,
+        "queries": 6,
+        "queries_by_variant": {"direct": 3, "paraphrase": 3},
         "published_index": {
-            "chunks": 3,
+            "chunks": len(fixture.doc_ids),
             "collection": "tidb_chunks_v1",
             "chunker": "chunker",
             "embedding_profile": "qwen3-embedding-8b-tidb-doc-4096-v1",
@@ -75,52 +78,46 @@ def _reports(root: Path, *, qrels_overrides: dict[str, object] | None = None) ->
             "sparse": "sparse",
         },
     }
-    pool = {
-        "schema": "zhrag-tidb-runs-v1",
-        "queries": 4,
-        "pairs": 2,
-        "corpus_chunks": 3,
-        "query_set_fingerprint": "queries",
-        "pool_fingerprint": "pool",
-        "runs_fingerprint": "runs",
-        "pool_candidates_total": 6,
-        "pool_candidates_min": 2,
-        "pool_candidates_mean": 3.0,
-        "pool_candidates_max": 4,
-    }
-    qrels: dict[str, object] = {
-        "schema": "zhrag-tidb-qrels-v1",
-        "queries": 4,
-        "pairs": 2,
-        "corpus_chunks": 3,
-        "query_set_fingerprint_sha256": "queries",
-        "pool_fingerprint_sha256": "pool",
-        "runs_fingerprint_sha256": "runs",
-        "batches": 2,
-        "cache_batches": 2,
-        "cache_valid_batches": 2,
-        "grades": {"0": 3, "1": 1, "2": 2},
-        "generating_chunk_grades": {"0": 0, "1": 1, "2": 1},
-        "generating_chunk_disagreement_rate": 0.5,
-        "run_judged_coverage": {
-            label: {
-                "queries": 4,
-                "top1_complete": 4,
-                "top1_rate": 1.0,
-                "top10_complete": 4,
-                "top10_rate": 1.0,
-            }
-            for label in RUN_LABELS
-        },
-    }
+    if qgen_overrides:
+        qgen.update(qgen_overrides)
+    pool = copy.deepcopy(fixture.pool_report)
+    qrels = copy.deepcopy(fixture.qrels_report)
+    qrels["requested_model"] = "same-model"
+    qrels["served_models"] = {"same-model": qrels["batches"]}
+    qrels["reasoning_effort"] = "high"
     if qrels_overrides:
         qrels.update(qrels_overrides)
+    quality = fixture.evaluate(resamples=30, seed=7)
+    if quality_mutator is not None:
+        quality_mutator(quality)
     write_json(artifacts / "state.json", state)
     write_json(eval_root / "report.json", qgen)
     write_json(eval_root / "pool_report.json", pool)
     write_json(eval_root / "qrels_report.json", qrels)
+    write_json(eval_root / "quality_report.json", quality)
+    write_jsonl(eval_root / "runs.jsonl", fixture.run_rows)
+    write_jsonl(eval_root / "qrels.jsonl", fixture.qrel_rows)
     _write_junit(eval_root / "pytest.xml")
     return artifacts
+
+
+def _mutate(
+    path: tuple[str | int, ...],
+    value: object,
+) -> Callable[[dict[str, Any]], None]:
+    def apply(report: dict[str, Any]) -> None:
+        target: Any = report
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+
+    return apply
+
+
+def _read_quality(artifacts: Path) -> dict[str, Any]:
+    value = read_json(artifacts / "eval" / "quality_report.json")
+    assert isinstance(value, dict)
+    return value
 
 
 def _docs(root: Path, *, duplicate_readme_marker: bool = False) -> tuple[Path, Path, Path]:
@@ -195,20 +192,59 @@ class TestReportValidation:
 
         status = runner.load_status(artifacts)
 
-        assert status.documents == 2
-        assert status.chunks == 3
-        assert status.verified_pairs == 2
-        assert status.queries == 4
-        assert status.pool_candidates == 6
-        assert status.judging_batches == 2
+        fixture = _Fixture()
+        assert status.documents == 1
+        assert status.chunks == len(fixture.doc_ids)
+        assert status.verified_pairs == 3
+        assert status.queries == 6
+        assert status.pool_candidates == fixture.pool_report["pool_candidates_total"]
+        assert status.judging_batches == fixture.qrels_report["batches"]
+        assert status.quality["schema"] == "zhrag-tidb-retrieval-quality-v2"
+        assert status.source_clusters == 2
         assert status.tests == 7
+
+    @pytest.mark.parametrize("name", ["runs.jsonl", "qrels.jsonl"])
+    def test_requires_raw_artifacts_to_authenticate_the_report(
+        self,
+        tmp_path: Path,
+        name: str,
+    ) -> None:
+        runner = _runner()
+        artifacts = _reports(tmp_path)
+        (artifacts / "eval" / name).unlink()
+
+        with pytest.raises(SystemExit, match="raw artifacts are absent"):
+            runner.load_status(artifacts)
+
+    def test_rejects_structurally_valid_forged_statistics(self, tmp_path: Path) -> None:
+        runner = _runner()
+        artifacts = _reports(tmp_path)
+        quality = _read_quality(artifacts)
+        interval = quality["system_metrics"][RUN_LABELS[0]]["overall"][PRIMARY_METRIC]
+        interval["mean"] = 0.987654
+        interval["low"] = 0.9
+        interval["high"] = 0.99
+        write_json(artifacts / "eval" / "quality_report.json", quality)
+
+        with pytest.raises(SystemExit, match="deterministic recomputation"):
+            runner.load_status(artifacts)
+
+    def test_rejects_a_forged_qrels_semantic_digest(self, tmp_path: Path) -> None:
+        runner = _runner()
+        artifacts = _reports(tmp_path)
+        quality = _read_quality(artifacts)
+        quality["inputs"]["qrels_semantic_fingerprint_sha256"] = "a" * 64
+        write_json(artifacts / "eval" / "quality_report.json", quality)
+
+        with pytest.raises(SystemExit, match="deterministic recomputation"):
+            runner.load_status(artifacts)
 
     @pytest.mark.parametrize(
         ("override", "message"),
         [
-            ({"query_set_fingerprint_sha256": "wrong"}, "query-set fingerprint"),
+            ({"query_set_fingerprint_sha256": "0" * 64}, "query-set fingerprint"),
             ({"cache_valid_batches": 1}, "cache batch count"),
-            ({"grades": {"0": 3, "1": 1, "2": 1}}, "grade counts"),
+            ({"grades": {"0": 1, "1": 1, "2": 1}}, "grade counts"),
         ],
     )
     def test_fails_closed_on_cross_report_drift(
@@ -222,19 +258,134 @@ class TestReportValidation:
         with pytest.raises(SystemExit, match=message):
             runner.load_status(artifacts)
 
+    @pytest.mark.parametrize(
+        ("path", "value", "message"),
+        [
+            (
+                ("inputs", "query_set_fingerprint_sha256"),
+                "0" * 64,
+                "quality query_set_fingerprint",
+            ),
+            (("qrels_quality", "raw_grades", "0"), 1, "raw grade aggregates"),
+            (
+                ("qrels_quality", "generating_chunk_grades", "1"),
+                0,
+                "generating grade aggregates",
+            ),
+            (("qrels_quality", "promoted_generating_chunks"), 0, "promoted generating"),
+            (("qrels_quality", "judging_batches"), 1, "judging batch"),
+            (
+                (
+                    "qrels_quality",
+                    "run_judged_coverage",
+                    "dense-qwen3-4096",
+                    "top10_all_returned_judged",
+                ),
+                5,
+                "top-10 is inconsistent",
+            ),
+        ],
+    )
+    def test_fails_closed_on_quality_report_drift(
+        self,
+        tmp_path: Path,
+        path: tuple[str | int, ...],
+        value: object,
+        message: str,
+    ) -> None:
+        runner = _runner()
+        artifacts = _reports(tmp_path)
+        quality = _read_quality(artifacts)
+        _mutate(path, value)(quality)
+        write_json(artifacts / "eval" / "quality_report.json", quality)
+
+        with pytest.raises(SystemExit, match=message):
+            runner.load_status(artifacts)
+
+    @pytest.mark.parametrize(
+        ("path", "value", "message"),
+        [
+            (("evaluation_design", "paired_test"), "unpaired", "inferential method"),
+            (
+                ("system_metrics", RUN_LABELS[0], "overall", PRIMARY_METRIC, "low"),
+                2.0,
+                "interval bounds",
+            ),
+            (("primary_contrasts", 0, "adjusted_p"), 0.123456, "Holm-adjusted"),
+            (("primary_contrasts", 0, "raw_p_at_floor"), True, "floor provenance"),
+        ],
+    )
+    def test_rejects_malformed_quality_method_or_statistics(
+        self,
+        tmp_path: Path,
+        path: tuple[str | int, ...],
+        value: object,
+        message: str,
+    ) -> None:
+        runner = _runner()
+        artifacts = _reports(tmp_path)
+        quality = _read_quality(artifacts)
+        _mutate(path, value)(quality)
+        write_json(artifacts / "eval" / "quality_report.json", quality)
+
+        with pytest.raises(SystemExit, match=message):
+            runner.load_status(artifacts)
+
+    @pytest.mark.parametrize(
+        ("qgen_overrides", "qrels_overrides", "message"),
+        [
+            (
+                {"verifier_model_requested": "other-model"},
+                None,
+                "synthetic label requested model",
+            ),
+            (
+                {"verification_independence": "unknown"},
+                None,
+                "unknown verification independence",
+            ),
+            (
+                None,
+                {"reasoning_effort": "low"},
+                "synthetic label reasoning effort",
+            ),
+            (
+                {"generator_models_served": {"different-served-model": 4}},
+                None,
+                "served synthetic-label models",
+            ),
+        ],
+    )
+    def test_rejects_label_provenance_drift(
+        self,
+        tmp_path: Path,
+        qgen_overrides: dict[str, object] | None,
+        qrels_overrides: dict[str, object] | None,
+        message: str,
+    ) -> None:
+        runner = _runner()
+        artifacts = _reports(
+            tmp_path,
+            qgen_overrides=qgen_overrides,
+            qrels_overrides=qrels_overrides,
+        )
+
+        with pytest.raises(SystemExit, match=message):
+            runner.load_status(artifacts)
+
+    def test_requires_quality_report(self, tmp_path: Path) -> None:
+        runner = _runner()
+        artifacts = _reports(tmp_path)
+        (artifacts / "eval" / "quality_report.json").unlink()
+
+        with pytest.raises(FileNotFoundError, match="quality_report"):
+            runner.load_status(artifacts)
+
     def test_rejects_incomplete_coverage_or_quality_gate(self, tmp_path: Path) -> None:
         runner = _runner()
-        coverage = {
-            label: {
-                "queries": 4,
-                "top1_complete": 4,
-                "top1_rate": 1.0,
-                "top10_complete": 4,
-                "top10_rate": 1.0,
-            }
-            for label in RUN_LABELS
-        }
-        coverage["dense-qwen3-4096"]["top10_complete"] = 3
+        fixture = _Fixture()
+        coverage = copy.deepcopy(fixture.qrels_report["run_judged_coverage"])
+        coverage["dense-qwen3-4096"]["top10_complete"] = 5
         artifacts = _reports(tmp_path, qrels_overrides={"run_judged_coverage": coverage})
         with pytest.raises(SystemExit, match="coverage is incomplete"):
             runner.load_status(artifacts)
@@ -253,11 +404,31 @@ class TestSynchronization:
 
         assert runner.synchronize(_args(runner, tmp_path)) == (readme, architecture, claude)
         first = tuple(read_text(path) for path in (readme, architecture, claude))
-        assert "2 组 direct/paraphrase、4 条 query" in first[0]
+        assert "3 组 direct/paraphrase、6 条 query" in first[0]
+        assert "2 个 `gold_source_key` 源聚类" in first[0]
+        assert "source-cluster bootstrap 95% CI" in first[0]
+        assert "独立单位" not in first[0]
+        assert "`ruff check` 全通过" not in first[0]
+        assert "`mypy --strict` 无告警" not in first[0]
+        assert "binary nDCG@10" in first[0]
+        assert "预声明主检验族" in first[0]
+        assert "direct → paraphrase robustness" in first[0]
+        assert "词面重叠分层" in first[0]
+        assert "same-model self-agreement" in first[0]
         assert "100% **已判断覆盖**" in first[0]
         assert "`pytest` 7 passed" in first[0]
         assert "无上游人工 gold" in first[1]
-        assert "judging_cache.jsonl" in first[2]
+        assert "quality_report.json" in first[2]
+        serialized = "\n".join(first)
+        for forbidden in (
+            "直接问题",
+            "改写问题",
+            "答案 0",
+            "source-0",
+            "chunk-000",
+            "direct:unrelated",
+        ):
+            assert forbidden not in serialized
         assert runner.synchronize(_args(runner, tmp_path)) == ()
         assert tuple(read_text(path) for path in (readme, architecture, claude)) == first
         assert runner.synchronize(_args(runner, tmp_path, check=True)) == ()
@@ -272,6 +443,48 @@ class TestSynchronization:
             runner.synchronize(_args(runner, tmp_path, check=True))
 
         assert tuple(read_text(path) for path in (readme, architecture, claude)) == before
+
+    def test_publication_failure_rolls_back_every_document(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner()
+        _reports(tmp_path)
+        readme, architecture, claude = _docs(tmp_path)
+        before = tuple(read_text(path) for path in (readme, architecture, claude))
+        real_replace = os.replace
+        calls = {"n": 0}
+
+        def flaky(source: object, target: object) -> None:
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise OSError("injected replacement failure")
+            real_replace(source, target)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(os, "replace", flaky)
+
+        with pytest.raises(OSError, match="injected replacement failure"):
+            runner.synchronize(_args(runner, tmp_path))
+
+        monkeypatch.undo()
+        assert tuple(read_text(path) for path in (readme, architecture, claude)) == before
+        assert not list(tmp_path.glob("*.sync.tmp"))
+
+    def test_refuses_to_run_while_a_bundle_writer_holds_the_shared_lock(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner()
+        artifacts = _reports(tmp_path)
+        _docs(tmp_path)
+        lock = artifacts / "eval" / runner.ARTIFACT_LOCK
+        write_text(lock, "pid=123\n")
+
+        with pytest.raises(SystemExit, match="another writer"):
+            runner.synchronize(_args(runner, tmp_path))
+
+        assert read_text(lock) == "pid=123\n"
 
     def test_validates_every_document_before_writing_any(self, tmp_path: Path) -> None:
         runner = _runner()

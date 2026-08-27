@@ -55,7 +55,7 @@ class TestPublishedIndexValidation:
     def test_accepts_the_exact_evergreen_chunk_set(self, tmp_path: Path) -> None:
         runner = _runner()
         write_state(tmp_path / "state.json", _state())
-        runner._verify_against_index([_chunk()], tmp_path)
+        assert runner._verify_against_index([_chunk()], tmp_path) == _state()
 
     def test_rejects_scope_drift(self, tmp_path: Path) -> None:
         runner = _runner()
@@ -257,7 +257,11 @@ class TestWrite:
     def _args(self, runner: ModuleType, tmp_path: Path) -> object:
         return runner._parse_args(["--artifacts", str(tmp_path)])
 
-    def test_writes_both_variants_of_a_surviving_pair(self, tmp_path: Path) -> None:
+    def test_writes_both_variants_of_a_surviving_pair(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
         runner = _runner()
         chunk = _chunk()
         kept = [
@@ -266,6 +270,14 @@ class TestWrite:
                 "p", chunk.chunk_id, "paraphrase", "事务隔离级别怎样配置", "答案", "config"
             ),
         ]
+        shared_lock = tmp_path / runner.ARTIFACT_LOCK
+        real_replace = runner.replace_files
+
+        def replace_while_locked(staged: list[tuple[Path, Path]]) -> None:
+            assert shared_lock.is_file()
+            real_replace(staged)
+
+        monkeypatch.setattr(runner, "replace_files", replace_while_locked)
 
         code = runner._write(
             self._args(runner, tmp_path),
@@ -281,6 +293,41 @@ class TestWrite:
         assert [row["task"] for row in rows] == ["direct", "paraphrase"]
         assert all(row["gold_doc_ids"] == [chunk.chunk_id] for row in rows)
         assert read_json(tmp_path / "report.json")["complete_pairs"] == 1
+        assert not shared_lock.exists()
+
+    def test_rechecks_published_state_under_the_shared_lock_before_writing(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner()
+        chunk = _chunk()
+        kept = [
+            GeneratedQuery("d", chunk.chunk_id, "direct", "如何配置事务隔离级别", "答案", "config"),
+            GeneratedQuery(
+                "p", chunk.chunk_id, "paraphrase", "事务隔离级别怎样配置", "答案", "config"
+            ),
+        ]
+        expected_state = _state()
+        write_state(tmp_path / "state.json", _state("replacement"))
+        write_jsonl(tmp_path / "queries.jsonl", [{"query_id": "previous"}])
+        write_json(tmp_path / "report.json", {"status": "previous"})
+
+        with pytest.raises(SystemExit, match="changed during query generation"):
+            runner._write(
+                self._args(runner, tmp_path),
+                kept=kept,
+                sample=[chunk],
+                by_chunk={chunk.chunk_id: chunk},
+                out=tmp_path,
+                report_extra={},
+                published_state=expected_state,
+            )
+
+        assert list(read_jsonl(tmp_path / "queries.jsonl")) == [{"query_id": "previous"}]
+        assert read_json(tmp_path / "report.json") == {"status": "previous"}
+        assert not (tmp_path / runner.ARTIFACT_LOCK).exists()
+        assert not (tmp_path / "queries.jsonl.tmp").exists()
+        assert not (tmp_path / "report.json.tmp").exists()
 
     def test_a_zero_survivor_run_fails_without_truncating_the_last_good_set(
         self, tmp_path: Path

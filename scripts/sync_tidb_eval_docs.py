@@ -15,6 +15,7 @@ Run tests with JUnit output before synchronization:
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping
@@ -22,8 +23,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from zhrag.eval.tidb_quality import (
+    PRIMARY_METRIC,
+    RUN_LABELS,
+    evaluate_tidb_quality,
+    validate_quality_report,
+)
 from zhrag.eval.tidb_runs import DENSE_LABEL, LEXICAL_LABEL, RERANK_LABEL, RRF_LABEL
-from zhrag.io_utils import read_json, read_text, replace_files, write_text
+from zhrag.io_utils import (
+    exclusive_lock,
+    read_json,
+    read_jsonl,
+    read_text,
+    replace_files,
+    write_text,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "indexes" / "tidb"
@@ -35,8 +49,8 @@ STATE_SCHEMA = "zhrag-ingest-state-v1"
 QGEN_SCHEMA = "zhrag-tidb-qgen-v1"
 POOL_SCHEMA = "zhrag-tidb-runs-v1"
 QRELS_SCHEMA = "zhrag-tidb-qrels-v1"
+ARTIFACT_LOCK = ".artifacts.lock"
 DOCUMENT_EMBEDDING_PROFILE = "qwen3-embedding-8b-tidb-doc-4096-v1"
-RUN_LABELS = (LEXICAL_LABEL, DENSE_LABEL, RRF_LABEL, RERANK_LABEL)
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +60,8 @@ class EvalStatus:
     collection: str
     sampled_chunks: int
     verified_pairs: int
+    source_clusters: int
+    label_provenance: str
     queries: int
     direct_queries: int
     paraphrase_queries: int
@@ -59,6 +75,7 @@ class EvalStatus:
     generating_disagreements: int
     generating_disagreement_rate: float
     tests: int
+    quality: Mapping[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +126,10 @@ def _number(row: Mapping[str, Any], name: str, *, source: Path) -> float:
     value = row.get(name)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise SystemExit(f"! {source}: {name} must be numeric")
-    return float(value)
+    result = float(value)
+    if not math.isfinite(result):
+        raise SystemExit(f"! {source}: {name} must be finite")
+    return result
 
 
 def _mapping(row: Mapping[str, Any], name: str, *, source: Path) -> Mapping[str, Any]:
@@ -167,15 +187,21 @@ def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
     qgen_path = eval_root / "report.json"
     pool_path = eval_root / "pool_report.json"
     qrels_path = eval_root / "qrels_report.json"
+    quality_path = eval_root / "quality_report.json"
     junit_path = eval_root / "pytest.xml"
     state = _object(state_path)
     qgen = _object(qgen_path)
     pool = _object(pool_path)
     qrels = _object(qrels_path)
+    quality = _object(quality_path)
     _schema(state, STATE_SCHEMA, source=state_path)
     _schema(qgen, QGEN_SCHEMA, source=qgen_path)
     _schema(pool, POOL_SCHEMA, source=pool_path)
     _schema(qrels, QRELS_SCHEMA, source=qrels_path)
+    try:
+        validate_quality_report(quality)
+    except ValueError as exc:
+        raise SystemExit(f"! {quality_path}: invalid quality report: {exc}") from exc
 
     documents = _mapping(state, "documents", source=state_path)
     if any(
@@ -213,6 +239,46 @@ def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
         )
 
     sampled = _integer(qgen, "sampled_chunks", source=qgen_path, minimum=1)
+    independence = _string(qgen, "verification_independence", source=qgen_path)
+    qgen_model = _string(qgen, "generator_model_requested", source=qgen_path)
+    verifier_model = _string(qgen, "verifier_model_requested", source=qgen_path)
+    judge_model = _string(qrels, "requested_model", source=qrels_path)
+    served_model_fields = (
+        (qgen, "generator_models_served", qgen_path),
+        (qgen, "verifier_models_served", qgen_path),
+        (qrels, "served_models", qrels_path),
+    )
+    served_models: set[str] = set()
+    for report, name, source in served_model_fields:
+        counts = _mapping(report, name, source=source)
+        if not counts:
+            raise SystemExit(f"! {source}: {name} must be non-empty")
+        for model in counts:
+            if not isinstance(model, str) or not model:
+                raise SystemExit(f"! {source}: {name} keys must be non-empty strings")
+            _integer(counts, model, source=source, minimum=1)
+            served_models.add(model)
+    label_provenance: str
+    if independence == "same-requested-model self-agreement":
+        _same("synthetic label requested model", qgen_model, verifier_model, judge_model)
+        if served_models != {qgen_model}:
+            raise SystemExit(
+                "! aggregate reports disagree on served synthetic-label models: "
+                f"requested={qgen_model!r}, served={sorted(served_models)!r}"
+            )
+        label_provenance = "same-model self-agreement"
+    elif independence == "different-requested-model review":
+        if qgen_model == verifier_model:
+            raise SystemExit(f"! {qgen_path}: different-model review uses identical models")
+        label_provenance = "different-model verification; judge provenance reported separately"
+    else:
+        raise SystemExit(f"! {qgen_path}: unknown verification independence {independence!r}")
+    _same(
+        "synthetic label reasoning effort",
+        _string(qgen, "reasoning_effort", source=qgen_path),
+        _string(qrels, "reasoning_effort", source=qrels_path),
+    )
+
     pairs = _integer(qgen, "complete_pairs", source=qgen_path, minimum=1)
     verified = _integer(qgen, "pairs_verified", source=qgen_path, minimum=1)
     dropped = _integer(qgen, "pairs_dropped", source=qgen_path)
@@ -251,6 +317,36 @@ def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
         _string(pool, "runs_fingerprint", source=pool_path),
         _string(qrels, "runs_fingerprint_sha256", source=qrels_path),
     )
+    quality_inputs = _mapping(quality, "inputs", source=quality_path)
+    quality_design = _mapping(quality, "evaluation_design", source=quality_path)
+    quality_qrels = _mapping(quality, "qrels_quality", source=quality_path)
+    _same(
+        "quality query count",
+        queries,
+        _integer(quality_design, "queries", source=quality_path, minimum=1),
+        _integer(quality_qrels, "queries", source=quality_path, minimum=1),
+    )
+    _same(
+        "quality pair count",
+        pairs,
+        _integer(quality_design, "pairs", source=quality_path, minimum=1),
+        _integer(quality_qrels, "pairs", source=quality_path, minimum=1),
+    )
+    _same(
+        "quality corpus count",
+        chunks,
+        _integer(quality_qrels, "corpus_chunks", source=quality_path, minimum=1),
+    )
+    for name, expected in (
+        ("query_set_fingerprint_sha256", _string(pool, "query_set_fingerprint", source=pool_path)),
+        ("pool_fingerprint_sha256", _string(pool, "pool_fingerprint", source=pool_path)),
+        ("runs_fingerprint_sha256", _string(pool, "runs_fingerprint", source=pool_path)),
+    ):
+        _same(
+            f"quality {name}",
+            expected,
+            _string(quality_inputs, name, source=quality_path),
+        )
 
     pool_total = _integer(pool, "pool_candidates_total", source=pool_path, minimum=1)
     pool_min = _integer(pool, "pool_candidates_min", source=pool_path, minimum=1)
@@ -258,6 +354,11 @@ def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
     pool_mean = _number(pool, "pool_candidates_mean", source=pool_path)
     if not pool_min <= pool_mean <= pool_max or abs(pool_mean * pairs - pool_total) > 1e-7:
         raise SystemExit(f"! {pool_path}: pool candidate aggregates do not reconcile")
+    quality_pool = _mapping(quality_qrels, "pool_candidates", source=quality_path)
+    _same("quality pool total", pool_total, _integer(quality_pool, "total", source=quality_path))
+    _same("quality pool minimum", pool_min, _integer(quality_pool, "min", source=quality_path))
+    _same("quality pool mean", pool_mean, _number(quality_pool, "mean", source=quality_path))
+    _same("quality pool maximum", pool_max, _integer(quality_pool, "max", source=quality_path))
 
     batches = _integer(qrels, "batches", source=qrels_path, minimum=1)
     _same(
@@ -266,14 +367,35 @@ def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
         _integer(qrels, "cache_batches", source=qrels_path),
         _integer(qrels, "cache_valid_batches", source=qrels_path),
     )
+    _same(
+        "quality judging batch count",
+        batches,
+        _integer(quality_qrels, "judging_batches", source=quality_path, minimum=1),
+    )
     grades = _mapping(qrels, "grades", source=qrels_path)
+    quality_grades = _mapping(quality_qrels, "raw_grades", source=quality_path)
     grade_zero = _integer(grades, "0", source=qrels_path)
     grade_one = _integer(grades, "1", source=qrels_path)
     grade_two = _integer(grades, "2", source=qrels_path)
     if grade_zero + grade_one + grade_two != pool_total:
         raise SystemExit(f"! {qrels_path}: grade counts do not equal pooled candidates")
+    for grade, count in zip(
+        ("0", "1", "2"),
+        (grade_zero, grade_one, grade_two),
+        strict=True,
+    ):
+        _same(
+            f"quality raw grade {grade}",
+            count,
+            _integer(quality_grades, grade, source=quality_path),
+        )
 
     generating = _mapping(qrels, "generating_chunk_grades", source=qrels_path)
+    quality_generating = _mapping(
+        quality_qrels,
+        "generating_chunk_grades",
+        source=quality_path,
+    )
     generating_counts = tuple(
         _integer(generating, str(grade), source=qrels_path) for grade in (0, 1, 2)
     )
@@ -283,18 +405,72 @@ def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
     disagreement_rate = _number(qrels, "generating_chunk_disagreement_rate", source=qrels_path)
     if abs(disagreement_rate - disagreements / pairs) > 1e-12:
         raise SystemExit(f"! {qrels_path}: generating-chunk disagreement rate is inconsistent")
+    for grade, count in zip(("0", "1", "2"), generating_counts, strict=True):
+        _same(
+            f"quality generating grade {grade}",
+            count,
+            _integer(quality_generating, grade, source=quality_path),
+        )
+    _same(
+        "quality promoted generating count",
+        disagreements,
+        _integer(quality_qrels, "promoted_generating_chunks", source=quality_path),
+    )
+
+    arity = _mapping(qrels, "gold_arity", source=qrels_path)
+    quality_arity = _mapping(quality_qrels, "gold_arity", source=quality_path)
+    arity_values = tuple(_number(arity, name, source=qrels_path) for name in ("min", "mean", "max"))
+    if not 1.0 <= arity_values[0] <= arity_values[1] <= arity_values[2]:
+        raise SystemExit(f"! {qrels_path}: gold arity aggregates are inconsistent")
+    for name, value in zip(("min", "mean", "max"), arity_values, strict=True):
+        _same(
+            f"quality gold arity {name}",
+            value,
+            _number(quality_arity, name, source=quality_path),
+        )
 
     coverage = _mapping(qrels, "run_judged_coverage", source=qrels_path)
+    quality_coverage = _mapping(
+        quality_qrels,
+        "run_judged_coverage",
+        source=quality_path,
+    )
     if set(coverage) != set(RUN_LABELS):
         raise SystemExit(f"! {qrels_path}: run coverage labels differ from the frozen systems")
+    if set(quality_coverage) != set(RUN_LABELS):  # pragma: no cover
+        raise AssertionError("validated quality coverage labels drifted")
     for label in RUN_LABELS:
         arm = _mapping(coverage, label, source=qrels_path)
+        quality_arm = _mapping(quality_coverage, label, source=quality_path)
         _same(f"{label} coverage queries", queries, _integer(arm, "queries", source=qrels_path))
+        _same(
+            f"quality {label} coverage queries",
+            queries,
+            _integer(quality_arm, "queries", source=quality_path),
+        )
         for depth in (1, 10):
             complete = _integer(arm, f"top{depth}_complete", source=qrels_path)
             rate = _number(arm, f"top{depth}_rate", source=qrels_path)
             if complete != queries or abs(rate - 1.0) > 1e-12:
                 raise SystemExit(f"! {qrels_path}: {label} top-{depth} coverage is incomplete")
+            _same(
+                f"quality {label} top-{depth} coverage",
+                complete,
+                _integer(
+                    quality_arm,
+                    f"top{depth}_all_returned_judged",
+                    source=quality_path,
+                ),
+            )
+            _same(
+                f"quality {label} top-{depth} coverage rate",
+                rate,
+                _number(
+                    quality_arm,
+                    f"top{depth}_all_returned_judged_rate",
+                    source=quality_path,
+                ),
+            )
 
     tests, failures, errors, skipped = _junit_counts(junit_path)
     if tests < 1 or failures or errors or skipped:
@@ -302,12 +478,24 @@ def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
             f"! quality gate is not clean: tests={tests}, failures={failures}, "
             f"errors={errors}, skipped={skipped}"
         )
+    # Cross-report reconciliation above gives precise diagnostics; this is the
+    # check that actually authenticates the rendered numbers.
+    _authenticate_quality(
+        quality,
+        state=state,
+        pool=pool,
+        qrels=qrels,
+        eval_root=eval_root,
+        quality_path=quality_path,
+    )
     return EvalStatus(
         documents=len(documents),
         chunks=chunks,
         collection=collection,
         sampled_chunks=sampled,
         verified_pairs=pairs,
+        source_clusters=_integer(quality_design, "clusters", source=quality_path, minimum=1),
+        label_provenance=label_provenance,
         queries=queries,
         direct_queries=direct,
         paraphrase_queries=paraphrase,
@@ -321,7 +509,88 @@ def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
         generating_disagreements=disagreements,
         generating_disagreement_rate=disagreement_rate,
         tests=tests,
+        quality=quality,
     )
+
+
+def _authenticate_quality(
+    quality: Mapping[str, Any],
+    *,
+    state: Mapping[str, Any],
+    pool: Mapping[str, Any],
+    qrels: Mapping[str, Any],
+    eval_root: Path,
+    quality_path: Path,
+) -> None:
+    """Rebuild the quality report from frozen raw artifacts and demand equality.
+
+    Structural validation alone cannot authenticate a number: any in-range mean,
+    interval or p-value passes it. The evaluator is seed-deterministic and JSON
+    float round-trips are exact, so recomputing from ``runs.jsonl`` / ``qrels.jsonl``
+    with the report's own resamples and base seed and comparing objects binds
+    every rendered statistic, and the qrels semantic digest, to the artifacts.
+    """
+    runs_path = eval_root / "runs.jsonl"
+    qrels_rows_path = eval_root / "qrels.jsonl"
+    missing = [path for path in (runs_path, qrels_rows_path) if not path.is_file()]
+    if missing:
+        joined = ", ".join(str(path) for path in missing)
+        raise SystemExit(
+            f"! cannot authenticate {quality_path}: raw artifacts are absent: {joined}"
+        )
+    design = _mapping(quality, "evaluation_design", source=quality_path)
+    resamples = _integer(design, "resamples", source=quality_path, minimum=1)
+    base_seed = _integer(design, "base_seed", source=quality_path)
+    try:
+        recomputed = evaluate_tidb_quality(
+            state=state,
+            pool_report=pool,
+            qrels_report=qrels,
+            run_rows=read_jsonl(runs_path),
+            qrel_rows=read_jsonl(qrels_rows_path),
+            resamples=resamples,
+            seed=base_seed,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise SystemExit(f"! {quality_path}: offline recomputation failed: {exc}") from exc
+    if recomputed != quality:
+        raise SystemExit(
+            f"! {quality_path}: does not match deterministic recomputation from frozen artifacts"
+        )
+
+
+def _quality_section(status: EvalStatus, name: str) -> Mapping[str, Any]:
+    value = status.quality.get(name)
+    if not isinstance(value, dict):  # pragma: no cover - strict validator guards this
+        raise AssertionError(f"validated quality section {name!r} is absent")
+    return value
+
+
+def _quality_mean(status: EvalStatus, label: str, view: str, metric: str) -> float:
+    systems = _quality_section(status, "system_metrics")
+    row = systems[label][view][metric]
+    return float(row["mean"])
+
+
+def _fmt_interval(row: Mapping[str, Any], *, scale: float = 1.0, digits: int = 3) -> str:
+    mean = float(row["mean"]) * scale
+    low = float(row["low"]) * scale
+    high = float(row["high"]) * scale
+    return f"{mean:.{digits}f} [{low:.{digits}f}, {high:.{digits}f}]"
+
+
+def _fmt_p(value: float, *, at_floor: bool) -> str:
+    rendered = f"{value:.2e}" if 0.0 < value < 1e-4 else f"{value:.4f}"
+    return f"{rendered}†" if at_floor else rendered
+
+
+def _system_name(label: str) -> str:
+    return {
+        LEXICAL_LABEL: "BM25 char-bigram",
+        DENSE_LABEL: "dense Qwen3-4096",
+        RRF_LABEL: "RRF k=10/depth=100",
+        RERANK_LABEL: "Qwen3 rerank@50",
+    }[label]
 
 
 def _readme_status(status: EvalStatus) -> str:
@@ -334,9 +603,11 @@ def _readme_status(status: EvalStatus) -> str:
             f"{status.queries:,} 条 query** 的合成 pooled qrels；"
         ),
         (
-            "> 系统级 TiDB R@1 / MRR@10 / nDCG@10 尚未从该 qrels 计算，"
-            "服务端 `hybrid_search` 融合仍是待验证的优化路径。"
+            "> 系统级 TiDB Hit@1 / R@1 / MRR@10 / binary + graded nDCG@10 已完成；"
+            f"点估计以 {status.verified_pairs:,} 个 pair 观测为权重，CI 与检验按 "
+            f"{status.source_clusters:,} 个 `gold_source_key` 源聚类重采样。"
         ),
+        "> 服务端 `hybrid_search` 融合仍是待验证路径，不等同于本地 exact RRF。",
         "> 下方所有数字均为本仓库脚本在真实语料上跑出的结果，非引用。",
     ]
     return "\n".join(lines)
@@ -344,6 +615,8 @@ def _readme_status(status: EvalStatus) -> str:
 
 def _readme_evidence(status: EvalStatus) -> str:
     percent = status.generating_disagreement_rate * 100.0
+    systems = _quality_section(status, "system_metrics")
+    design = _quality_section(status, "evaluation_design")
     lines = [
         (
             "> **TiDB 合成评测集（本地报告生成）**：从已发布的 "
@@ -363,31 +636,136 @@ def _readme_evidence(status: EvalStatus) -> str:
         ),
         (
             f"> 生成 chunk 与 grade 2 规则不一致 {status.generating_disagreements:,}/"
-            f"{status.verified_pairs:,}（{percent:.3f}%）。四系统 top-1/top-10 均达到 "
-            "100% **已判断覆盖**。"
+            f"{status.verified_pairs:,}（{percent:.3f}%）。四系统实际返回的 top-1/top-10 "
+            "均达到 100% **已判断覆盖**。"
         ),
+        "",
         (
-            "> **边界**：这些是同一请求模型完成生成、验证与相关性判断的合成 pooled labels，"
-            "不是 TiDB 上游人工 gold；100% 表示候选已被判断，不是检索准确率。"
+            "> **离线质量（overall，direct/paraphrase 先在 pair 内取均值；"
+            f"括号为 source-cluster bootstrap 95% CI，{status.source_clusters:,} 个源聚类）**："
         ),
-        (
-            "> 当前还没有系统质量表。若用这批 query 继续调参，必须另拆 dev/test，"
-            "或把结果明确标为探索性。"
-        ),
-        (
-            "> 生成 chunk 是构题后由独立 verification pass 验证的证据；即使相关性 judge "
-            "给 0/1，发布 qrels 仍将其保留为 verified gold。pool 外文档保持未判断。"
-        ),
+        "",
+        "| 冻结系统 | Hit@1 | R@1（备选完整答案覆盖） | MRR@10 | binary nDCG@10 | graded nDCG@10 |",
+        "|---|---:|---:|---:|---:|---:|",
     ]
+    for label in RUN_LABELS:
+        overall = systems[label]["overall"]
+        cells = [
+            _fmt_interval(overall["full_hit_at_1"]),
+            _fmt_interval(overall["full_recall_at_1"]),
+            _fmt_interval(overall["full_mrr_at_10"]),
+            _fmt_interval(overall["full_binary_ndcg_at_10"]),
+            _fmt_interval(overall["graded_ndcg_at_10"]),
+        ]
+        lines.append(f"| {_system_name(label)} | " + " | ".join(cells) + " |")
+
+    lines.extend(
+        (
+            "",
+            "> **预声明主检验族**：主终点为 pair-mean binary nDCG@10；双尾 centred paired "
+            f"source-cluster bootstrap（{int(design['resamples']):,} 次，"
+            f"{int(design['clusters']):,} 个源聚类）并在以下 4 个比较内做 Holm 校正。",
+            "",
+            "| treatment − comparator | Δ [95% CI] | win/loss/tie | p | p(Holm) |",
+            "|---|---:|---:|---:|---:|",
+        )
+    )
+    for row in status.quality["primary_contrasts"]:
+        delta = row["delta"]
+        counts = row["counts"]
+        tie = int(counts["ties_nonzero"]) + int(counts["ties_zero"])
+        raw = _fmt_p(float(row["raw_p"]), at_floor=bool(row["raw_p_at_floor"]))
+        adjusted = _fmt_p(
+            float(row["adjusted_p"]),
+            at_floor=bool(row["adjusted_p_inherits_floor"]),
+        )
+        label = f"{_system_name(str(row['treatment']))} − {_system_name(str(row['comparator']))}"
+        lines.append(
+            f"| {label} | {_fmt_interval(delta, digits=4)} | "
+            f"{counts['wins']}/{counts['losses']}/{tie} | {raw} | "
+            f"{adjusted}{' *' if row['reject'] else ''} |"
+        )
+
+    lines.extend(
+        (
+            "",
+            "> **direct → paraphrase robustness（独立 4-test Holm family）**：",
+            "",
+            "| 系统 | direct nDCG | paraphrase nDCG | Δ(para-direct) [95% CI] | p(Holm) |",
+            "|---|---:|---:|---:|---:|",
+        )
+    )
+    robustness = {str(row["id"]): row for row in status.quality["surface_robustness"]}
+    for label in RUN_LABELS:
+        row = robustness[label]
+        direct_mean = _quality_mean(status, label, "direct", PRIMARY_METRIC)
+        paraphrase_mean = _quality_mean(status, label, "paraphrase", PRIMARY_METRIC)
+        adjusted = _fmt_p(
+            float(row["adjusted_p"]),
+            at_floor=bool(row["adjusted_p_inherits_floor"]),
+        )
+        lines.append(
+            f"| {_system_name(label)} | {direct_mean:.3f} | {paraphrase_mean:.3f} | "
+            f"{_fmt_interval(row['delta'], digits=4)} | {adjusted}{' *' if row['reject'] else ''} |"
+        )
+
+    lines.extend(
+        (
+            "",
+            "> **词面重叠分层（描述性，不做 subgroup p 值）**：每个 surface 内按 stored "
+            "bigram containment 做保留 ties 的 mid-CDF 三分位；下表为主指标。",
+            "",
+            "| surface / stratum | n | overlap 范围 | BM25 | dense | RRF | rerank |",
+            "|---|---:|---:|---:|---:|---:|---:|",
+        )
+    )
+    overlap = status.quality["overlap_strata"]["tasks"]
+    for task in ("direct", "paraphrase"):
+        for stratum in ("low", "middle", "high"):
+            row = overlap[task][stratum]
+            values = [f"{float(row['systems'][label]['mean']):.3f}" for label in RUN_LABELS]
+            lines.append(
+                f"| {task} / {stratum} | {row['n']} | "
+                f"{float(row['overlap_min']):.3f}–{float(row['overlap_max']):.3f} | "
+                + " | ".join(values)
+                + " |"
+            )
+
+    lines.extend(
+        (
+            "",
+            (
+                f"> **边界**：这些是 {status.label_provenance} 的 synthetic pooled labels，"
+                "不是 TiDB 上游人工 gold；100% 是 judged coverage，不是质量。"
+            ),
+            (
+                "> grade 2 文档是可独立完整回答的**替代证据**，所以 Hit@1 / MRR / nDCG 是主视图，"
+                "不报告要求找齐所有替代答案的 ALL@10；graded nDCG 采用 full=3、partial=1 gain。"
+            ),
+            (
+                f"> 生成 chunk 经单独 verification pass 证实（{status.label_provenance}）；"
+                "即使 relevance judge 给 0/1，仍作为 operational full gold。"
+                "pool 外保持未判断；本评测未用于反向调参。"
+            ),
+            (
+                "> † 表示 add-one Monte Carlo floor，不是严格 `<` 上界；CI 是 pointwise，"
+                "同一 source 的 pair 已整簇重采样，跨 source/theme 的残余相关性未建模。"
+            ),
+        )
+    )
     return "\n".join(lines)
 
 
 def _quality_gate(status: EvalStatus) -> str:
+    # Only the JUnit report is parsed here, so only the pytest result may be
+    # claimed. Ruff / format / mypy are separate pre-commit gates that this
+    # synchronizer does not read and therefore must not certify.
     return (
         f"tests/                   {status.tests:,} 个单元测试\n"
         "```\n\n"
-        f"质量门禁：`pytest` {status.tests:,} passed · `ruff check` 全通过 · "
-        "`ruff format --check` 全通过 · `mypy --strict` 无告警。"
+        f"质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` {status.tests:,} passed。"
+        "`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，"
+        "不由本报告认证。"
     )
 
 
@@ -414,35 +792,41 @@ def _architecture_corpus(status: EvalStatus) -> str:
         ),
         (
             "| **在它上面测什么** | R@1 / MRR@10 / nDCG@10 / ALL-gold@10 + 配对检验 | "
-            "待生成系统级指标、direct/paraphrase 与词面重叠分层；另测延迟/QPS/重建 |"
+            "已完成 Hit@1 / R@1 / MRR@10 / binary+graded nDCG@10、source-cluster bootstrap、"
+            "direct/paraphrase 与描述性词面重叠分层；延迟/QPS/重建仍待测 |"
         ),
         "",
         (
             f"当前 TiDB qrels 覆盖 {status.verified_pairs:,} 个 pair / "
-            f"{status.queries:,} 条 query / {status.pool_candidates:,} 个 pooled candidates。"
+            f"{status.queries:,} 条 query / {status.pool_candidates:,} 个 pooled candidates，"
+            f"分属 {status.source_clusters:,} 个 `gold_source_key` 源聚类。"
         ),
         (
             "四条冻结 run 的 top-1/top-10 候选均已判断，但 **100% judged coverage "
-            "不是 100% retrieval quality**；在系统级指标与 95% CI / 配对检验产出前，"
-            "不从覆盖率推导质量结论。"
+            "不是 100% retrieval quality**；质量表已用 source-clustered 95% CI、双尾配对 "
+            "source-cluster bootstrap 与 Holm 校正生成。"
         ),
     ]
     return "\n".join(lines)
 
 
 def _architecture_m3(status: EvalStatus) -> str:
+    bm25 = _quality_mean(status, LEXICAL_LABEL, "overall", PRIMARY_METRIC)
+    dense = _quality_mean(status, DENSE_LABEL, "overall", PRIMARY_METRIC)
+    rrf = _quality_mean(status, RRF_LABEL, "overall", PRIMARY_METRIC)
+    rerank = _quality_mean(status, RERANK_LABEL, "overall", PRIMARY_METRIC)
     return "".join(
         (
-            "| **M3** | **TiDB 全量索引 + 合成 pooled qrels ✅ 2026-08-25** | **1.5** | ",
-            "✅ `ingest.py` + `scripts/build_index.py` + `scripts/query_index.py`；✅ ",
-            "`scripts/build_tidb_{queries,pool,qrels}.py`（双表面 QG、四系统 pool、",
-            "显式 finalize） | ",
-            f"{status.documents:,} 篇 evergreen → **{status.chunks:,} chunks** 已索引发布；",
-            f"合成评测集为 **{status.verified_pairs:,} pairs / {status.queries:,} queries / ",
-            f"{status.pool_candidates:,} pooled candidates / ",
-            f"{status.judging_batches:,} judge batches**。",
-            "四系统 top-1/top-10 判断覆盖完整，但系统级指标尚待离线计算；",
-            "无上游人工 gold |",
+            "| **M3** | **TiDB 全量索引 + 合成 pooled qrels + 离线质量 ✅ 2026-08-26** | ",
+            "**1.5** | ✅ `ingest.py` + `scripts/build_index.py` + `scripts/query_index.py`；✅ ",
+            "`scripts/build_tidb_{queries,pool,qrels}.py`；✅ `evaluate_tidb_retrieval.py` | ",
+            f"{status.documents:,} 篇 evergreen → **{status.chunks:,} chunks**；",
+            f"**{status.verified_pairs:,} pairs / {status.queries:,} queries / ",
+            f"{status.pool_candidates:,} pooled candidates**。overall binary nDCG@10：",
+            f"BM25 {bm25:.3f} / dense {dense:.3f} / RRF {rrf:.3f} / rerank {rerank:.3f}；",
+            f"以 {status.source_clusters:,} 个 source cluster 为重采样单位的 95% CI + ",
+            "两个预声明 4-test 双尾 source-cluster bootstrap/Holm family。",
+            "无上游人工 gold；本地 exact RRF 不代表服务端 hybrid_search |",
         )
     )
 
@@ -519,6 +903,14 @@ def _claude_artifacts(status: EvalStatus) -> str:
             "—",
             f"`scripts/build_tidb_qrels.py --finalize`；{status.queries:,} qrels（离线）",
         ),
+        (
+            "`indexes/tidb/eval/quality_report.json`",
+            "—",
+            (
+                "`scripts/evaluate_tidb_retrieval.py`；source-clustered CI / "
+                "paired source-cluster bootstrap / Holm（离线）"
+            ),
+        ),
     ]
     table = "\n".join(f"| {path} | {size} | {source} |" for path, size, source in rows)
     note = (
@@ -572,29 +964,32 @@ def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
 
 
 def synchronize(args: argparse.Namespace) -> tuple[Path, ...]:
-    status = load_status(args.artifacts)
-    rendered = [(target.path, *_render_target(target, status)) for target in _targets(args)]
-    stale = tuple(path for path, before, after in rendered if before != after)
-    if args.check:
-        if stale:
-            joined = ", ".join(str(path) for path in stale)
-            raise SystemExit(f"! generated documentation is stale: {joined}")
-        return ()
-    if not stale:
-        return ()
+    # The shared artifact lock is held across authentication *and* publication so
+    # a bundle writer cannot swap runs/qrels between recomputation and rendering.
+    with exclusive_lock(args.artifacts / "eval" / ARTIFACT_LOCK):
+        status = load_status(args.artifacts)
+        rendered = [(target.path, *_render_target(target, status)) for target in _targets(args)]
+        stale = tuple(path for path, before, after in rendered if before != after)
+        if args.check:
+            if stale:
+                joined = ", ".join(str(path) for path in stale)
+                raise SystemExit(f"! generated documentation is stale: {joined}")
+            return ()
+        if not stale:
+            return ()
 
-    staged: list[tuple[Path, Path]] = []
-    try:
-        for path, before, after in rendered:
-            if before == after:
-                continue
-            temporary = path.with_suffix(path.suffix + ".sync.tmp")
-            write_text(temporary, after)
-            staged.append((temporary, path))
-        replace_files(staged)
-    finally:
-        for temporary, _path in staged:
-            temporary.unlink(missing_ok=True)
+        staged: list[tuple[Path, Path]] = []
+        try:
+            for path, before, after in rendered:
+                if before == after:
+                    continue
+                temporary = path.with_suffix(path.suffix + ".sync.tmp")
+                write_text(temporary, after)
+                staged.append((temporary, path))
+            replace_files(staged)
+        finally:
+            for temporary, _path in staged:
+                temporary.unlink(missing_ok=True)
     return stale
 
 

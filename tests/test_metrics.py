@@ -7,6 +7,8 @@ where the eval libraries disagree with each other -- are pinned explicitly.
 from __future__ import annotations
 
 import math
+from collections.abc import Hashable
+from typing import cast
 
 import pytest
 
@@ -14,7 +16,10 @@ from zhrag.eval import (
     all_gold_at_k,
     bootstrap_ci,
     bootstrap_p_floor,
+    clustered_bootstrap_ci,
+    clustered_paired_bootstrap_test,
     evaluate,
+    graded_ndcg_at_k,
     hit_at_k,
     holm_bonferroni,
     holm_floor_flags,
@@ -102,6 +107,44 @@ class TestNDCG:
     def test_bounded_to_unit_interval(self) -> None:
         assert 0.0 <= ndcg_at_k(RANKED, ["d5"], 5) <= 1.0
 
+    def test_rejects_duplicate_ids_inside_evaluated_prefix(self) -> None:
+        with pytest.raises(ValueError, match="duplicate"):
+            ndcg_at_k(["d1", "d1"], ["d1"], 2)
+
+    def test_ignores_duplicates_beyond_evaluated_prefix(self) -> None:
+        assert ndcg_at_k(["d1", "d2", "d2"], ["d1"], 2) == 1.0
+
+
+class TestGradedNDCG:
+    def test_uses_exponential_gains_and_ideal_order(self) -> None:
+        grades = {"full": 2, "partial": 1, "irrelevant": 0}
+        dcg = 1.0 + 3.0 / math.log2(3)
+        ideal = 3.0 + 1.0 / math.log2(3)
+        assert graded_ndcg_at_k(["partial", "full"], grades, 10) == pytest.approx(dcg / ideal)
+        assert graded_ndcg_at_k(["full", "partial"], grades, 10) == 1.0
+
+    def test_truncates_and_treats_absent_ids_as_zero_gain(self) -> None:
+        grades = {"full": 2, "partial": 1}
+        assert graded_ndcg_at_k(["unknown", "full"], grades, 1) == 0.0
+
+    def test_rejects_duplicate_ids_inside_evaluated_prefix(self) -> None:
+        with pytest.raises(ValueError, match="duplicate"):
+            graded_ndcg_at_k(["full", "full"], {"full": 2}, 2)
+
+    @pytest.mark.parametrize(
+        "grades",
+        [
+            {},
+            {"zero": 0},
+            {"negative": -1},
+            {"boolean": True},
+            {"": 2},
+        ],
+    )
+    def test_rejects_invalid_grade_maps(self, grades: dict[str, int]) -> None:
+        with pytest.raises(ValueError, match=r"grade|positive"):
+            graded_ndcg_at_k(RANKED, grades)
+
 
 class TestBootstrap:
     def test_interval_brackets_the_mean(self) -> None:
@@ -188,9 +231,108 @@ class TestPairedBootstrap:
             treatment[i] = 1.0
         assert paired_bootstrap_test(baseline, treatment, resamples=4000) < 0.05
 
+    def test_two_sided_form_detects_both_directions_symmetrically(self) -> None:
+        baseline = [float(index % 3) / 2 for index in range(100)]
+        treatment = [score + 0.25 for score in baseline]
+        forward = paired_bootstrap_test(
+            baseline,
+            treatment,
+            alternative="two-sided",
+            resamples=1000,
+        )
+        backward = paired_bootstrap_test(
+            treatment,
+            baseline,
+            alternative="two-sided",
+            resamples=1000,
+        )
+        assert forward == backward == pytest.approx(bootstrap_p_floor(1000))
+
+    def test_two_sided_null_returns_one(self) -> None:
+        scores = [0.0, 0.5, 1.0] * 20
+        assert (
+            paired_bootstrap_test(
+                scores,
+                scores,
+                alternative="two-sided",
+                resamples=500,
+            )
+            == 1.0
+        )
+
     def test_rejects_mismatched_lengths(self) -> None:
         with pytest.raises(ValueError, match="length mismatch"):
             paired_bootstrap_test([1.0], [1.0, 0.0])
+
+    @pytest.mark.parametrize("resamples", [0, -1])
+    def test_rejects_invalid_resample_counts(self, resamples: int) -> None:
+        with pytest.raises(ValueError, match="resamples must be"):
+            paired_bootstrap_test([0.0], [1.0], resamples=resamples)
+        with pytest.raises(ValueError, match="resamples must be"):
+            bootstrap_ci([0.0], resamples=resamples)
+
+    def test_rejects_nonfinite_values_and_unknown_alternative(self) -> None:
+        with pytest.raises(ValueError, match="finite"):
+            paired_bootstrap_test([0.0], [math.nan])
+        with pytest.raises(ValueError, match="alternative must be"):
+            paired_bootstrap_test(
+                [0.0],
+                [1.0],
+                alternative="less",  # type: ignore[arg-type]
+            )
+
+
+class TestClusteredBootstrap:
+    def test_reports_cluster_count_but_keeps_pair_weighted_mean(self) -> None:
+        scores = [0.0, 1.0, 1.0, 1.0]
+        clusters = ["large", "large", "large", "single"]
+        ci = clustered_bootstrap_ci(scores, clusters, resamples=1000, seed=3)
+
+        assert ci.mean == pytest.approx(0.75)
+        assert ci.n == 2
+        assert ci.low <= ci.mean <= ci.high
+
+    def test_whole_cluster_resampling_is_deterministic(self) -> None:
+        scores = [0.0, 1.0, 0.5, 0.5]
+        clusters = ["a", "a", "b", "c"]
+        assert clustered_bootstrap_ci(
+            scores,
+            clusters,
+            resamples=500,
+            seed=9,
+        ) == clustered_bootstrap_ci(scores, clusters, resamples=500, seed=9)
+
+    def test_paired_test_is_symmetric_and_uses_clusters(self) -> None:
+        baseline = [0.0, 0.0, 0.0, 0.0]
+        treatment = [1.0, 1.0, 0.0, 0.0]
+        clusters = ["a", "a", "b", "c"]
+        forward = clustered_paired_bootstrap_test(
+            baseline,
+            treatment,
+            clusters,
+            alternative="two-sided",
+            resamples=1000,
+            seed=5,
+        )
+        backward = clustered_paired_bootstrap_test(
+            treatment,
+            baseline,
+            clusters,
+            alternative="two-sided",
+            resamples=1000,
+            seed=5,
+        )
+        assert forward == backward
+
+    def test_rejects_cluster_length_and_hashability_errors(self) -> None:
+        with pytest.raises(ValueError, match="length mismatch"):
+            clustered_bootstrap_ci([0.0, 1.0], ["only-one"], resamples=10)
+        with pytest.raises(ValueError, match="hashable"):
+            clustered_bootstrap_ci(
+                [0.0],
+                [cast(Hashable, ["not-hashable"])],
+                resamples=10,
+            )
 
 
 class TestWinLossTie:
@@ -305,7 +447,8 @@ class TestHolmBonferroni:
         assert sum(1 for p in raw.values() if p <= 0.05) == 3
         out = holm_bonferroni(raw)
         assert sum(1 for _, rejected in out.values() if rejected) == 1
-        assert out["a"] == (pytest.approx(0.004), True)
+        assert out["a"][0] == pytest.approx(0.004)
+        assert out["a"][1] is True
 
     def test_adjusted_p_is_monotone_non_decreasing(self) -> None:
         out = holm_bonferroni({f"m{i}": p for i, p in enumerate([0.01, 0.011, 0.012, 0.9])})
@@ -331,7 +474,9 @@ class TestHolmBonferroni:
         assert not any(rejected for _, rejected in out.values())
 
     def test_single_comparison_is_unchanged(self) -> None:
-        assert holm_bonferroni({"only": 0.03}) == {"only": (pytest.approx(0.03), True)}
+        adjusted, rejected = holm_bonferroni({"only": 0.03})["only"]
+        assert adjusted == pytest.approx(0.03)
+        assert rejected is True
 
     def test_adjusted_p_is_capped_at_one(self) -> None:
         out = holm_bonferroni({f"m{i}": 0.5 for i in range(10)})
@@ -349,6 +494,18 @@ class TestHolmBonferroni:
     def test_rejects_invalid_alpha(self, alpha: float) -> None:
         with pytest.raises(ValueError, match="alpha must be"):
             holm_bonferroni({"a": 0.01}, alpha=alpha)
+
+    def test_equal_pvalues_have_key_stable_order(self) -> None:
+        forward = holm_bonferroni({"z": 0.01, "a": 0.01, "later": 0.5})
+        reversed_input = holm_bonferroni({"later": 0.5, "a": 0.01, "z": 0.01})
+
+        assert forward == reversed_input
+        assert list(forward) == ["a", "z", "later"]
+
+    @pytest.mark.parametrize("pvalue", [math.nan, math.inf, -0.01, 1.01, True])
+    def test_rejects_invalid_pvalues(self, pvalue: float) -> None:
+        with pytest.raises(ValueError, match=r"finite.*\[0, 1\]"):
+            holm_bonferroni({"bad": pvalue})
 
     def test_integrates_with_paired_bootstrap(self) -> None:
         base = [float(i % 2) for i in range(200)]
@@ -387,6 +544,26 @@ class TestHolmFloorFlags:
         )
 
         assert flags == {"first": False, "second": False}
+
+    def test_equal_pvalues_are_insertion_order_independent(self) -> None:
+        raw = {"z": 0.1, "a": 0.1, "later": 0.11}
+        floors = {"z": True, "a": False, "later": True}
+
+        forward = holm_floor_flags(raw, floors)
+        reversed_input = holm_floor_flags(
+            dict(reversed(tuple(raw.items()))),
+            dict(reversed(tuple(floors.items()))),
+        )
+
+        assert forward == reversed_input
+        assert list(forward) == ["a", "z", "later"]
+
+    def test_rejects_non_boolean_floor_flags(self) -> None:
+        with pytest.raises(ValueError, match="boolean"):
+            holm_floor_flags(
+                {"floor": 0.1},
+                cast(dict[str, bool], {"floor": 1}),
+            )
 
     def test_requires_identical_keys(self) -> None:
         with pytest.raises(ValueError, match="identical keys"):

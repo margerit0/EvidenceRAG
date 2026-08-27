@@ -58,6 +58,7 @@ from zhrag.eval.qgen import (
     verification_prompt,
 )
 from zhrag.ingest import (
+    IngestState,
     Scope,
     chunker_fingerprint,
     document_loader,
@@ -71,6 +72,7 @@ from zhrag.io_utils import (
     exclusive_lock,
     read_json,
     read_jsonl,
+    replace_files,
     write_json,
     write_jsonl,
 )
@@ -92,6 +94,7 @@ DEFAULT_SEED = "zhrag-tidb-eval-2026-08"
 #: reported as self-agreement rather than being presented as independent review.
 DEFAULT_VERIFIER: str | None = None
 FLUSH_EVERY = 20
+ARTIFACT_LOCK = ".artifacts.lock"
 
 
 def _reconfigure_streams() -> None:
@@ -154,7 +157,7 @@ def _load_chunks(manifest_path: Path, documents: Path) -> tuple[EvalChunk, ...]:
     )
 
 
-def _verify_against_index(chunks: Sequence[EvalChunk], artifacts: Path) -> None:
+def _verify_against_index(chunks: Sequence[EvalChunk], artifacts: Path) -> IngestState:
     """Refuse to build golds that the live collection does not actually hold.
 
     A chunker or scope change would still produce a plausible-looking query set,
@@ -190,6 +193,7 @@ def _verify_against_index(chunks: Sequence[EvalChunk], artifacts: Path) -> None:
             "! published chunk set differs from the exact qgen corpus: "
             f"{len(missing):,} missing, {len(extra):,} extra"
         )
+    return state
 
 
 @dataclass(frozen=True, slots=True)
@@ -592,7 +596,13 @@ def _verified(
     return kept, dict(sorted(failures.items())), tuple(sorted(dropped_chunks)), ledger
 
 
-def _build(args: argparse.Namespace, sample: Sequence[EvalChunk], out: Path) -> int:
+def _build(
+    args: argparse.Namespace,
+    sample: Sequence[EvalChunk],
+    out: Path,
+    *,
+    published_state: IngestState,
+) -> int:
     env = load_env(ROOT / ".env")
     generator = ChatClient(ChatConfig.from_env(env), reasoning_effort=args.reasoning_effort or None)
     verifier_model = args.verifier_model or env["LLM_MODEL_NAME"]
@@ -694,27 +704,18 @@ def _build(args: argparse.Namespace, sample: Sequence[EvalChunk], out: Path) -> 
         f"axis failures {failures}; dropped pairs {len(incomplete_chunks):,}"
     )
 
-    state = read_state(args.artifacts / "state.json")
-    assert state is not None
     return _write(
         args,
         kept=kept,
         sample=sample,
         by_chunk=by_chunk,
         out=out,
+        published_state=published_state,
         report_extra={
             "reasoning_effort": args.reasoning_effort,
             "instruction_fingerprints": {
                 "generation": generation_instructions_fingerprint(),
                 "verification": verification_instructions_fingerprint(),
-            },
-            "published_index": {
-                "scope": state.scope,
-                "chunker": state.chunker_fingerprint,
-                "embedding_profile": state.embedding_profile,
-                "sparse": state.sparse_fingerprint,
-                "collection": state.collection_name,
-                "chunks": len(state.chunk_ids()),
             },
             "generator_endpoint": generator.config.endpoint,
             "generator_model_requested": generator.config.model,
@@ -756,6 +757,7 @@ def _write(
     by_chunk: dict[str, EvalChunk],
     out: Path,
     report_extra: dict[str, Any],
+    published_state: IngestState | None = None,
 ) -> int:
     text_by_chunk = {chunk_id: chunk.text for chunk_id, chunk in by_chunk.items()}
     rows = [
@@ -778,9 +780,6 @@ def _write(
     # no usable pair. The report is still written below so the failed run is
     # auditable, while the query artifact remains the last known-good output.
     written = len(rows)
-    if kept:
-        write_jsonl(out / "queries.jsonl", rows)
-
     complete_pairs = len(_pairs(kept))
     report = {
         "schema": QGEN_SCHEMA,
@@ -805,13 +804,43 @@ def _write(
         ),
         **report_extra,
     }
-    write_json(out / "report.json", report)
+    query_target = out / "queries.jsonl"
+    report_target = out / "report.json"
+    staged_query = query_target.with_suffix(query_target.suffix + ".tmp")
+    staged_report = report_target.with_suffix(report_target.suffix + ".tmp")
+    staged = (staged_query, staged_report)
+    try:
+        # The .build.lock held by main is the operation lock. This shared lock is
+        # deliberately limited to final local validation/publication, not paid calls.
+        with exclusive_lock(out / ARTIFACT_LOCK):
+            if published_state is not None:
+                current_state = read_state(args.artifacts / "state.json")
+                if current_state is None or current_state != published_state:
+                    raise SystemExit(
+                        "! published index changed during query generation; refusing to publish"
+                    )
+                report["published_index"] = {
+                    "scope": current_state.scope,
+                    "chunker": current_state.chunker_fingerprint,
+                    "embedding_profile": current_state.embedding_profile,
+                    "sparse": current_state.sparse_fingerprint,
+                    "collection": current_state.collection_name,
+                    "chunks": len(current_state.chunk_ids()),
+                }
+            replacements: list[tuple[Path, Path]] = []
+            if kept:
+                write_jsonl(staged_query, rows)
+                replacements.append((staged_query, query_target))
+            write_json(staged_report, report)
+            replacements.append((staged_report, report_target))
+            replace_files(replacements)
+    finally:
+        for path in staged:
+            path.unlink(missing_ok=True)
     if not kept:
         print("! no query survived verification")
         return 1
-    print(
-        f"wrote {written:,} queries ({complete_pairs:,} complete pairs) to {out / 'queries.jsonl'}"
-    )
+    print(f"wrote {written:,} queries ({complete_pairs:,} complete pairs) to {query_target}")
     overlap = report["bigram_containment"]
     if isinstance(overlap, dict) and "direct" in overlap:
         print(
@@ -846,7 +875,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("! --concurrency must be positive")
 
     chunks = _load_chunks(args.manifest, args.documents)
-    _verify_against_index(chunks, args.artifacts)
+    published_state = _verify_against_index(chunks, args.artifacts)
     requested_size = min(args.size, len(chunks))
     if args.limit is not None:
         requested_size = min(requested_size, args.limit)
@@ -858,7 +887,7 @@ def main(argv: list[str] | None = None) -> int:
     out = _output_dir(args)
     out.mkdir(parents=True, exist_ok=True)
     with exclusive_lock(out / ".build.lock"):
-        return _build(args, sample, out)
+        return _build(args, sample, out, published_state=published_state)
 
 
 if __name__ == "__main__":

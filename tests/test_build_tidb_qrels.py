@@ -8,7 +8,14 @@ from types import ModuleType
 import pytest
 
 from zhrag.eval.pool import PooledQuery
-from zhrag.io_utils import append_jsonl, read_text, write_json, write_text
+from zhrag.io_utils import (
+    append_jsonl,
+    read_json,
+    read_jsonl,
+    read_text,
+    write_json,
+    write_text,
+)
 from zhrag.providers.chat import ChatConfig
 
 
@@ -279,3 +286,84 @@ class TestCommandModes:
         assert runner.main(["--artifacts", str(tmp_path)]) == 0
         assert (read_text(qrels), read_text(report)) == ("old qrels", "old report")
         assert (qrels.stat().st_mtime_ns, report.stat().st_mtime_ns) == before
+
+
+class TestArtifactPublication:
+    def test_publishes_qrels_and_report_under_the_shared_lock(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner()
+        unit = _unit()
+        query_rows = {
+            query_id: {
+                "query_id": query_id,
+                "question": question,
+                "answer": unit.answer,
+                "gold_doc_ids": [unit.chunk_id],
+                "gold_source_key": "source",
+                "task": query_id.partition(":")[0],
+                "question_type": "config",
+                "theme": "sql",
+                "bigram_containment": 0.5,
+            }
+            for query_id, question in zip(unit.query_ids, unit.questions, strict=True)
+        }
+        labels = (
+            runner.LEXICAL_LABEL,
+            runner.DENSE_LABEL,
+            runner.RRF_LABEL,
+            runner.RERANK_LABEL,
+        )
+        runs = runner.TiDBRuns(
+            query_ids=unit.query_ids,
+            runs={label: (("gold", "other"), ("gold", "other")) for label in labels},
+        )
+        experiment = runner._Experiment(
+            corpus={"gold": "第一段", "other": "第二段"},
+            query_rows=query_rows,
+            runs=runs,
+            units=(unit,),
+            pool_report={},
+            query_set_fingerprint="a" * 64,
+        )
+        judged = runner.JudgedQuery(
+            chunk_id=unit.chunk_id,
+            query_ids=unit.query_ids,
+            grades={"gold": 2, "other": 0},
+        )
+        batch = runner._Batch("batch", unit, unit.candidates)
+        entry = runner._CacheEntry("{}", "model", None, None, None)
+        eval_root = tmp_path / "eval"
+        shared_lock = eval_root / runner.ARTIFACT_LOCK
+        targets: list[str] = []
+        real_replace = runner.replace_files
+
+        def replace_while_locked(staged: tuple[tuple[Path, Path], ...]) -> None:
+            assert shared_lock.is_file()
+            pairs = tuple(staged)
+            targets.extend(target.name for _source, target in pairs)
+            real_replace(pairs)
+
+        monkeypatch.setattr(runner, "replace_files", replace_while_locked)
+
+        runner._publish(
+            runner._parse_args(["--artifacts", str(tmp_path)]),
+            experiment,
+            [judged],
+            {batch.cache_id: entry},
+            [batch],
+            provenance={
+                "batch_size": 8,
+                "order_seed": "seed",
+                "judging_input_fingerprint_sha256": "b" * 64,
+                "model": "model",
+                "endpoint": "https://example.test/v1",
+            },
+        )
+
+        assert targets == ["qrels.jsonl", "qrels_report.json"]
+        assert len(list(read_jsonl(eval_root / "qrels.jsonl"))) == 2
+        assert read_json(eval_root / "qrels_report.json")["pairs"] == 1
+        assert not shared_lock.exists()

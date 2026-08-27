@@ -85,6 +85,7 @@ POOL_REPORT = EVAL / "pool_report.json"
 JUDGING_CACHE = EVAL / "judging_cache.jsonl"
 QRELS = EVAL / "qrels.jsonl"
 QRELS_REPORT = EVAL / "qrels_report.json"
+ARTIFACT_LOCK = ".artifacts.lock"
 
 TARGET_TOKENS = 400
 HARD_MAX_TOKENS = 600
@@ -683,12 +684,15 @@ def _publish(
     try:
         write_jsonl(staged_qrels, rows)
         write_json(staged_report, report)
-        replace_files(
-            (
-                (staged_qrels, eval_root / QRELS.name),
-                (staged_report, eval_root / QRELS_REPORT.name),
+        # Shared bundle lock around the final replacement only: paid judging must
+        # not serialize behind it, but readers must never see a split bundle.
+        with exclusive_lock(eval_root / ARTIFACT_LOCK):
+            replace_files(
+                (
+                    (staged_qrels, eval_root / QRELS.name),
+                    (staged_report, eval_root / QRELS_REPORT.name),
+                )
             )
-        )
     finally:
         for path in staged:
             path.unlink(missing_ok=True)

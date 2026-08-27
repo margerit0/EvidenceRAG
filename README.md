@@ -6,7 +6,8 @@
 > **状态**：评估层、语料层、词法/稠密检索、MRL、RRF 与离线 rerank 深度消融均已完成；
 > 在线检索链路已通过真实 Milvus Lite 校验，TiDB evergreen 索引也已付费嵌入并发布：
 > **450 篇文档 / 1,832 chunks**。另已构建 **490 组 direct/paraphrase、980 条 query** 的合成 pooled qrels；
-> 系统级 TiDB R@1 / MRR@10 / nDCG@10 尚未从该 qrels 计算，服务端 `hybrid_search` 融合仍是待验证的优化路径。
+> 系统级 TiDB Hit@1 / R@1 / MRR@10 / binary + graded nDCG@10 已完成；点估计以 490 个 pair 观测为权重，CI 与检验按 245 个 `gold_source_key` 源聚类重采样。
+> 服务端 `hybrid_search` 融合仍是待验证路径，不等同于本地 exact RRF。
 > 下方所有数字均为本仓库脚本在真实语料上跑出的结果，非引用。
 <!-- END TIDB-EVAL-STATUS -->
 
@@ -474,16 +475,56 @@ vocabulary + IDF 写成 `sparse_index.json`，查询端加载后先比对 `state
 > 融合 132 个候选；重排把「快照备份使用指南 > 对集群进行快照备份」从融合第 17 位提到第 1 位。
 > 阶段耗时 encode 2.2s / search 1.0s / fuse 0.1ms / fetch 26ms / **rerank 11.8s**（100 篇一次请求）。
 > ⚠️ 这是**一条查询的观察**，不是延迟基准也不是质量证据——p50/p95/QPS 属于 M8；
-> TiDB 合成 qrels 已就绪，但系统级检索指标仍待从该 qrels 计算。
+> 系统级检索质量见下方 490-pair 离线评估，不能用这一条冒烟查询替代。
 
 <!-- BEGIN TIDB-EVAL-EVIDENCE -->
 > **TiDB 合成评测集（本地报告生成）**：从已发布的 1,832 个 chunk 中按主题确定性抽样 500 个，双阶段生成并验证后保留 490 个完整 pair（direct / paraphrase 各 490 条）。
 > 四条冻结 run 在两种表面形式上按系统 top-20 取并集，并强制纳入生成 chunk，得到 24,525 个 pair-candidate 判断槽（每 pair 23–74）。
 > rank-blinded、固定顺序的 LLM judge 共完成 3,287 个 batch；原始 grade 0/1/2 为 18,840/4,347/1,338。
-> 生成 chunk 与 grade 2 规则不一致 1/490（0.204%）。四系统 top-1/top-10 均达到 100% **已判断覆盖**。
-> **边界**：这些是同一请求模型完成生成、验证与相关性判断的合成 pooled labels，不是 TiDB 上游人工 gold；100% 表示候选已被判断，不是检索准确率。
-> 当前还没有系统质量表。若用这批 query 继续调参，必须另拆 dev/test，或把结果明确标为探索性。
-> 生成 chunk 是构题后由独立 verification pass 验证的证据；即使相关性 judge 给 0/1，发布 qrels 仍将其保留为 verified gold。pool 外文档保持未判断。
+> 生成 chunk 与 grade 2 规则不一致 1/490（0.204%）。四系统实际返回的 top-1/top-10 均达到 100% **已判断覆盖**。
+
+> **离线质量（overall，direct/paraphrase 先在 pair 内取均值；括号为 source-cluster bootstrap 95% CI，245 个源聚类）**：
+
+| 冻结系统 | Hit@1 | R@1（备选完整答案覆盖） | MRR@10 | binary nDCG@10 | graded nDCG@10 |
+|---|---:|---:|---:|---:|---:|
+| BM25 char-bigram | 0.660 [0.626, 0.695] | 0.429 [0.397, 0.460] | 0.758 [0.731, 0.784] | 0.701 [0.675, 0.727] | 0.639 [0.618, 0.660] |
+| dense Qwen3-4096 | 0.789 [0.759, 0.819] | 0.495 [0.460, 0.529] | 0.862 [0.841, 0.883] | 0.793 [0.774, 0.812] | 0.739 [0.725, 0.752] |
+| RRF k=10/depth=100 | 0.764 [0.734, 0.795] | 0.484 [0.452, 0.516] | 0.855 [0.836, 0.875] | 0.796 [0.776, 0.816] | 0.739 [0.724, 0.754] |
+| Qwen3 rerank@50 | 0.935 [0.916, 0.952] | 0.614 [0.575, 0.651] | 0.964 [0.953, 0.974] | 0.914 [0.899, 0.928] | 0.833 [0.823, 0.844] |
+
+> **预声明主检验族**：主终点为 pair-mean binary nDCG@10；双尾 centred paired source-cluster bootstrap（10,000 次，245 个源聚类）并在以下 4 个比较内做 Holm 校正。
+
+| treatment − comparator | Δ [95% CI] | win/loss/tie | p | p(Holm) |
+|---|---:|---:|---:|---:|
+| dense Qwen3-4096 − BM25 char-bigram | 0.0917 [0.0682, 0.1161] | 254/123/113 | 1.00e-04† | 0.0004† * |
+| RRF k=10/depth=100 − BM25 char-bigram | 0.0951 [0.0816, 0.1088] | 282/58/150 | 1.00e-04† | 0.0004† * |
+| RRF k=10/depth=100 − dense Qwen3-4096 | 0.0034 [-0.0110, 0.0180] | 169/162/159 | 0.6464 | 0.6464 |
+| Qwen3 rerank@50 − RRF k=10/depth=100 | 0.1177 [0.1019, 0.1340] | 265/46/179 | 1.00e-04† | 0.0004† * |
+
+> **direct → paraphrase robustness（独立 4-test Holm family）**：
+
+| 系统 | direct nDCG | paraphrase nDCG | Δ(para-direct) [95% CI] | p(Holm) |
+|---|---:|---:|---:|---:|
+| BM25 char-bigram | 0.783 | 0.619 | -0.1641 [-0.1930, -0.1358] | 0.0004† * |
+| dense Qwen3-4096 | 0.806 | 0.780 | -0.0257 [-0.0410, -0.0107] | 0.0012 * |
+| RRF k=10/depth=100 | 0.833 | 0.759 | -0.0740 [-0.0928, -0.0555] | 0.0004† * |
+| Qwen3 rerank@50 | 0.923 | 0.906 | -0.0167 [-0.0286, -0.0052] | 0.0044 * |
+
+> **词面重叠分层（描述性，不做 subgroup p 值）**：每个 surface 内按 stored bigram containment 做保留 ties 的 mid-CDF 三分位；下表为主指标。
+
+| surface / stratum | n | overlap 范围 | BM25 | dense | RRF | rerank |
+|---|---:|---:|---:|---:|---:|---:|
+| direct / low | 167 | 0.280–0.625 | 0.678 | 0.763 | 0.776 | 0.905 |
+| direct / middle | 157 | 0.630–0.711 | 0.817 | 0.815 | 0.845 | 0.927 |
+| direct / high | 166 | 0.714–0.917 | 0.857 | 0.841 | 0.880 | 0.936 |
+| paraphrase / low | 164 | 0.050–0.419 | 0.384 | 0.744 | 0.642 | 0.882 |
+| paraphrase / middle | 163 | 0.421–0.552 | 0.689 | 0.788 | 0.791 | 0.905 |
+| paraphrase / high | 163 | 0.553–0.833 | 0.786 | 0.809 | 0.846 | 0.931 |
+
+> **边界**：这些是 same-model self-agreement 的 synthetic pooled labels，不是 TiDB 上游人工 gold；100% 是 judged coverage，不是质量。
+> grade 2 文档是可独立完整回答的**替代证据**，所以 Hit@1 / MRR / nDCG 是主视图，不报告要求找齐所有替代答案的 ALL@10；graded nDCG 采用 full=3、partial=1 gain。
+> 生成 chunk 经单独 verification pass 证实（same-model self-agreement）；即使 relevance judge 给 0/1，仍作为 operational full gold。pool 外保持未判断；本评测未用于反向调参。
+> † 表示 add-one Monte Carlo floor，不是严格 `<` 上界；CI 是 pointwise，同一 source 的 pair 已整簇重采样，跨 source/theme 的残余相关性未建模。
 <!-- END TIDB-EVAL-EVIDENCE -->
 
 ---
@@ -511,6 +552,7 @@ src/zhrag/
     qgen.py              TiDB 分层抽样、双表面 QG、严格解析与双阶段验证
     tidb_runs.py         冻结四系统 run、确定性排序、RRF 与 rerank 应用语义
     pool.py              pair-level pooling、rank-blinded 判断顺序与 multi-gold qrels
+    tidb_quality.py      TiDB pair-aware 指标、95% CI、配对 bootstrap/Holm 与分层报告
   providers/
     http.py               One Hub JSON transport：显式 UA、长退避、Retry-After、隐私化错误
     embedding.py          共享嵌入客户端：配置 / 批缓存 / 模型与 prompt sidecar
@@ -541,15 +583,16 @@ scripts/
   verify_milvus_store.py 正式 store 的 Milvus Lite 集成校验（schema / 两臂 / alias / 重开）
   build_index.py         manifest → chunk → 稀疏重建 → shadow collection → alias 切换（默认干跑）
   query_index.py         在线组合根：嵌入 + 词表 + Milvus alias + 重排，打印排序与各阶段耗时
-  build_tidb_queries.py  分层抽样 → 生成 direct/paraphrase → 独立验证 → 发布 query pair
+  build_tidb_queries.py  分层抽样 → 生成 direct/paraphrase → 单独验证 pass → 发布 query pair
   build_tidb_pool.py     冻结 BM25/dense/RRF/rerank runs 并构造 pair-level 判断池
   build_tidb_qrels.py    rank-blinded 判断缓存；只有 --finalize 发布 qrels/report
+  evaluate_tidb_retrieval.py 只读冻结 runs/qrels，离线生成聚合质量报告
   sync_tidb_eval_docs.py 校验本地聚合报告/JUnit 并同步 tracked 文档（支持 --check）
 <!-- BEGIN QUALITY-GATE-STATUS -->
-tests/                   612 个单元测试
+tests/                   703 个单元测试
 ```
 
-质量门禁：`pytest` 612 passed · `ruff check` 全通过 · `ruff format --check` 全通过 · `mypy --strict` 无告警。
+质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 703 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
 <!-- END QUALITY-GATE-STATUS -->
 
 README 中每一个数字都由上述脚本生成，没有手工誊写。这不是洁癖：早期原型用固定 1.15 字符/token 估算，得出的 chunk 数与最终实现相差 2.4 倍；而最初那次 BM25 饱和实验是一次性脚本跑的、从未提交，导致 README 里的核心结论一度**无法被任何人复现**。
@@ -645,8 +688,9 @@ uv run python scripts/build_tidb_pool.py --embed --rerank          # 仅补齐�
 uv run python scripts/build_tidb_qrels.py                          # 只检查，不发布
 uv run python scripts/build_tidb_qrels.py --judge                  # 只补判断 cache，不发布
 uv run python scripts/build_tidb_qrels.py --finalize               # 离线显式发布 qrels/report
+uv run python scripts/evaluate_tidb_retrieval.py --resamples 10000 --seed 0  # 严格离线质量
 
-# 10. 文档中的 TiDB 聚合状态和测试数来自本地报告，不手工誊抄。
+# 10. 文档中的 TiDB 聚合状态、质量指标和测试数来自本地报告，不手工誊抄。
 uv run pytest --junitxml=indexes/tidb/eval/pytest.xml
 uv run python scripts/sync_tidb_eval_docs.py
 uv run python scripts/sync_tidb_eval_docs.py --check

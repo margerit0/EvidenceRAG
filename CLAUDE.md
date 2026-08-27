@@ -76,9 +76,15 @@ uv run mypy                       # strict
 | `indexes/tidb/eval/{runs,pool}.jsonl`、`pool_report.json` | — | `scripts/build_tidb_pool.py`；24,525 slots（离线） |
 | `indexes/tidb/eval/judging_cache.jsonl` | — | `scripts/build_tidb_qrels.py --judge`；3,287 batches（付费） |
 | `indexes/tidb/eval/qrels.jsonl`、`qrels_report.json` | — | `scripts/build_tidb_qrels.py --finalize`；980 qrels（离线） |
+| `indexes/tidb/eval/quality_report.json` | — | `scripts/evaluate_tidb_retrieval.py`；source-clustered CI / paired source-cluster bootstrap / Holm（离线） |
 
 以上全部是本地输入或派生产物，均不得提交。TiDB 链路的付费步骤不止索引 embedding：还包括 QG/验证、query embedding、rerank 与 qrels judging；缓存完整后的 pool、finalize、指标计算和文档同步才是离线步骤。
 <!-- END TIDB-LOCAL-ARTIFACTS -->
+
+TiDB canonical artifact 的 publisher 先拿各自 operation lock，再只在最终本地发布阶段拿
+`indexes/tidb/eval/.artifacts.lock`；evaluator 与文档同步则在 load → 重算认证 → publish 全程持有
+该共享锁。付费 API 调用不包在共享锁内。`replace_files()` 保证 Python 异常时回滚且 marker 最后发布，
+但**不承诺进程强杀下的 crash-atomic bundle transaction**。
 
 **嵌入缓存已存在，所以维度消融重跑是免费的**（`dimensions=n` 实测就是前缀切片，
 全部维度档共用这一份 4096 维向量）。缓存按批 append，中断可续。
