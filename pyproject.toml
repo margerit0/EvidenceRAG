@@ -16,6 +16,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "types-pyyaml>=6.0",
+    "httpx>=0.28.1",
 ]
 
 milvus = [
@@ -27,6 +28,11 @@ verify = [
     "jieba>=0.42.1",
     "rouge-chinese>=1.0.3",
     "sacrebleu>=2.5",
+]
+
+service = [
+    "fastapi>=0.141.1",
+    "uvicorn>=0.52.4",
 ]
 
 [build-system]

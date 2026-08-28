@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>zhrag · TiDB 文档检索</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #08111f;
+      --panel: #101d30;
+      --panel-2: #16263d;
+      --line: #29405f;
+      --text: #e8f0fb;
+      --muted: #9db0c9;
+      --accent: #63d4ff;
+      --accent-2: #8bf0c8;
+      --error: #ff9caa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 10% 0%, #12365b 0, transparent 32rem),
+        linear-gradient(145deg, var(--bg), #0c1728 65%, #08101c);
+      color: var(--text);
+      font: 15px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { width: min(1060px, calc(100% - 32px)); margin: 0 auto; padding: 64px 0 96px; }
+    header { margin-bottom: 32px; }
+    .eyebrow { color: var(--accent); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { margin: 8px 0 6px; font-size: clamp(2rem, 6vw, 4.25rem); line-height: 1.05; }
+    header p { max-width: 720px; margin: 0; color: var(--muted); }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: color-mix(in srgb, var(--panel) 94%, transparent);
+      box-shadow: 0 22px 80px #0006;
+      padding: 22px;
+    }
+    form { display: grid; grid-template-columns: 1fr auto; gap: 12px; }
+    label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+    input, button { border-radius: 12px; font: inherit; }
+    input {
+      width: 100%; border: 1px solid var(--line); background: #091425;
+      color: var(--text); padding: 14px 16px; outline: none;
+    }
+    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #63d4ff22; }
+    button {
+      border: 0; padding: 0 23px; color: #06131e; font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--accent-2)); cursor: pointer;
+    }
+    button:disabled { cursor: wait; filter: grayscale(.6); opacity: .65; }
+    #status { min-height: 1.65em; margin: 13px 2px 0; color: var(--muted); }
+    #status.error { color: var(--error); }
+    section[hidden] { display: none; }
+    h2 { margin: 34px 0 14px; }
+    .profile { color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
+    .timings { display: grid; gap: 9px; margin-top: 16px; }
+    .timing { display: grid; grid-template-columns: 150px 1fr 80px; gap: 12px; align-items: center; }
+    .track { height: 8px; border-radius: 999px; background: #07101c; overflow: hidden; }
+    .bar { height: 100%; min-width: 2px; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+    .value { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .results { display: grid; gap: 14px; }
+    article { border: 1px solid var(--line); border-radius: 15px; background: var(--panel-2); padding: 18px; }
+    article h3 { margin: 0 0 6px; font-size: 1.05rem; overflow-wrap: anywhere; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 10px; color: var(--muted); font-size: .86rem; }
+    .passage { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    @media (max-width: 640px) {
+      main { padding-top: 36px; }
+      form { grid-template-columns: 1fr; }
+      button { min-height: 48px; }
+      .timing { grid-template-columns: 105px 1fr 66px; gap: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">Reproducible Chinese RAG</div>
+      <h1>TiDB 文档检索</h1>
+      <p>Dense + char-bigram sparse retrieval，经本地 exact RRF 融合与可选 rerank。页面展示真实服务阶段耗时，不生成答案。</p>
+    </header>
+
+    <div class="panel">
+      <form id="search-form">
+        <label for="query">检索问题</label>
+        <input id="query" name="query" maxlength="2000" autocomplete="off" required
+               placeholder="例如：如何使用 BR 做全量备份？">
+        <button id="submit" type="submit">检索文档</button>
+      </form>
+      <div id="status" role="status" aria-live="polite"></div>
+    </div>
+
+    <section id="diagnostics" hidden>
+      <h2>阶段耗时</h2>
+      <div class="panel">
+        <div id="profile" class="profile"></div>
+        <div id="timings" class="timings"></div>
+      </div>
+    </section>
+
+    <section id="result-section" hidden>
+      <h2>检索结果</h2>
+      <div id="results" class="results"></div>
+    </section>
+  </main>
+
+  <script>
+    const form = document.querySelector("#search-form");
+    const query = document.querySelector("#query");
+    const submit = document.querySelector("#submit");
+    const status = document.querySelector("#status");
+    const diagnostics = document.querySelector("#diagnostics");
+    const resultSection = document.querySelector("#result-section");
+    const timings = document.querySelector("#timings");
+    const profile = document.querySelector("#profile");
+    const results = document.querySelector("#results");
+
+    const stageLabels = {
+      dense_encode_seconds: "Dense encode",
+      sparse_encode_seconds: "Sparse encode",
+      dense_search_seconds: "Dense search",
+      sparse_search_seconds: "Sparse search",
+      fusion_seconds: "RRF fusion",
+      fetch_seconds: "Fetch",
+      rerank_seconds: "Rerank",
+      total_seconds: "Total"
+    };
+
+    function element(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined) node.textContent = text;
+      return node;
+    }
+
+    function showTimings(data) {
+      timings.replaceChildren();
+      const max = Math.max(...Object.values(data.timings), Number.EPSILON);
+      for (const [key, label] of Object.entries(stageLabels)) {
+        const seconds = data.timings[key];
+        const row = element("div", "timing");
+        row.append(element("span", "", label));
+        const track = element("div", "track");
+        const bar = element("div", "bar");
+        bar.style.width = `${Math.max(0.5, 100 * seconds / max)}%`;
+        track.append(bar);
+        row.append(track, element("span", "value", `${(1000 * seconds).toFixed(1)} ms`));
+        timings.append(row);
+      }
+      const mode = data.rerank_enabled ? "rerank enabled" : "rerank disabled";
+      profile.textContent = `${data.profile_name} · ${mode}`;
+      diagnostics.hidden = false;
+    }
+
+    function showResults(data) {
+      results.replaceChildren();
+      for (const passage of data.passages) {
+        const card = element("article");
+        const heading = passage.metadata.heading_path || passage.metadata.path || passage.source_key;
+        card.append(element("h3", "", `#${passage.rank} · ${heading}`));
+        const meta = element("div", "meta");
+        meta.append(
+          element("span", "", `fused #${passage.fused_rank}`),
+          element("span", "", `rerank ${passage.rerank_score.toFixed(4)}`),
+          element("span", "", `chunk ${passage.ordinal}`)
+        );
+        card.append(meta, element("p", "passage", passage.text));
+        results.append(card);
+      }
+      resultSection.hidden = false;
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      submit.disabled = true;
+      status.className = "";
+      status.textContent = "正在检索……";
+      diagnostics.hidden = true;
+      resultSection.hidden = true;
+      try {
+        const response = await fetch("/api/search", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({query: query.value, top_k: 10})
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.message || "检索失败");
+        showTimings(data);
+        showResults(data);
+        status.textContent = `完成，共返回 ${data.passages.length} 个 passage。`;
+      } catch (error) {
+        status.className = "error";
+        status.textContent = error instanceof Error ? error.message : "检索失败";
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

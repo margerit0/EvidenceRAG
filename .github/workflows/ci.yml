@@ -36,7 +36,7 @@ jobs:
           cache-dependency-glob: uv.lock
 
       - name: Install project
-        run: uv sync --extra dev --python ${{ matrix.python }}
+        run: uv sync --extra dev --extra service --python ${{ matrix.python }}
 
       # Deliberately NOT setting PYTHONUTF8 or PYTHONIOENCODING anywhere in this
       # workflow. Setting either one would make the Windows leg pass trivially

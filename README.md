@@ -555,6 +555,34 @@ vocabulary + IDF 写成 `sparse_index.json`，查询端加载后先比对 `state
 > ⚠️ 这是**一条查询的观察**，不是延迟基准也不是质量证据——p50/p95/QPS 属于 M8；
 > 系统级检索质量见下方 490-pair 离线评估，不能用这一条冒烟查询替代。
 
+<!-- BEGIN M8-SERVICE-BENCHMARK -->
+### HTTP 服务与 M8 性能基准
+
+FastAPI 服务复用同一条同步 `OnlineRetriever`：dense / sparse 两臂各取 100，客户端 exact RRF，再按 profile 选择 rerank；单文件前端只展示检索 passage 与阶段耗时，**不生成答案，也不调用 chat completion**。
+
+**正式 profile**：`tidb-docs-exact-rrf10-cached-query-no-rerank-v1`（embedding=`cached-qwen3-embedding-8b-tidb-query-4096-v1`；rerank=`disabled-identity-fused-order-v1`；cache-backed，本地测量不包含 provider 墙钟）。通过 HTTP 完成 980 次正式请求（另有 20 次 warm-up，全部排除）；fixture 含 980 条本地 query，仅发布其 SHA-256。
+
+| HTTP 指标 | p50 | p95 | p99 |
+|---|---:|---:|---:|
+| 客户端端到端 | 197.4 ms | 228.3 ms | 244.4 ms |
+
+成功 **980/980**，错误率 **0.00%**，成功吞吐 **4.97 QPS**；测量窗口 197.019s、并发 1。HTTP 状态：200=980。
+
+| 服务阶段 | p50 | p95 | p99 |
+|---|---:|---:|---:|
+| dense encode | 0.0 ms | 0.1 ms | 0.1 ms |
+| sparse encode | 0.1 ms | 0.1 ms | 0.1 ms |
+| dense search | 84.0 ms | 105.5 ms | 111.9 ms |
+| sparse search | 92.9 ms | 114.0 ms | 123.3 ms |
+| fusion | 0.1 ms | 0.2 ms | 0.2 ms |
+| fetch | 14.1 ms | 24.7 ms | 36.1 ms |
+| rerank | 0.0 ms | 0.0 ms | 0.0 ms |
+| service total | 195.0 ms | 225.9 ms | 242.1 ms |
+
+> 百分位固定用 NumPy `linear`；环境为 `Windows-11-10.0.26200-SP0` / Python `3.13.3` / `AMD64`。失败请求不进入成功 latency 或阶段百分位，QPS=成功数/正式测量墙钟。
+> 这是本机 HTTP profile 的观测，不是公网或生产 SLA；质量指标与显著性检验另见 TiDB pooled-qrels 评估。numeric samples 只含 status、elapsed 与阶段秒数，不含 query、passage、doc id、向量或 provider payload。
+<!-- END M8-SERVICE-BENCHMARK -->
+
 <!-- BEGIN TIDB-EVAL-EVIDENCE -->
 > **TiDB 合成评测集（本地报告生成）**：从已发布的 1,832 个 chunk 中按主题确定性抽样 500 个，双阶段生成并验证后保留 490 个完整 pair（direct / paraphrase 各 490 条）。
 > 四条冻结 run 在两种表面形式上按系统 top-20 取并集，并强制纳入生成 chunk，得到 24,525 个 pair-candidate 判断槽（每 pair 23–74）。
@@ -671,10 +699,10 @@ scripts/
   evaluate_h_hybrid_mrl1024.py 只读完整 4096 cache，离线重建 A/E/H/G 并生成聚合报告
   sync_h_hybrid_mrl1024_docs.py 重算认证 H 报告并同步 tracked 文档（支持 --check）
 <!-- BEGIN QUALITY-GATE-STATUS -->
-tests/                   747 个单元测试
+tests/                   846 个单元测试
 ```
 
-质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 747 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
+质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 846 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
 <!-- END QUALITY-GATE-STATUS -->
 
 README 中每一个数字都由上述脚本生成，没有手工誊写。这不是洁癖：早期原型用固定 1.15 字符/token 估算，得出的 chunk 数与最终实现相差 2.4 倍；而最初那次 BM25 饱和实验是一次性脚本跑的、从未提交，导致 README 里的核心结论一度**无法被任何人复现**。

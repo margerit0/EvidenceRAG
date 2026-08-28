@@ -340,11 +340,17 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 | **M5** | **Rerank + 深度消融：离线部分 ✅ 2026-08-21** | **1.5** | ✅ `providers/rerank.py` + `providers/cache.py` + `eval/rerank.py` + `scripts/evaluate_rerank.py`；✅ 在线 stage 已接入 `retrieval/online.py`（**请求深度 100 / 应用深度 50** 分开建模） | 冻结 G（dense-4096 hybrid）统一评分 239,400 对：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp@50 / +7.41pp@100；arity=2 无显著增益；top-100 未显著胜 top-50。4B 对照因 provider 无模型而取消 |
 | **M6** | ~~MRL 消融（原创）~~ **✅ 已完成 2026-08-19** | ~~1.0~~ **0.3** | `scripts/probe_mrl_quality.py`：4096→64 七档 + 逐维方差 + 配对检验 | 存储 93.1 MB → 23.3 MB（1024 维）；**1024 维 −0.50pp 不显著（p=0.684），仅 64 维显著劣化 −4.25pp（Holm p=0.001†；蒙特卡洛地板标记）** |
 | **M7** | chunk sweep | **0.5** | 256/400/800 | 「为什么是 400」有曲线不是故事 |
-| **M8** | 服务层 + 延迟/QPS | **1.5** | FastAPI + 单文件静态前端（含各阶段耗时条）；`scripts/bench.py` | **p50/p95/p99 + QPS**——补上「企业级」四条腿里唯一缺的那条 |
+<!-- BEGIN M8-ROADMAP -->
+| **M8** | **服务层 + HTTP 延迟/QPS ✅ 2026-08-28** | **1.5** | ✅ FastAPI + 单文件静态前端（阶段耗时条）+ `scripts/serve.py`；✅ `scripts/bench.py` + numeric-samples 认证 + `sync_m8_docs.py` | profile `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`（cache-backed），正式请求 980/980 成功，HTTP p50/p95/p99 **197.4/228.3/244.4 ms**，**4.97 QPS**，并发 1；本机结果，不是生产 SLA，不与其他 profile 混写 |
+<!-- END M8-ROADMAP -->
 | **M9** | 生成侧评估 | **2.0** | 移植 `metrics_gen/`（jieba 词级 BLEU/ROUGE + BERTScore-zh rescaled + 自实现 RAGQuestEval）；commit quest_gt JSON | event_summary / QA-1doc 两个任务对齐 CRUD-RAG Table 8 baseline |
 | **M10** | TiDB 第二后端 + 那一节 README | **1.0** | `store/tidb.py` + 「为什么 TiDB 的文档没有跑在 TiDB 上」 | 同一份 Protocol 双后端跑通 |
 | **M11** | 可观测性 + Bad Case 归因 | **1.0** | `phoenix serve` tracing；Bad-Case 归因表（召回失败 / 排序失败 / 生成失败三分类，各 20 例） | Bad Case 分布百分比 |
 | **M12** | 公网部署 + README 定稿 | **1.0** | Zilliz Cloud Free 集群 + 公网 demo 链接；README 首屏定稿 | 端到端在线可点 |
+
+<!-- BEGIN M8-STATUS -->
+> M8 在线 pipeline、FastAPI/静态前端与 HTTP benchmark 已完成。当前认证 headline 只绑定 `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`：p95 **228.3 ms** / **4.97 QPS**；provider-included 与 cache-backed profile 必须分表，不能混成一个性能数字。
+<!-- END M8-STATUS -->
 
 **合计 ≈ 15.5 天有效工时**。按每周 2 个工作日晚上 + 1 个周末日算，约 **5–6 周**。
 
@@ -573,6 +579,9 @@ zhrag/
 <!-- BEGIN H-HYBRID-MRL1024-CHECKLIST -->
 - [x] **H：dense-1024 + char-bigram BM25 的独立等权 exact RRF 基线。** 已在 5,681 篇完整文档 / 2,394 条 query 上从同一 4096 维 cache 双侧前缀切片并重归一化，零 API、无 rerank；1doc nDCG@10 **0.908 [0.895, 0.921]**。H−G 两个 retention family 共 2/12 项通过 Holm；未拒绝项只写“未检测到差异”，不写“无损/等价”。复现：`scripts/evaluate_h_hybrid_mrl1024.py`。
 <!-- END H-HYBRID-MRL1024-CHECKLIST -->
+<!-- BEGIN M8-CHECKLIST -->
+- [x] **M8：FastAPI 服务与 HTTP 性能基准。** 服务层只编排现有 `OnlineRetriever`，有严格输入、脱敏错误、metadata allowlist、fail-fast 并发 admission 与单文件静态 UI；benchmark 排除 warm-up，报告 p50/p95/p99、成功 QPS、错误率/status 与八阶段耗时。当前认证 HTTP p95 **228.3 ms** / **4.97 QPS**。同步器从无文本 numeric samples 重算 aggregate；不调用 chat completion。
+<!-- END M8-CHECKLIST -->
 - [ ] **RAGAS / DeepEval 内置指标提示词在中文上的校准度。** 研究只验证了管道（`base_url` 支持、`adapt_instruction` 语义、DeepSeek/Kimi 类），**零中文评测**。人工标 ~50 行，先测判官与你的一致率。
 
 **部署与生态待验证事项**

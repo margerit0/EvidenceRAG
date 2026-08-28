@@ -87,6 +87,12 @@ uv run mypy                       # strict
 该报告、有效矩阵 fingerprints 与所有输入继续位于目录级 gitignore 边界；cache miss 会失败，不会读取 `.env` 或调用 embedding/rerank provider。
 <!-- END H-HYBRID-MRL1024-ARTIFACT -->
 
+<!-- BEGIN M8-LOCAL-ARTIFACTS -->
+- `indexes/tidb/eval/{m8_http_samples,m8_http_report}.json` — `scripts/bench.py` 经 HTTP 测量；samples 仅含 status / elapsed / 八阶段秒数，report 仅含聚合值。当前 `tidb-docs-exact-rrf10-cached-query-no-rerank-v1` 为 980 个正式请求；由 `scripts/sync_m8_docs.py` 校验 canonical SHA-256 并从 samples 精确重算后才同步文档。
+
+M8 artifacts 继续位于 `indexes/` gitignore 边界，禁止加入 query、passage、doc id、embedding、rerank score 或 provider payload；不同 provider/cache profile 必须各自命名与报告。
+<!-- END M8-LOCAL-ARTIFACTS -->
+
 TiDB canonical artifact 的 publisher 先拿各自 operation lock，再只在最终本地发布阶段拿
 `indexes/tidb/eval/.artifacts.lock`；evaluator 与文档同步则在 load → 重算认证 → publish 全程持有
 该共享锁。付费 API 调用不包在共享锁内。`replace_files()` 保证 Python 异常时回滚且 marker 最后发布，
