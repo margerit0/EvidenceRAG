@@ -125,6 +125,12 @@ def _docs(
                 "<!-- BEGIN M8-ROADMAP -->",
                 "stale",
                 "<!-- END M8-ROADMAP -->",
+                "<!-- BEGIN M8-RESUME-EVIDENCE -->",
+                "stale",
+                "<!-- END M8-RESUME-EVIDENCE -->",
+                "<!-- BEGIN M8-RESUME-PERFORMANCE -->",
+                "stale",
+                "<!-- END M8-RESUME-PERFORMANCE -->",
                 "<!-- BEGIN M8-CHECKLIST -->",
                 "stale",
                 "<!-- END M8-CHECKLIST -->",
@@ -237,6 +243,19 @@ class TestSynchronization:
         assert roadmap.startswith("| **M8** |")
         assert roadmap.count("\n") == 0
         assert roadmap.count("|") == 6
+        evidence = (
+            first[1]
+            .split("<!-- BEGIN M8-RESUME-EVIDENCE -->", 1)[1]
+            .split("<!-- END M8-RESUME-EVIDENCE -->", 1)[0]
+        )
+        performance = (
+            first[1]
+            .split("<!-- BEGIN M8-RESUME-PERFORMANCE -->", 1)[1]
+            .split("<!-- END M8-RESUME-PERFORMANCE -->", 1)[0]
+        )
+        assert "4 次正式请求" in evidence
+        assert "p95 380.0 ms / 3.00 QPS" in performance
+        assert "不含 provider 墙钟" in performance
         assert "m8_http_samples" in first[2]
         serialized = "\n".join(first)
         for forbidden in ("SECRET_QUERY", "SECRET_DOC", '"query"', '"doc_id"'):

@@ -38,7 +38,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -51,6 +51,7 @@ __all__ = [
     "normalize",
     "parse_frontmatter",
     "split_by_headings",
+    "split_trigger_exceedance_reason",
 ]
 
 _FENCE = re.compile(r"```.*?```", re.S)
@@ -88,6 +89,49 @@ class Chunk:
         "TiKV 配置文件 > raftstore > apply-pool-size".
         """
         return f"{' > '.join(self.heading_path)}\n\n{self.text}" if self.heading_path else self.text
+
+
+type SplitTriggerReason = Literal[
+    "protected_fence",
+    "protected_table",
+    "protected_fence_and_table",
+    "indivisible_paragraph",
+    "unexplained",
+]
+
+
+def split_trigger_exceedance_reason(
+    text: str,
+    *,
+    split_trigger_tokens: int,
+    token_counter: Callable[[str], int] = estimate_tokens,
+) -> SplitTriggerReason | None:
+    """Classify why one emitted chunk exceeds the best-effort split trigger.
+
+    ``hard_max_tokens`` in :func:`chunk_markdown` triggers paragraph splitting;
+    it is not a strict output cap. Fenced code and pipe tables stay atomic, and
+    an individual paragraph has no smaller safe boundary. This helper uses the
+    same grammar as the chunker so reports can reconcile every exceedance without
+    mislabelling expected preservation as a hard-limit violation.
+    """
+    if split_trigger_tokens < 1:
+        raise ValueError("split_trigger_tokens must be positive")
+    if token_counter(text) <= split_trigger_tokens:
+        return None
+    has_fence = _FENCE.search(text) is not None
+    has_table = _TABLE.search(text) is not None
+    if has_fence and has_table:
+        return "protected_fence_and_table"
+    if has_fence:
+        return "protected_fence"
+    if has_table:
+        return "protected_table"
+    if any(
+        paragraph.strip() and token_counter(paragraph) > split_trigger_tokens
+        for paragraph in _PARA.split(text)
+    ):
+        return "indivisible_paragraph"
+    return "unexplained"
 
 
 def parse_frontmatter(markdown: str) -> tuple[dict[str, Any], str]:

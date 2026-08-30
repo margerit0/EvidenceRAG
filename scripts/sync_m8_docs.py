@@ -276,6 +276,30 @@ def _architecture_checklist(report: Mapping[str, Any]) -> str:
     )
 
 
+def _architecture_resume_evidence(report: Mapping[str, Any]) -> str:
+    measurement = _mapping(report, "measurement")
+    profile = _mapping(report, "profile")
+    return (
+        "> M8 复现证据：`scripts/bench.py` 已对 cache-backed HTTP profile "
+        f"`{profile['name']}` 完成 {int(measurement['request_count']):,} 次正式请求；"
+        "原始 numeric samples 与聚合报告均在 gitignored `indexes/tidb/eval/`，"
+        "由 `sync_m8_docs.py` 校验 SHA-256 并离线重算。"
+    )
+
+
+def _architecture_resume_performance(report: Mapping[str, Any]) -> str:
+    measurement = _mapping(report, "measurement")
+    latency = _mapping(measurement, "http_latency")
+    configuration = _mapping(report, "configuration")
+    profile = _mapping(report, "profile")
+    return (
+        f"当前认证的 cache-backed HTTP profile `{profile['name']}`（并发 "
+        f"{int(configuration['concurrency'])}，不含 provider 墙钟）端到端 **p95 "
+        f"{float(latency['p95_seconds']) * 1000.0:,.1f} ms / "
+        f"{float(measurement['successful_qps']):.2f} QPS**。"
+    )
+
+
 def _claude_artifact(report: Mapping[str, Any]) -> str:
     measurement = _mapping(report, "measurement")
     profile = _mapping(report, "profile")
@@ -291,13 +315,22 @@ def _claude_artifact(report: Mapping[str, Any]) -> str:
     )
 
 
-def _replace_region(text: str, name: str, body: str, *, path: Path) -> str:
+def _replace_region(
+    text: str,
+    name: str,
+    body: str,
+    *,
+    path: Path,
+    inline: bool = False,
+) -> str:
     start = f"<!-- BEGIN {name} -->"
     end = f"<!-- END {name} -->"
     if text.count(start) != 1 or text.count(end) != 1:
         raise SystemExit(f"! {path}: marker pair {name!r} must occur exactly once")
     prefix, remainder = text.split(start, 1)
     _old, suffix = remainder.split(end, 1)
+    if inline:
+        return f"{prefix}{start}{body.strip()}{end}{suffix}"
     return f"{prefix}{start}\n{body.rstrip()}\n{end}{suffix}"
 
 
@@ -308,7 +341,17 @@ def _render_target(
     before = read_text(target.path)
     after = before
     for name, render in target.regions.items():
-        after = _replace_region(after, name, render(report), path=target.path)
+        if name in {"M8-RESUME-EVIDENCE", "M8-RESUME-PERFORMANCE"} and (
+            f"<!-- BEGIN {name} -->" not in after or f"<!-- END {name} -->" not in after
+        ):
+            continue
+        after = _replace_region(
+            after,
+            name,
+            render(report),
+            path=target.path,
+            inline=name == "M8-RESUME-PERFORMANCE",
+        )
     return before, after
 
 
@@ -321,6 +364,10 @@ def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
                 "M8-STATUS": _architecture_status,
                 "M8-ROADMAP": _architecture_m8,
                 "M8-CHECKLIST": _architecture_checklist,
+                # Older fixture documents may not yet carry these optional markers;
+                # the canonical repository document does, and new renders own them.
+                "M8-RESUME-EVIDENCE": _architecture_resume_evidence,
+                "M8-RESUME-PERFORMANCE": _architecture_resume_performance,
             },
         ),
         _Target(args.claude_context, {"M8-LOCAL-ARTIFACTS": _claude_artifact}),

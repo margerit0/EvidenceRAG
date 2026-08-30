@@ -93,6 +93,12 @@ uv run mypy                       # strict
 M8 artifacts 继续位于 `indexes/` gitignore 边界，禁止加入 query、passage、doc id、embedding、rerank score 或 provider payload；不同 provider/cache profile 必须各自命名与报告。
 <!-- END M8-LOCAL-ARTIFACTS -->
 
+<!-- BEGIN M7-CHUNK-SWEEP -->
+- `indexes/tidb/eval/chunk_sweep/v1/` — `build_tidb_chunk_sweep.py` 规划并认证 256/400/800 profile；`evaluate_tidb_chunk_sweep.py` 完全离线重建 BM25/dense/RRF、source collapse、numeric samples 与 source-cluster CI/paired bootstrap/Holm report。
+
+M7 需补齐的 document vector ID 仅为 256/800 相对 canonical 400 缺失的 exact chunk IDs，固定 batch=16；不调用 query embedding、rerank、chat 或 Milvus。所有 cache、runs、qrels 映射与报告均位于 `indexes/` gitignore 边界。
+<!-- END M7-CHUNK-SWEEP -->
+
 TiDB canonical artifact 的 publisher 先拿各自 operation lock，再只在最终本地发布阶段拿
 `indexes/tidb/eval/.artifacts.lock`；evaluator 与文档同步则在 load → 重算认证 → publish 全程持有
 该共享锁。付费 API 调用不包在共享锁内。`replace_files()` 保证 Python 异常时回滚且 marker 最后发布，

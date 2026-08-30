@@ -15,6 +15,7 @@ from zhrag.chunking import (
     normalize,
     parse_frontmatter,
     split_by_headings,
+    split_trigger_exceedance_reason,
 )
 
 DOC = """---
@@ -75,6 +76,46 @@ class TestNormalize:
 
     def test_link_stripping_can_be_disabled(self) -> None:
         assert "/ai/x.md" in normalize("[a](/ai/x.md)", strip_links=False)
+
+
+class TestSplitTriggerDiagnostics:
+    @staticmethod
+    def _chars(text: str) -> int:
+        return len(text)
+
+    def test_returns_none_within_trigger(self) -> None:
+        assert (
+            split_trigger_exceedance_reason(
+                "short",
+                split_trigger_tokens=5,
+                token_counter=self._chars,
+            )
+            is None
+        )
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        (
+            ("```sql\nselect 1\n```", "protected_fence"),
+            ("| a |\n|---|\n| 1 |", "protected_table"),
+            ("```text\nx\n```\n\n| a |\n|---|", "protected_fence_and_table"),
+            ("one-indivisible-paragraph", "indivisible_paragraph"),
+            ("aaa\n\nbbb", "unexplained"),
+        ),
+    )
+    def test_uses_chunker_grammar_for_exceedances(self, text: str, expected: str) -> None:
+        assert (
+            split_trigger_exceedance_reason(
+                text,
+                split_trigger_tokens=4,
+                token_counter=self._chars,
+            )
+            == expected
+        )
+
+    def test_rejects_non_positive_trigger(self) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            split_trigger_exceedance_reason("text", split_trigger_tokens=0)
 
 
 class TestHeadingSplit:

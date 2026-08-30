@@ -794,7 +794,8 @@ def _architecture_corpus(status: EvalStatus) -> str:
         (
             "| **在它上面测什么** | R@1 / MRR@10 / nDCG@10 / ALL-gold@10 + 配对检验 | "
             "已完成 Hit@1 / R@1 / MRR@10 / binary+graded nDCG@10、source-cluster bootstrap、"
-            "direct/paraphrase 与描述性词面重叠分层；延迟/QPS/重建仍待测 |"
+            "direct/paraphrase 与描述性词面重叠分层；HTTP 延迟/QPS 已由 M8 独立认证，"
+            "增量重建仍待测 |"
         ),
         "",
         (

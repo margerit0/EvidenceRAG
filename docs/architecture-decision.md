@@ -27,7 +27,7 @@
 | **rerank** | **Qwen/Qwen3-Reranker-8B** @ One Hub relay，传 `instruction`，部署窗口候选 **top-50** | 已在冻结的 dense-4096 hybrid 上完成 top-50/100 分层消融：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp（p=1.32e−09）；top-100 未显著优于 top-50 | 4B 对照取消：当前中转站不提供。若换 provider，必须新建独立 fingerprint/cache，不能与现有 8B 分数混用 |
 | **LLM（生成）** | Qwen 系（你已有 key） | 与 embedding/rerank 同族，叙事一致 | — |
 | **LLM（评判）** | 当前 TiDB pooled qrels：与 QG 相同的 `gpt-5.6-sol`、`reasoning_effort=high`；未来生成侧对比实验仍要求独立 judge | 本轮可用配置只有同一请求模型，因此报告明确写 **self-agreement / synthetic labels**，不冒充独立复核；若要提升标签可信度，应在冻结 pool 上补不同模型复判或人工校准 | DeepSeek-V3 类或 Kimi 等非生成模型；切换后必须新建 provenance/cache，不与现有判断混用 |
-| **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,832，p50 371，p90 734，欠长块 5.0%，代码块破损 0 | 必须补跑 256/400/800 sweep 出曲线（验证分块目标的选择依据） |
+| **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,832，p50 371，p90 734，欠长块 5.0%，代码块破损 0；M7 已完成 256/400/800 source-level known-item sweep | 400 保留为 canonical reference；M7 两个相对 400 的主终点比较经 Holm 均未显著，不能声称 400 全局最优、等价或无损 |
 | **检索管线** | dense(4096/1024, HNSW, COSINE) + sparse(char-bigram BM25, **IP**) 双字段 → 服务端 `hybrid_search` + `RRFRanker` → 客户端 Qwen3-Reranker-8B 重排 top-50 | 三段式，每段可单独消融；top-50 由 top-100 未检出额外收益的实测决定 | **WeightedRanker 是必测项而非备选**：离线实测等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），加权 0.3/0.7 才显著（16 胜 4 负，p=0.047）。反过来 `RRFRanker` 的 **k 几乎不影响结果**（60→10 只动 0.1pp），不值得占消融表一列。Qdrant 的 dbsf 仍可作对照 |
 | **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | Milvus 内置 `chinese` analyzer 就是 jieba，且默认 `mode="search"` = `cut_for_search`——正是你实测最差的 73.4%，比 char bigram 的 75.9% 低 2.5 分。**开服务端分词器会让系统变差**。另外可绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的坑 | 无（这是本项目最有说服力的设计决策之一） |
 | **服务层** | FastAPI + httpx（异步）+ tenacity（429 指数退避） | 三个依赖，全部薄，不侵入检索层 | — |
@@ -185,7 +185,7 @@ suffix = '<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n'
 | **角色** | **探索性检索 benchmark**——现有消融数字来源 | **部署集 + 合成 pooled qrels**——公网 demo 与域内评测输入 |
 | **有无 gold label** | 有上游 `evidence_document_id` | **无上游人工 gold**；已有 direct/paraphrase QG、四系统 pooling、rank-blinded LLM judge 形成的合成 qrels |
 | **在它上面调什么** | 已探索 analyzer、fusion 权重、rerank 深度、MRL 维度 | 当前冻结配置，不用这批 query 反向调参；若要调，先拆 dev/test 或明确为探索性 |
-| **在它上面测什么** | R@1 / MRR@10 / nDCG@10 / ALL-gold@10 + 配对检验 | 已完成 Hit@1 / R@1 / MRR@10 / binary+graded nDCG@10、source-cluster bootstrap、direct/paraphrase 与描述性词面重叠分层；延迟/QPS/重建仍待测 |
+| **在它上面测什么** | R@1 / MRR@10 / nDCG@10 / ALL-gold@10 + 配对检验 | 已完成 Hit@1 / R@1 / MRR@10 / binary+graded nDCG@10、source-cluster bootstrap、direct/paraphrase 与描述性词面重叠分层；HTTP 延迟/QPS 已由 M8 独立认证，增量重建仍待测 |
 
 当前 TiDB qrels 覆盖 490 个 pair / 980 条 query / 24,525 个 pooled candidates，分属 245 个 `gold_source_key` 源聚类。
 四条冻结 run 的 top-1/top-10 候选均已判断，但 **100% judged coverage 不是 100% retrieval quality**；质量表已用 source-clustered 95% CI、双尾配对 source-cluster bootstrap 与 Holm 校正生成。
@@ -339,7 +339,9 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 <!-- END H-HYBRID-MRL1024-M4 -->
 | **M5** | **Rerank + 深度消融：离线部分 ✅ 2026-08-21** | **1.5** | ✅ `providers/rerank.py` + `providers/cache.py` + `eval/rerank.py` + `scripts/evaluate_rerank.py`；✅ 在线 stage 已接入 `retrieval/online.py`（**请求深度 100 / 应用深度 50** 分开建模） | 冻结 G（dense-4096 hybrid）统一评分 239,400 对：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp@50 / +7.41pp@100；arity=2 无显著增益；top-100 未显著胜 top-50。4B 对照因 provider 无模型而取消 |
 | **M6** | ~~MRL 消融（原创）~~ **✅ 已完成 2026-08-19** | ~~1.0~~ **0.3** | `scripts/probe_mrl_quality.py`：4096→64 七档 + 逐维方差 + 配对检验 | 存储 93.1 MB → 23.3 MB（1024 维）；**1024 维 −0.50pp 不显著（p=0.684），仅 64 维显著劣化 −4.25pp（Holm p=0.001†；蒙特卡洛地板标记）** |
-| **M7** | chunk sweep | **0.5** | 256/400/800 | 「为什么是 400」有曲线不是故事 |
+<!-- BEGIN M7-CHUNK-SWEEP -->
+| **M7** | **TiDB chunk sweep（source-level known-item）✅** | **0.5** | 256/400/800；dense-4096 + char-bigram BM25 + exact RRF k=10；RRF 先于最终 arm 的 source collapse；不启用 rerank/chat | `tidb-chunk-t256-h384-v1` 2,802 chunks；origin-source MRR@10 0.870 [0.846, 0.893]<br>`tidb-chunk-t400-h600-v1` 1,832 chunks；origin-source MRR@10 0.862 [0.839, 0.884]<br>`tidb-chunk-t800-h1200-v1` 1,019 chunks；origin-source MRR@10 0.850 [0.824, 0.874]<br>主问题是 `400-origin exploratory known-item source retrieval sweep`，不是 passage-level answer relevance |
+<!-- END M7-CHUNK-SWEEP -->
 <!-- BEGIN M8-ROADMAP -->
 | **M8** | **服务层 + HTTP 延迟/QPS ✅ 2026-08-28** | **1.5** | ✅ FastAPI + 单文件静态前端（阶段耗时条）+ `scripts/serve.py`；✅ `scripts/bench.py` + numeric-samples 认证 + `sync_m8_docs.py` | profile `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`（cache-backed），正式请求 980/980 成功，HTTP p50/p95/p99 **197.4/228.3/244.4 ms**，**4.97 QPS**，并发 1；本机结果，不是生产 SLA，不与其他 profile 混写 |
 <!-- END M8-ROADMAP -->
@@ -351,6 +353,10 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 <!-- BEGIN M8-STATUS -->
 > M8 在线 pipeline、FastAPI/静态前端与 HTTP benchmark 已完成。当前认证 headline 只绑定 `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`：p95 **228.3 ms** / **4.97 QPS**；provider-included 与 cache-backed profile 必须分表，不能混成一个性能数字。
 <!-- END M8-STATUS -->
+
+<!-- BEGIN M8-RESUME-EVIDENCE -->
+> M8 复现证据：`scripts/bench.py` 已对 cache-backed HTTP profile `tidb-docs-exact-rrf10-cached-query-no-rerank-v1` 完成 980 次正式请求；原始 numeric samples 与聚合报告均在 gitignored `indexes/tidb/eval/`，由 `sync_m8_docs.py` 校验 SHA-256 并离线重算。
+<!-- END M8-RESUME-EVIDENCE -->
 
 **合计 ≈ 15.5 天有效工时**。按每周 2 个工作日晚上 + 1 个周末日算，约 **5–6 周**。
 
@@ -490,12 +496,11 @@ zhrag/
 
 **③ 面向技术文档的两阶段分块策略。** 针对 500 篇 TiDB 中文文档（**3,309** 个代码块 / **5,262** 行表格），纯标题切分导致 **63.5%** 分块 <100 tokens、最大块 **16,111** tokens；改为「标题切分 → 掩码代码块与表格 → 按 target=400 合并小块 / 拆分大块」，得 **1,832** 块，p50 **371** / p90 **734**，欠长块降至 **5.0%**，代码块破损 **0** 例；并给出 256/400/800 的分块尺寸-召回曲线。
 
-**④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B 构建 dense + 字符 bigram BM25 双臂检索与 RRF 融合，在 5,681 篇语料 / 800 条单证据查询上 **R@1 由 BM25 基线 75.9% 提升至 79.9%（+4.00pp，65 胜 33 负，McNemar 精确检验 p = 1.6e-03）**；在全部 2,394 条查询上对冻结 hybrid 的 top-100 候选统一调用 Qwen3-Reranker-8B，离线消融显示 top-50 已使单证据 `hit@1` **+6.06pp**（95% CI [+3.34,+8.78]，Holm p=0.0003）、三证据 `ALL@10` **+7.15pp**（[+4.98,+9.32]，p=1.32e-09），而 top-100 无显著额外收益，因此部署候选选 top-50；端到端 **p95 [XXX] ms / QPS [XX]** 待补。首次公开 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**：4096→1024 维存储由 **93.1 MB 降至 23.3 MB（−75%）**，R@1 **78.0%→77.5%（−0.50pp，配对 bootstrap p=0.684，Holm 校正后不显著）**；降至 128 维（−97% 存储）仍无显著损失，**64 维起显著劣化（−4.25pp，Holm p=0.001†；蒙特卡洛地板标记）**——官方技术报告未发布此数据。
+**④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B 构建 dense + 字符 bigram BM25 双臂检索与 RRF 融合，在 5,681 篇语料 / 800 条单证据查询上 **R@1 由 BM25 基线 75.9% 提升至 79.9%（+4.00pp，65 胜 33 负，McNemar 精确检验 p = 1.6e-03）**；在全部 2,394 条查询上对冻结 hybrid 的 top-100 候选统一调用 Qwen3-Reranker-8B，离线消融显示 top-50 已使单证据 `hit@1` **+6.06pp**（95% CI [+3.34,+8.78]，Holm p=0.0003）、三证据 `ALL@10` **+7.15pp**（[+4.98,+9.32]，p=1.32e-09），而 top-100 无显著额外收益，因此部署候选选 top-50；<!-- BEGIN M8-RESUME-PERFORMANCE -->当前认证的 cache-backed HTTP profile `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`（并发 1，不含 provider 墙钟）端到端 **p95 228.3 ms / 4.97 QPS**。<!-- END M8-RESUME-PERFORMANCE -->首次公开 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**：4096→1024 维存储由 **93.1 MB 降至 23.3 MB（−75%）**，R@1 **78.0%→77.5%（−0.50pp，配对 bootstrap p=0.684，Holm 校正后不显著）**；降至 128 维（−97% 存储）仍无显著损失，**64 维起显著劣化（−4.25pp，Holm p=0.001†；蒙特卡洛地板标记）**——官方技术报告未发布此数据。
 
 **⑤ 用配对检验推翻自己的点估计，并据此改路线。** 8B 稠密检索相对 40 行纯标准库 BM25 名义领先 2.1pp，配对检验后判定**不显著**（95% CI **[−0.88, +5.12]pp**，McNemar 精确 p = **0.199**）；进一步用 R@1 列联表（both 538 / 仅 BM25 69 / 仅 dense 86 / 都不中 107，φ = 0.455，**并集 oracle 上限 86.6%**）判定两臂**互补而非冗余**，据此把主线从「换更强的单臂」改为「融合」，离线 RRF 兑现 **75.9% → 79.9%（p = 1.6e-03）**。同一批实验还显示**等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），只有加权 0.3/0.7 显著（16 胜 4 负，p=0.047）**——赢在少破坏，不在多修好。
 
-> ⚠️ **④ 里剩下的 2 个 `[方括号]` 必须在发布前填实数**（M8 的延迟与吞吐）。
-> M4 的融合、M5 的离线 rerank 深度消融与 M6 的 MRL 结果都已实测；在线 pipeline 与 M8 性能数字仍待完成。①②③⑤ 每一个数字也都已实测。
+> ④ 中的 HTTP 性能句由 `M8-RESUME-PERFORMANCE` 区域从认证 numeric samples 生成；不要手写或跨 profile 混用。M4 的融合、M5 的离线 rerank 深度消融、M6 的 MRL 与 M8 的在线 pipeline/本机 HTTP benchmark 都已实测；①②③⑤ 每一个数字也都已实测。M11 的可观测性与 Bad Case 归因仍待完成。
 >
 > ⚠️ **不要把「dense 打赢 BM25」写进任何一条要点。** 实测 +2.12pp、95% CI [−0.88, +5.12]pp、
 > McNemar p = 0.199 —— **在本语料上不显著**。可以写的是融合后对 BM25 的 +4.00pp（显著），
@@ -540,7 +545,7 @@ zhrag/
 | **拿 Milvus 的 delete 计数当业务删除数** | Lite 对不存在的主键写 tombstone 并返回 `len(pks)`，删不存在的行不是错误 | 存储层只报「请求了几行、服务端确认了」；`{added, updated, deleted}` 一律来自 manifest diff |
 | **把 `code=100` 当成「alias 还没发布」** | 100 被复用于多种「对象不存在」，若传输层故障恰好带上它，就会把一次连接失败读成「首次发布」，然后覆盖一个从未校验过的 collection | 只认消息里明说不存在的措辞（`not exist` / `not found`），码值不单独作数 |
 | **合并相邻小节时丢掉后续标题** | 「甲」「乙」两个兄弟小节合成一块，只有「甲」的路径留在 metadata，「乙」的标题在生成永久 chunk id 与向量之前就消失 | 只把**共同前缀**放进 metadata，各自剩余层级物化进被索引正文（`_materialize_sections`）；改这条会改 chunk 数，README 数字须重出 |
-| **README 里「企业级」目前是空头支票** | 尚缺实际延迟与监控验证，不能只凭功能清单作出承诺 | M8 交付 p50/p95/p99 + QPS，或把这个词软化 |
+| **README 里「企业级」不能只靠功能清单** | 已有 M8 本机 HTTP 延迟/QPS 证据，但仍缺公网 SLA、provider-included profile 与 M11 tracing/Bad Case 归因 | 保持本机 profile 的边界声明；完成 M11，并在公网部署后另测生产路径 |
 
 ---
 

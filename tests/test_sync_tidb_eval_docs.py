@@ -418,6 +418,9 @@ class TestSynchronization:
         assert "100% **已判断覆盖**" in first[0]
         assert "`pytest` 7 passed" in first[0]
         assert "无上游人工 gold" in first[1]
+        assert "HTTP 延迟/QPS 已由 M8 独立认证" in first[1]
+        assert "增量重建仍待测" in first[1]
+        assert "延迟/QPS/重建仍待测" not in first[1]
         assert "quality_report.json" in first[2]
         serialized = "\n".join(first)
         for forbidden in (

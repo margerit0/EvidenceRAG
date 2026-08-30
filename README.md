@@ -583,6 +583,38 @@ FastAPI 服务复用同一条同步 `OnlineRetriever`：dense / sparse 两臂各
 > 这是本机 HTTP profile 的观测，不是公网或生产 SLA；质量指标与显著性检验另见 TiDB pooled-qrels 评估。numeric samples 只含 status、elapsed 与阶段秒数，不含 query、passage、doc id、向量或 provider payload。
 <!-- END M8-SERVICE-BENCHMARK -->
 
+<!-- BEGIN M7-CHUNK-SWEEP -->
+### M7 分块粒度 sweep（TiDB source-level known-item）
+
+> **探索性声明**：这是 `400-origin exploratory known-item source retrieval sweep`。
+> 先在 raw chunk 上分别构建 BM25 / dense-4096，再做 exact RRF k=10/depth=100，
+> 最终 arm 才按 source 首次出现折叠；不启用 rerank、Milvus 或 chat。
+
+| profile | docs | chunks | split-trigger exceedance | exact reuse / required new vectors |
+|---|---:|---:|---:|---:|
+| `tidb-chunk-t256-h384-v1` | 450 | 2,802 | 430 (15.35%) | 252 / 2,550 |
+| `tidb-chunk-t400-h600-v1` | 450 | 1,832 | 282 (15.39%) | 1,832 / 0 |
+| `tidb-chunk-t800-h1200-v1` | 450 | 1,019 | 116 (11.38%) | 190 / 829 |
+
+> **主终点（overall，pair 内 direct/paraphrase 取均值；95% CI 为 245 个 source cluster 整簇 bootstrap）**：
+
+| profile | origin-source MRR@10 | Hit@1 | Hit@10 |
+|---|---:|---:|---:|
+| `tidb-chunk-t256-h384-v1` | 0.870 [0.846, 0.893] | 0.787 [0.749, 0.823] | 0.994 [0.987, 0.999] |
+| `tidb-chunk-t400-h600-v1` | 0.862 [0.839, 0.884] | 0.771 [0.734, 0.806] | 0.992 [0.984, 0.998] |
+| `tidb-chunk-t800-h1200-v1` | 0.850 [0.824, 0.874] | 0.753 [0.715, 0.791] | 0.991 [0.982, 0.998] |
+
+> **预声明 Family A（Holm 2-test）**：主终点比较 256−400 与 800−400；Family B 独立检验 direct/paraphrase difference-in-differences。
+
+| comparison | Δ MRR@10 [95% CI] | p | p(Holm) | W/L/T |
+|---|---:|---:|---:|---:|
+| `tidb-chunk-t256-h384-v1-vs-tidb-chunk-t400-h600-v1` | 0.0080 [-0.0049, 0.0206] | 0.2239 | 0.2239 | 65/63/362 |
+| `tidb-chunk-t800-h1200-v1-vs-tidb-chunk-t400-h600-v1` | -0.0125 [-0.0262, 0.0009] | 0.0703 | 0.1406 | 70/90/330 |
+
+> 不能把未检出差异写成等价、无损或全局最优；source-level known-item retrieval 也不等于 answer-bearing passage recall。
+> confirmed-source 只是 canonical 400-only judgement pool 的 secondary sensitivity，未判断 source 不是可靠负例。
+<!-- END M7-CHUNK-SWEEP -->
+
 <!-- BEGIN TIDB-EVAL-EVIDENCE -->
 > **TiDB 合成评测集（本地报告生成）**：从已发布的 1,832 个 chunk 中按主题确定性抽样 500 个，双阶段生成并验证后保留 490 个完整 pair（direct / paraphrase 各 490 条）。
 > 四条冻结 run 在两种表面形式上按系统 top-20 取并集，并强制纳入生成 chunk，得到 24,525 个 pair-candidate 判断槽（每 pair 23–74）。
@@ -699,10 +731,10 @@ scripts/
   evaluate_h_hybrid_mrl1024.py 只读完整 4096 cache，离线重建 A/E/H/G 并生成聚合报告
   sync_h_hybrid_mrl1024_docs.py 重算认证 H 报告并同步 tracked 文档（支持 --check）
 <!-- BEGIN QUALITY-GATE-STATUS -->
-tests/                   846 个单元测试
+tests/                   934 个单元测试
 ```
 
-质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 846 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
+质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 934 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
 <!-- END QUALITY-GATE-STATUS -->
 
 README 中每一个数字都由上述脚本生成，没有手工誊写。这不是洁癖：早期原型用固定 1.15 字符/token 估算，得出的 chunk 数与最终实现相差 2.4 倍；而最初那次 BM25 饱和实验是一次性脚本跑的、从未提交，导致 README 里的核心结论一度**无法被任何人复现**。

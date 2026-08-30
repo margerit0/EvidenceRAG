@@ -5,6 +5,7 @@ from zhrag.chunking.markdown import (
     normalize,
     parse_frontmatter,
     split_by_headings,
+    split_trigger_exceedance_reason,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "normalize",
     "parse_frontmatter",
     "split_by_headings",
+    "split_trigger_exceedance_reason",
 ]
