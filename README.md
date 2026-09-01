@@ -148,6 +148,37 @@ M9a 冻结的是可复现的指标合同，不是一次真实生成实验。词�
 这些值不是本项目实现的 golden test：论文没有冻结足够的 tokenization、依赖版本、smoothing 或模型参数，且上游 `bertScore` 实际是 `text2vec-base-chinese` 句向量相似度，不是真 BERTScore。不要把它与本项目的真实 BERTScore 列直接横比。
 上游仓库固定为 `IAAR-Shanghai/CRUD_RAG@1aace383994e1f68efa12cf2a8e2dadfb4102ceb`；截至 2026-08-31 仍无 LICENSE。这里只引用聚合事实和公开定义，未复制上游代码或数据。
 <!-- END M9A-GENERATION-METRICS -->
+<!-- BEGIN M9B-GENERATION-STATUS -->
+### M9b1：CRUD-RAG 生成评测编排合同
+
+M9b1 冻结合同 `m9b1-known-context-v1`，当前 profile 是 known-context：生成请求直接使用每条 case 的已知 context，暂不包含 retrieval stage。支持的 task 为 `event_summary`, `questanswer_1doc`。这不是 CRUD-RAG Table 8 reproduction，也不产生端到端检索质量结论。
+
+**已交付的离线边界**：
+- 输入、prompt、hash、cache row、question/reference bank 与 finalizer 均为纯内存合同；输入 schema=`zhrag-crud-generation-v1`，cache row schema=`zhrag-crud-generation-cache-row-v1`。
+- generation、QG、reference QA、prediction QA 和 semantic stage 按依赖图断点续跑；每 case 最多 8 个问题，prompt estimator 超过 30,000 个估算 token 即拒绝截断。
+- status/dry-run 是只读检查，不读取 `.env`，不导入 provider 或可选模型，不创建 cache、artifact directory 或 lock；付费 chat 与模型加载必须分别显式开启 guard。
+- cache sidecar 重新认证 input manifest、prompt、model/endpoint、served model、父级 fingerprint 和完整性；final report 只能由完整、认证过的 cache 离线重建。
+
+**artifact 与隐私边界**：
+- 文本型 cache、question/reference bank 和中间答案只允许存在于 `indexes/crud/generation/v1/` 的 gitignored 本地树；不提交 corpus、source、question、answer、prediction、embedding、provider payload 或 BERTScore 权重。
+- 发布的 `numeric_samples.json` 与 `report.json` 只含匿名 sequence/cluster、task、metric、allowlisted fingerprint 和统计计数，不含任何原文或可回溯的 case/question identity。
+- generation 指标按 case 统计，RAGQuestEval 按 question 统计，多问题 case 以 parent case 作 cluster；单 profile 只发布 descriptive cluster-bootstrap 95% CI，不做假设检验。
+
+**RAGQuestEval 口径**：问题只从 exact ground-truth reference 生成；reference QA 与 prediction QA 分别使用 reference 和 evaluated prediction 作为 context，source article 不进入 QG 或任一 QA context。空的 conditional denominator 保持为 null/0，而不是伪造为零分。
+
+**真实实验状态**：
+尚未执行 `--generate`、`--generate-questions`、`--answer-reference`、
+`--answer-prediction` 或 `--score-semantic`；本 marker 不发布任何真实生成、QG、QA、
+BERTScore 或 RAGQuestEval 数字。真实实验仍需显式授权，并继续受许可与 ignored-artifact 边界约束。
+
+**入口**：
+```bash
+uv run python scripts/run_crud_generation.py --status
+uv run python scripts/run_crud_generation.py --dry-run
+# 付费 chat：显式加 --allow-paid-provider，并按 stage 的 prerequisite 顺序执行
+# BERTScore：另需显式加 --allow-model-download；finalize 全程离线
+```
+<!-- END M9B-GENERATION-STATUS -->
 
 ### 中文 BM25：字符 bigram 优于 jieba 分词
 
@@ -745,14 +776,16 @@ scripts/
   evaluate_tidb_retrieval.py 只读冻结 runs/qrels，离线生成聚合质量报告
   sync_tidb_eval_docs.py 只同步 TiDB 聚合状态/质量区域（支持 --check）
   sync_m9a_docs.py       从 tracked aggregate-only evidence 同步生成指标合同与 Table 8 区域
+  run_crud_generation.py M9b1 known-context 生成/QG/QA/semantic 编排（付费步骤显式 guard）
+  sync_m9b_docs.py       只同步 M9b1 合同状态与路线图 marker（支持 --check）
   sync_quality_gate_docs.py 从独立 JUnit 报告同步 README 测试数（支持 --check）
   evaluate_h_hybrid_mrl1024.py 只读完整 4096 cache，离线重建 A/E/H/G 并生成聚合报告
   sync_h_hybrid_mrl1024_docs.py 重算认证 H 报告并同步 tracked 文档（支持 --check）
 <!-- BEGIN QUALITY-GATE-STATUS -->
-tests/                   1,030 个单元测试
+tests/                   1,095 个单元测试
 ```
 
-质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 1,030 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
+质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 1,095 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
 <!-- END QUALITY-GATE-STATUS -->
 
 README 中每一个数字都由上述脚本生成，没有手工誊写。这不是洁癖：早期原型用固定 1.15 字符/token 估算，得出的 chunk 数与最终实现相差 2.4 倍；而最初那次 BM25 饱和实验是一次性脚本跑的、从未提交，导致 README 里的核心结论一度**无法被任何人复现**。
@@ -850,11 +883,14 @@ uv run python scripts/build_tidb_qrels.py --judge                  # 只补判�
 uv run python scripts/build_tidb_qrels.py --finalize               # 离线显式发布 qrels/report
 uv run python scripts/evaluate_tidb_retrieval.py --resamples 10000 --seed 0  # 严格离线质量
 
-# 10. 文档同步分三条独立边界：M9a evidence、TiDB 聚合报告、JUnit 质量门禁。
-#     下面的 pytest.xml 只供质量门禁同步器读取；TiDB 同步器不依赖它。
+# 10. 文档同步分四条独立边界：M9a evidence、M9b 合同状态、TiDB 聚合报告、JUnit 质量门禁。
+#     M9a/M9b 同步器不读取 ignored artifact；下面的 pytest.xml 只供质量门禁同步器读取，
+#     TiDB 同步器不依赖它。
 uv run pytest --junitxml=.pytest_tmp/pytest.xml
 uv run python scripts/sync_m9a_docs.py
 uv run python scripts/sync_m9a_docs.py --check
+uv run python scripts/sync_m9b_docs.py
+uv run python scripts/sync_m9b_docs.py --check
 uv run python scripts/sync_tidb_eval_docs.py
 uv run python scripts/sync_tidb_eval_docs.py --check
 uv run python scripts/sync_quality_gate_docs.py --junit .pytest_tmp/pytest.xml

@@ -286,6 +286,37 @@ M9a 只交付纯内存评分、合成测试、来源证据和默认 CI 隔离；
 
 Table 8 只作为历史来源锚点：历史值来自 [arXiv 2401.17043v3](https://arxiv.org/pdf/2401.17043v3) 的 Table 8（HTML 锚点：[https://ar5iv.labs.arxiv.org/html/2401.17043#S4.T8](https://ar5iv.labs.arxiv.org/html/2401.17043#S4.T8)，PDF 第 26 页；副本 SHA-256 `2e4ae0cb708fdca9d96bcf8d1c0713dae121195a0a31b78e3132e9ef4fa7db8a`）。 上游固定为 `https://github.com/IAAR-Shanghai/CRUD_RAG@1aace383994e1f68efa12cf2a8e2dadfb4102ceb`，许可状态仍为无 LICENSE；其聚合值不构成本项目数值等价或实现复用许可。
 <!-- END M9A-GENERATION-METRICS -->
+<!-- BEGIN M9B-GENERATION-STATUS -->
+**M9b1：CRUD-RAG 生成评测编排合同**
+
+M9b1 冻结合同 `m9b1-known-context-v1`，当前 profile 是 known-context：生成请求直接使用每条 case 的已知 context，暂不包含 retrieval stage。支持的 task 为 `event_summary`, `questanswer_1doc`。这不是 CRUD-RAG Table 8 reproduction，也不产生端到端检索质量结论。
+
+**已交付的离线边界**：
+- 输入、prompt、hash、cache row、question/reference bank 与 finalizer 均为纯内存合同；输入 schema=`zhrag-crud-generation-v1`，cache row schema=`zhrag-crud-generation-cache-row-v1`。
+- generation、QG、reference QA、prediction QA 和 semantic stage 按依赖图断点续跑；每 case 最多 8 个问题，prompt estimator 超过 30,000 个估算 token 即拒绝截断。
+- status/dry-run 是只读检查，不读取 `.env`，不导入 provider 或可选模型，不创建 cache、artifact directory 或 lock；付费 chat 与模型加载必须分别显式开启 guard。
+- cache sidecar 重新认证 input manifest、prompt、model/endpoint、served model、父级 fingerprint 和完整性；final report 只能由完整、认证过的 cache 离线重建。
+
+**artifact 与隐私边界**：
+- 文本型 cache、question/reference bank 和中间答案只允许存在于 `indexes/crud/generation/v1/` 的 gitignored 本地树；不提交 corpus、source、question、answer、prediction、embedding、provider payload 或 BERTScore 权重。
+- 发布的 `numeric_samples.json` 与 `report.json` 只含匿名 sequence/cluster、task、metric、allowlisted fingerprint 和统计计数，不含任何原文或可回溯的 case/question identity。
+- generation 指标按 case 统计，RAGQuestEval 按 question 统计，多问题 case 以 parent case 作 cluster；单 profile 只发布 descriptive cluster-bootstrap 95% CI，不做假设检验。
+
+**RAGQuestEval 口径**：问题只从 exact ground-truth reference 生成；reference QA 与 prediction QA 分别使用 reference 和 evaluated prediction 作为 context，source article 不进入 QG 或任一 QA context。空的 conditional denominator 保持为 null/0，而不是伪造为零分。
+
+**真实实验状态**：
+尚未执行 `--generate`、`--generate-questions`、`--answer-reference`、
+`--answer-prediction` 或 `--score-semantic`；本 marker 不发布任何真实生成、QG、QA、
+BERTScore 或 RAGQuestEval 数字。真实实验仍需显式授权，并继续受许可与 ignored-artifact 边界约束。
+
+**入口**：
+```bash
+uv run python scripts/run_crud_generation.py --status
+uv run python scripts/run_crud_generation.py --dry-run
+# 付费 chat：显式加 --allow-paid-provider，并按 stage 的 prerequisite 顺序执行
+# BERTScore：另需显式加 --allow-model-download；finalize 全程离线
+```
+<!-- END M9B-GENERATION-STATUS -->
 
 ### 6.3 LLM-judge 设计
 
@@ -328,7 +359,9 @@ Table 8 只作为历史来源锚点：历史值来自 [arXiv 2401.17043v3](https
 <!-- BEGIN M8-ROADMAP -->
 | **M8** | **服务层 + HTTP 延迟/QPS ✅ 2026-08-28** | **1.5** | ✅ FastAPI + 单文件静态前端（阶段耗时条）+ `scripts/serve.py`；✅ `scripts/bench.py` + numeric-samples 认证 + `sync_m8_docs.py` | profile `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`（cache-backed），正式请求 980/980 成功，HTTP p50/p95/p99 **197.4/228.3/244.4 ms**，**4.97 QPS**，并发 1；本机结果，不是生产 SLA，不与其他 profile 混写 |
 <!-- END M8-ROADMAP -->
-| **M9** | **生成侧评估（M9a ✅ / M9b 待完成）** | **2.0** | **M9a**：`eval/metrics_gen.py`、`eval/quest_eval.py`、合成测试、aggregate-only Table 8 evidence、独立文档同步；**M9b**：真实 event summarization / QA-1doc 生成、QG/QA 与付费评测编排 | M9a 已冻结指标与分母合同；M9b 才能在许可边界内产生本地答案 artifact，并与历史 Table 8 做明确口径对照 |
+<!-- BEGIN M9B-GENERATION-ROADMAP -->
+| **M9** | **生成侧评估（M9a ✅ / M9b1 编排合同 ✅；真实实验待授权）** | **2.0** | **M9a**：`eval/metrics_gen.py`、`eval/quest_eval.py`、合成测试、aggregate-only Table 8 evidence、独立文档同步；**M9b1**：纯内存合同、离线优先 CLI、QG/QA/生成 stage DAG（event_summary / questanswer_1doc）与 text-free finalizer | M9b1 已冻结 cache/provenance/privacy 合同；真实 provider 实验与结果数字不在本阶段发布 |
+<!-- END M9B-GENERATION-ROADMAP -->
 | **M10** | TiDB 第二后端 + 那一节 README | **1.0** | `store/tidb.py` + 「为什么 TiDB 的文档没有跑在 TiDB 上」 | 同一份 Protocol 双后端跑通 |
 | **M11** | 可观测性 + Bad Case 归因 | **1.0** | `phoenix serve` tracing；Bad-Case 归因表（召回失败 / 排序失败 / 生成失败三分类，各 20 例） | Bad Case 分布百分比 |
 | **M12** | 公网部署 + README 定稿 | **1.0** | Zilliz Cloud Free 集群 + 公网 demo 链接；README 首屏定稿 | 端到端在线可点 |
@@ -406,6 +439,8 @@ zhrag/
 │   ├── build_index.py              # ✅ manifest → chunk → index 发布
 │   ├── bench.py                    # ✅ p50/p95/p99 + QPS
 │   ├── sync_m9a_docs.py            # ✅ aggregate-only 证据与生成指标合同同步
+│   ├── run_crud_generation.py      # ✅ M9b1 known-context 生成/QG/QA/semantic 编排
+│   ├── sync_m9b_docs.py            # ✅ M9b1 合同状态与路线图同步
 │   └── sync_quality_gate_docs.py   # ✅ 独立 JUnit 质量门禁同步
 ├── tests/                          # ✅ provider-free、离线评测与集成回归测试
 ```

@@ -34,6 +34,9 @@ runs/
 *.duckdb
 *.sqlite
 
+# M9b generation artifacts: explicit defense-in-depth below the broad indexes/ rule.
+indexes/crud/generation/
+
 # Scratch files written by research subagents during the design phase.
 # Harvested for their findings (see README); kept out of the repo.
 .research_tmp/
