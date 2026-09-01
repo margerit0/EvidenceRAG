@@ -13,7 +13,9 @@
 ---
 
 
-**自研薄检索层（Protocol + YAML config）+ Milvus 三级部署（Lite on Windows → Standalone in WSL2 → Zilliz Cloud Free 公网）+ Qwen3-Embedding-8B（客户端拼 instruct 前缀、MRL 降至 1024 维）+ One Hub 上的 Qwen3-Reranker-8B（离线消融支持 top-50 / top-100，当前证据选 top-50）+ 客户端 char-bigram BM25 稀疏向量做词法臂 + 服务端 RRF 融合，评估侧以已建成的 R@1/MRR@10/nDCG@10 为主指标、移植 CRUD-RAG 的 ~150 行生成指标为辅，全部跑在 GitHub Actions 双 OS CI 上。**
+> **M9a 状态（2026-08-31）**：生成指标合同、RAGQuestEval answer-scoring 语义、aggregate-only Table 8 证据和独立同步器已完成；本阶段没有生成真实答案，也没有付费调用。M9b 才会在本地 gitignored 目录中运行 QG/QA/生成实验。
+
+**自研薄检索层（Protocol + YAML config）+ Milvus 三级部署（Lite on Windows → Standalone in WSL2 → Zilliz Cloud Free 公网）+ Qwen3-Embedding-8B（客户端拼 instruct 前缀、MRL 降至 1024 维）+ One Hub 上的 Qwen3-Reranker-8B（离线消融支持 top-50 / top-100，当前证据选 top-50）+ 客户端 char-bigram BM25 稀疏向量做词法臂 + 服务端 RRF 融合，评估侧以已建成的 R@1/MRR@10/nDCG@10 为主指标、M9a 的独立生成指标合同为辅，全部跑在 GitHub Actions 双 OS CI 上。**
 
 ---
 
@@ -32,7 +34,7 @@
 | **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | Milvus 内置 `chinese` analyzer 就是 jieba，且默认 `mode="search"` = `cut_for_search`——正是你实测最差的 73.4%，比 char bigram 的 75.9% 低 2.5 分。**开服务端分词器会让系统变差**。另外可绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的坑 | 无（这是本项目最有说服力的设计决策之一） |
 | **服务层** | FastAPI + httpx（异步）+ tenacity（429 指数退避） | 三个依赖，全部薄，不侵入检索层 | — |
 | **前端** | FastAPI 挂一个单文件静态 HTML（检索框 + 结果卡片 + 命中 chunk 高亮 + 各阶段耗时条） | 界面优先展示**阶段耗时**和**检索证据**，便于检查系统行为 | Gradio / Streamlit（若你想 5 分钟部署到 HF Space）。改选条件：你决定公网 demo 放 HF Space 而非 Zilliz |
-| **评估** | 检索侧：**已建成**（R@k / MRR / nDCG / ALL-gold / bootstrap CI / paired bootstrap）。生成侧：**移植** CRUD-RAG `src/metric/` 约 150 行进自己的包 | 绝不 `pip install` CRUD_RAG（它 pin 了 `llama_index==0.9.32` / `langchain==0.1.4` / `pymilvus==2.3.3`，在 3.13 上装不上） | RAGAS 只作为「我知道这个框架」的一行说明。**不要当主力**：最后一次 commit 2026-02-24，559 open issues，而竞品当天都在发版 |
+| **评估** | 检索侧：**已建成**（R@k / MRR / nDCG / ALL-gold / bootstrap CI / paired bootstrap）。生成侧：**M9a 已冻结独立指标合同**（逐样本 BLEU/ROUGE-L、可选真实 BERTScore、RAGQuestEval 评分语义），真实生成实验留给 M9b | 不安装或移植无授权的 CRUD_RAG 代码；Table 8 只保留 aggregate-only 来源证据 | RAGAS 只作为「我知道这个框架」的一行说明。**不要当主力**：最后一次 commit 2026-02-24，559 open issues，而竞品当天都在发版 |
 | **可观测性** | **Phoenix**（`pip install arize-phoenix && phoenix serve`，SQLite 后端，**零 Docker**） | 你机器没 Docker；Phoenix 是唯一 pip 即用的 tracing UI；requires_python `>=3.10,<3.15` 覆盖 3.13.5 | Langfuse（33.2k stars，国内认知度最高）但需 6 个容器；改选条件：你已经在 WSL2 里装了 Docker。⚠️ Phoenix 是 Elastic-2.0，非 OSI 许可 |
 | **工程化/CI** | GitHub Actions：`ubuntu-latest`（全量快子集）+ `windows-latest`（**故意不设 PYTHONUTF8/PYTHONIOENCODING**）；ruff（含 PLW1514 禁裸 `open()`）+ mypy + pytest | Linux runner 是 UTF-8，会掩盖你本机 cp936 的裸 `open()` 崩溃；双系统 CI 验证不同默认编码下的行为 | — |
 
@@ -265,50 +267,31 @@ H（A+dense-1024）已独立离线完成：1doc R@1 **79.6% [76.8%, 82.4%]**、M
 
 **M 行必须存在，且和 A 行贴在一起。** 这是全篇最重要的排版决策——非技术筛选人看到孤零零的 75.9% 会当成退化。
 
-### 6.2 中文 BLEU / ROUGE / BERTScore 的正确配置
+### 6.2 中文生成指标与 CRUD-RAG Table 8 证据
 
-**⚠️ 最高危陷阱（实测）**：`rouge_score` 的默认 tokenizer **会删掉所有中文字符**。实测 `tokenize('近千家展商参与了UDE2023博览会', None)` 返回 `['ude2023']` 一个 token。在你的 `qa_1doc.jsonl` 第 0 行上，好的改写打 **1.0000**、完全无关的句子打 **0.0000**——分数**完全来自共享的拉丁字母/数字子串**。这会产出一张看起来能发表的噪声表。
+<!-- BEGIN M9A-GENERATION-METRICS -->
+**M9a：独立生成指标合同 + Table 8 证据（无付费调用）**
 
-**复现 CRUD-RAG 的唯一正确路径**（jieba **词级**）：
+M9a 只交付纯内存评分、合成测试、来源证据和默认 CI 隔离；不读取 CRUD-RAG/TiDB 语料，不生成答案，不提交 `quest_gt`，不调用 QG/QA/chat/embedding/rerank/judge/Milvus。真实 event summarization 与 QA-1doc 生成实验留给 M9b。
 
-```python
-import jieba, evaluate
-f = lambda text: list(jieba.cut(text))          # 精确模式，HMM 开，无用户词典
+**固定合同**：
+- `mean_sentence_bleu4`：单 reference、token-level modified 1–4 gram precision、
+  几何均值与标准 brevity penalty；无 smoothing、无 effective-order，逐样本后取算术平均。
+- `crud_mean_sentence_bleu4_no_bp`：同一逐样本算法但移除 brevity penalty，只作兼容审计列，
+  不称为 standard BLEU；两者都不是 corpus BLEU。
+- `mean_sentence_rouge_l_f1`：token LCS 的 sentence-level precision/recall/F1（beta=1），
+  逐样本后取算术平均；是 rougeL，不是 rougeLsum。
+- `bert-base-chinese` 的真实 BERTScore 为可选模型适配器：lang=`zh`、layer=8、rescale_with_baseline=True、idf=False、batch=64、use_fast_tokenizer=False。
+- `zhrag-rag-quest-eval-v1`：无法回答哨兵为 `无法推断`；报告论文全问题分母与历史代码条件分母，不把空条件集合伪造为 0。
 
-bleu = evaluate.load('bleu')
-r = bleu.compute(predictions=[gen], references=[[ref]], tokenizer=f)
-
-rouge = evaluate.load('rouge')
-r = rouge.compute(predictions=[gen], references=[[ref]], tokenizer=f,
-                  rouge_types=['rougeL'])       # 注意是 rougeL，不是 rougeLsum
-```
-
-sacrebleu 的实测判别力（好改写分 − 无关句分）：`13a` 31.95 / `zh` 54.91 / `char` 67.02 / jieba 预切+`13a` 52.58。**`tokenize='zh'` 是字符级，不是词级**。选 jieba 词级以对齐 CRUD-RAG 表格；可额外报字符级作稳健性检查。
-
-**BERTScore**：
-
-```python
-from bert_score import BERTScorer
-scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
-```
-
-`lang='zh'` 一次性解析出 `bert-base-chinese` + `num_layers=8` + 对应 baseline 文件。**必须开 `rescale_with_baseline=True`**：该 baseline 的 layer-8 行是 P/R/F ≈ 0.5476，不做 rescale 时中文 BERTScore 压缩在 0.6–0.9，消融差异肉眼不可见。`hfl/chinese-roberta-wwm-ext` **不被支持**（`model2layers` 无条目、无 baseline TSV），不要用。
-
-⚠️ `bert-score` PyPI 版本 0.3.13 上传于 2023-02-20，仓库 HEAD 停在 2024-04-12——**这是整套栈里最可能装不上 Python 3.13 的包，先装再设计指标表**。
-
-**三个必须在 README 里点破的 CRUD-RAG 事实**（这些本身就是加分项）：
-
-1. 它的 `bertScore` 列**不是 BERTScore**，是 `text2vec-base-chinese` 的句向量余弦（`src/metric/common.py` L74-85）。requirements.txt 里根本没有 `bert-score`。不要把你的真 BERTScore 和他们的数放同一列。
-2. 它默认**把 BLEU 的 brevity penalty 除掉了**（`with_penalty=False` → `bleu_avg/brevity_penalty`），所以短生成不受长度惩罚。同时报标准 BLEU 和他们的变体。
-3. 论文 Eq.(2) 的 precision 分母是 `|QG(GT)|`（全部问题），**代码却是两次过滤后 `np.mean`**（先去掉 GT 自己答不了的，再去掉 GM 答不了的）。代码版系统性偏高。选一个、写明、全表不混用。
-
-另：所有指标被 `@catch_all_exceptions` 包着，异常返回 `None`，调用方 `or 0.0` ——**崩掉的 ROUGE 会变成 0.0 悄悄进入你的均值**。移植时改成显式失败计数，任何一行失败就拒绝出均值。
+Table 8 只作为历史来源锚点：历史值来自 [arXiv 2401.17043v3](https://arxiv.org/pdf/2401.17043v3) 的 Table 8（HTML 锚点：[https://ar5iv.labs.arxiv.org/html/2401.17043#S4.T8](https://ar5iv.labs.arxiv.org/html/2401.17043#S4.T8)，PDF 第 26 页；副本 SHA-256 `2e4ae0cb708fdca9d96bcf8d1c0713dae121195a0a31b78e3132e9ef4fa7db8a`）。 上游固定为 `https://github.com/IAAR-Shanghai/CRUD_RAG@1aace383994e1f68efa12cf2a8e2dadfb4102ceb`，许可状态仍为无 LICENSE；其聚合值不构成本项目数值等价或实现复用许可。
+<!-- END M9A-GENERATION-METRICS -->
 
 ### 6.3 LLM-judge 设计
 
 - **区分两条 judge 链路**：当前 TiDB pooled qrels 的生成、验证与相关性判断都由已配置的 `gpt-5.6-sol` 完成，必须标为同模型 self-agreement 与合成标签；M9 的生成侧系统对比仍要求判官 ≠ 被评估生成模型（例如 Qwen 生成 → DeepSeek/Kimi 评判）。
-- **RAGQuestEval 自己重实现**（约 60 行）：question generation 用强模型跑**一次**并 commit 结果 JSON（CRUD-RAG 原实现按 `data_point['ID']` 缓存到 `{task}_quest_gt_save.json`），整个消融矩阵**只付一次 QG 的钱**；per-config 的 QA 步是受限抽取任务（「用一两个词或者非常简短的语句回答」，temperature=0.1，max_new_tokens=1280），中档模型足够。
-- **无法回答的哨兵字符串是 `无法推断`，做的是精确相等比较**。判官回「无法推断。」带句号就会被算作「答上了」，静默抬高 recall。**必须先归一化再比较，并记录近似哨兵的命中率**。
+- **RAGQuestEval 分成 M9a 与 M9b**：M9a 只对已经存在的答案 pair 做纯内存评分，固定 `无法推断` 的有限归一化、near-sentinel 分类、多重集 token overlap，以及论文全问题分母与历史代码条件分母；不生成问题、不提交 `quest_gt`。M9b 才负责付费 QG/QA 编排，所有 generated question/answer 与 `quest_gt` 只留 gitignored 本地 artifact。
+- **无法回答的哨兵字符串是 `无法推断`**。先做 Unicode NFKC、空白、平衡外层引号和句末标点的有限归一化，再区分 exact/normalized/near；例如「根据材料无法推断具体日期」是 near、仍按可回答文本处理，并在报告中单独计数。
 - README 里写明 judge 模型 + temperature + 日期。judge drift 会无声地作废跨轮次对比。
 
 ### 6.4 如果各臂打平怎么办
@@ -329,7 +312,7 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 | # | 里程碑 | 天 | 交付物（artifact） | 数字（number） |
 |---|---|---|---|---|
 | **M0** | 仓库卫生 + CI | **1.0** | `.github/workflows/ci.yml`（ubuntu + windows 双 leg，windows 不设 PYTHONUTF8）；ruff 加 PLW1514；删除 `_research_*.py` / `_enc_test.txt`；`DATA_LICENSE.md` | CI 绿；ruff 0 error；测试通过率 100% |
-| **M1** | Protocol + registry + YAML config | **1.5** | `retrieval/base.py`（4 个 Protocol）、`registry.py`、`config.py`（pydantic-settings，`extra='forbid'`）、`experiments/*.yaml` | 现有 BM25 零改动通过 Protocol；1 条命令跑通 1 个 config |
+| **M1** | 检索核心 Protocol 与显式组合根 | **1.5** | 现有 `retrieval/online.py`、`store/base.py`、`providers/*`、`lexical/*` 中的窄 Protocol，以及 `OnlineSettings` 和显式 adapter/组合根；没有已交付的 `registry.py`、`config.py` 或 `experiments/*.yaml` | BM25、dense、sparse、fusion、rerank 可注入并分别测试；配置语义由 frozen settings 约束 |
 | **M2** | **Milvus store + provider 客户端 ✅ 2026-08-22** | **1.0** | ✅ `store/{base,milvus}.py`（vendor-neutral Protocol + 惰性导入的 pymilvus 适配器）；✅ `providers/{http,embedding,rerank,cache}.py`（One Hub/OpenAI-compatible transport、7 次长退避、严格响应校验、断点缓存与 provenance sidecar） | ✅ 适配器有 fake-client 契约测试（默认环境不 import pymilvus）；✅ 真实 Milvus Lite 集成通过 `scripts/verify_milvus_store.py`（schema 幂等、完整行 upsert、dense/sparse 两臂、fetch 定序、alias 切换、close 后重开）；`pymilvus==3.0.1` 收进可选 extra |
 <!-- BEGIN M3-TIDB-EVAL-STATUS -->
 | **M3** | **TiDB 全量索引 + 合成 pooled qrels + 离线质量 ✅ 2026-08-26** | **1.5** | ✅ `ingest.py` + `scripts/build_index.py` + `scripts/query_index.py`；✅ `scripts/build_tidb_{queries,pool,qrels}.py`；✅ `evaluate_tidb_retrieval.py` | 450 篇 evergreen → **1,832 chunks**；**490 pairs / 980 queries / 24,525 pooled candidates**。overall binary nDCG@10：BM25 0.701 / dense 0.793 / RRF 0.796 / rerank 0.914；以 245 个 source cluster 为重采样单位的 95% CI + 两个预声明 4-test 双尾 source-cluster bootstrap/Holm family。无上游人工 gold；本地 exact RRF 不代表服务端 hybrid_search |
@@ -345,7 +328,7 @@ scorer = BERTScorer(lang='zh', rescale_with_baseline=True, batch_size=64)
 <!-- BEGIN M8-ROADMAP -->
 | **M8** | **服务层 + HTTP 延迟/QPS ✅ 2026-08-28** | **1.5** | ✅ FastAPI + 单文件静态前端（阶段耗时条）+ `scripts/serve.py`；✅ `scripts/bench.py` + numeric-samples 认证 + `sync_m8_docs.py` | profile `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`（cache-backed），正式请求 980/980 成功，HTTP p50/p95/p99 **197.4/228.3/244.4 ms**，**4.97 QPS**，并发 1；本机结果，不是生产 SLA，不与其他 profile 混写 |
 <!-- END M8-ROADMAP -->
-| **M9** | 生成侧评估 | **2.0** | 移植 `metrics_gen/`（jieba 词级 BLEU/ROUGE + BERTScore-zh rescaled + 自实现 RAGQuestEval）；commit quest_gt JSON | event_summary / QA-1doc 两个任务对齐 CRUD-RAG Table 8 baseline |
+| **M9** | **生成侧评估（M9a ✅ / M9b 待完成）** | **2.0** | **M9a**：`eval/metrics_gen.py`、`eval/quest_eval.py`、合成测试、aggregate-only Table 8 evidence、独立文档同步；**M9b**：真实 event summarization / QA-1doc 生成、QG/QA 与付费评测编排 | M9a 已冻结指标与分母合同；M9b 才能在许可边界内产生本地答案 artifact，并与历史 Table 8 做明确口径对照 |
 | **M10** | TiDB 第二后端 + 那一节 README | **1.0** | `store/tidb.py` + 「为什么 TiDB 的文档没有跑在 TiDB 上」 | 同一份 Protocol 双后端跑通 |
 | **M11** | 可观测性 + Bad Case 归因 | **1.0** | `phoenix serve` tracing；Bad-Case 归因表（召回失败 / 排序失败 / 生成失败三分类，各 20 例） | Bad Case 分布百分比 |
 | **M12** | 公网部署 + README 定稿 | **1.0** | Zilliz Cloud Free 集群 + 公网 demo 链接；README 首屏定稿 | 端到端在线可点 |
@@ -377,62 +360,54 @@ zhrag/
 ├── src/zhrag/
 │   ├── io_utils.py                 # ✅ 已建成（UTF-8 端口）
 │   ├── tokens.py                   # ✅ 已建成（中英双分量估算）
-│   ├── config.py                   # 🆕 pydantic-settings, extra='forbid'
-│   ├── registry.py                 # 🆕 str -> factory
 │   ├── lexical/
 │   │   ├── analyzers.py            # ✅ char_ngram / jieba_words / union
-│   │   ├── bm25.py                 # ✅ 已满足 Retriever Protocol，零改动
-│   │   └── sparse.py               # 🆕 BM25 权重 -> {index: weight} 稀疏向量
+│   │   ├── bm25.py                 # ✅ Okapi BM25，可插拔 analyzer
+│   │   └── sparse.py               # ✅ BM25 权重 -> 稀疏向量
 │   ├── chunking/
 │   │   └── markdown.py             # ✅ 两阶段 header-aware
 │   ├── retrieval/
-│   │   ├── base.py                 # 🆕 Retriever / Fusion / Reranker / Chunker Protocol
-│   │   ├── dense.py                # 🆕
-│   │   ├── fusion.py               # ✅ 已建成 RRF（可加权、可指定融合深度）
-│   │   └── pipeline.py             # 🆕 retrieve -> fuse -> rerank
+│   │   ├── fusion.py               # ✅ RRF（可加权、可指定融合深度）
+│   │   ├── online.py               # ✅ 在线检索编排
+│   │   └── adapters.py             # ✅ provider 与在线 Protocol 的接缝
 │   ├── store/
-│   │   ├── base.py                 # 🆕 VectorStore Protocol
-│   │   ├── milvus.py               # 🆕 Lite / Standalone / Zilliz 同一份代码
-│   │   └── tidb.py                 # 🆕 第二后端（叙事用）
+│   │   ├── base.py                 # ✅ VectorStore / ChunkRecord Protocol
+│   │   └── milvus.py               # ✅ Lite / Standalone / Zilliz 适配器
 │   ├── providers/
 │   │   ├── http.py                 # ✅ One Hub JSON transport：UA / 长退避 / Retry-After
 │   │   ├── embedding.py            # ✅ embedding prompt / 批缓存 / provenance sidecar
 │   │   ├── rerank.py               # ✅ Qwen3 rerank 请求与严格响应校验
+│   │   ├── chat.py                 # ✅ LLM chat completion 与严格响应校验
 │   │   └── cache.py                # ✅ gitignored 配对分数缓存 + provenance sidecar
 │   ├── eval/
 │   │   ├── metrics.py              # ✅ R@k / MRR / nDCG / ALL-gold / bootstrap
 │   │   ├── retrieval.py            # ✅ BM25/dense run 与共享逐查询指标
-│   │   ├── rerank.py               # ✅ 窗口语义 / 指纹 / 四个预声明配对检验族
+│   │   ├── rerank.py               # ✅ 窗口语义 / 指纹 / 配对检验族
 │   │   ├── tidb_quality.py         # ✅ pair-aware TiDB 指标 / CI / bootstrap-Holm / 分层
-│   │   ├── metrics_gen.py          # 🆕 jieba 词级 BLEU/ROUGE + BERTScore-zh
-│   │   ├── quest_eval.py           # 🆕 RAGQuestEval 自实现（~60 行）
-│   │   └── runner.py               # 🆕 遍历 experiments/*.yaml -> results/*.jsonl
+│   │   ├── metrics_gen.py          # ✅ provider-free 生成指标合同与 lazy BERTScore
+│   │   ├── quest_eval.py           # ✅ provider-free RAGQuestEval 与显式 denominator
+│   │   ├── hybrid_mrl1024.py       # ✅ H 的离线 MRL 评估
+│   │   └── tidb_chunk_sweep_evaluation.py # ✅ M7 离线 chunk sweep
 │   ├── service/
-│   │   ├── app.py                  # 🆕 FastAPI
-│   │   └── static/index.html       # 🆕 单文件前端 + 阶段耗时条
-│   └── ingest.py                   # 🆕 幂等：path 为稳定键，sha256 变更检测，
-│                                   #    返回 {added, updated, deleted, skipped}
-├── experiments/                    # 🆕 每个 YAML = 消融表一行
-│   ├── a_bm25_bigram.yaml
-│   ├── h_hybrid_rrf_mrl1024.yaml
-│   └── ...
-├── results/                        # 🆕 提交（体积小、可复现、可比对）
-│   ├── retrieval_ablation.jsonl    # 只允许无语料文本/向量/逐对分数的聚合结果
-│   ├── quest_gt_save.json          # ⚠️ 可能含语料派生文本；完成许可审计前不得提交
-│   └── ablation_table.md           # 由脚本生成，非手写
-├── scripts/
+│   │   ├── app.py                  # ✅ FastAPI
+│   │   └── static/index.html       # ✅ 单文件静态前端 + 阶段耗时条
+│   └── ingest.py                   # ✅ 幂等：path 稳定键、sha256 变更检测、文档级 delta
+├── docs/
+│   ├── evidence/
+│   │   └── crud_rag_table8_v3.json # ✅ 仅含 Table 8 aggregate-only 历史证据
+│   ├── why-not-tidb.md             # 「为什么 TiDB 的文档没有跑在 TiDB 上」
+│   ├── why-not-pgvector.md         # 4096 > 4000 的 96 维之差
+│   └── bad-cases.md                # 归因表
+├── scripts/                        # 评测、构建、服务与文档同步脚本
 │   ├── corpus_stats.py             # ✅
 │   ├── compare_dense_bm25.py       # ✅ dense/BM25/RRF 与 arity 分层
 │   ├── evaluate_rerank.py          # ✅ top-100 断点评分 + top-50/100 离线分析
 │   ├── evaluate_tidb_retrieval.py  # ✅ 冻结 runs/qrels 的 pair-aware 离线质量报告
-│   ├── download_corpora.py         # 🆕 首次运行 stdout 打印许可声明
-│   ├── build_index.py              # 🆕
-│   └── bench.py                    # 🆕 p50/p95/p99 + QPS
-├── tests/                          # ✅ 4 个文件 ~559 行，继续加
-└── docs/
-    ├── why-not-tidb.md             # 「为什么 TiDB 的文档没有跑在 TiDB 上」
-    ├── why-not-pgvector.md         # 4096 > 4000 的 96 维之差
-    └── bad-cases.md                # 归因表
+│   ├── build_index.py              # ✅ manifest → chunk → index 发布
+│   ├── bench.py                    # ✅ p50/p95/p99 + QPS
+│   ├── sync_m9a_docs.py            # ✅ aggregate-only 证据与生成指标合同同步
+│   └── sync_quality_gate_docs.py   # ✅ 独立 JUnit 质量门禁同步
+├── tests/                          # ✅ provider-free、离线评测与集成回归测试
 ```
 
 **语料目录（`crud-rag-subset/`、`tidb-rag-curated/`）保持在 `.gitignore` 里，一个字节都不提交。**
@@ -448,8 +423,8 @@ zhrag/
 | Rerank top-100 已完成 sweep | 2,394 queries × 100 docs = 239,400 pairs | One Hub 实际价格未核实 | **不写金额**；不能套用 SiliconFlow 价格 |
 | top-50 深度消融 | 复用上述前 50 个配对分数 | — | **¥0 额外调用** |
 | 4B vs 8B | 当前 relay 无 4B | — | **取消** |
-| RAGQuestEval — QG（强模型，**只跑一次并 commit**） | ~2,400 题 × ~800 tok | 按 LLM 计费 | **≈ ¥30**（⚠️ 估算） |
-| RAGQuestEval — QA（中档判官，per-config） | ~2,400 × N 题 × ~600 tok | 按 LLM 计费 | **≈ ¥20 / 配置**（⚠️ 估算） |
+| RAGQuestEval — QG（M9b，本地 ignored artifact） | ~2,400 题 × ~800 tok | 按 LLM 计费 | **≈ ¥30**（⚠️ 估算，不提交） |
+| RAGQuestEval — QA（M9b，中档判官，本地 ignored artifact） | ~2,400 × N 题 × ~600 tok | 按 LLM 计费 | **≈ ¥20 / 配置**（⚠️ 估算，不提交） |
 | 生成侧 LLM 输出（4 个任务 × ~2,000 行 × ~250 tok） | ~2M tokens 输出 | 按 LLM 计费 | **≈ ¥40**（⚠️ 估算） |
 | BERTScore / BLEU / ROUGE | 本地 CPU | — | **¥0** |
 | Milvus Lite / Standalone (WSL2) | 本地 | — | **¥0** |
@@ -461,8 +436,9 @@ zhrag/
 存储侧：1,832 TiDB chunks @ 4096 维 float32 ≈ **30.0 MB**；MRL-1024 ≈ **7.5 MB**；全部落在 Zilliz Free 的 5 GB 里，**约 175 倍余量**。
 
 **成本与数据边界三条铁律**：① 重排分数按 `(qid, docid)` 缓存并由 sidecar 绑定 model/input provenance，
-但它们是语料派生物，**只留 gitignored 本地目录、绝不提交**；② QG 结果也可能构成语料派生文本，许可审计
-通过前同样不得提交；③ CI 只跑无需 API key、无需派生缓存的单元测试，付费指标只允许手动触发并断点续跑。
+但它们是语料派生物，**只留 gitignored 本地目录、绝不提交**；② QG/QA/生成文本、`quest_gt` 与
+对应 cache 同样只留 gitignored 本地目录，不因 M9b 完成而改变许可边界；③ CI 只跑无需 API key、
+无需派生缓存的单元测试，付费指标只允许手动触发并断点续跑。
 
 ---
 
@@ -520,11 +496,11 @@ zhrag/
 |---|---|---|
 | **Windows 默认 cp936** | 裸 `open()` 读项目自己的中文文件直接 `UnicodeDecodeError`；`print()` 中文抛 `UnicodeEncodeError`。文件系统编码却是 utf-8（不对称） | 全项目走 `io_utils.py`；ruff 开 **PLW1514** 禁裸 `open()`；CI 加 `windows-latest` leg 且**故意不设** `PYTHONUTF8`/`PYTHONIOENCODING`（设了这条腿就废了）。⚠️ 注意 GH Actions 的 windows runner 大概率是 cp1252 不是 cp936，它验证的是「非 UTF-8 默认」而非你的具体 codepage |
 | **`rouge_score` 默认 tokenizer 删光中文** | `tokenize('近千家展商参与了UDE2023博览会')` → `['ude2023']`；好改写打 1.0000、无关句打 0.0000，全靠共享拉丁子串。**产出一整张看起来能发表的噪声表** | 必须传 `tokenizer=lambda t: list(jieba.cut(t))`；上线前用一对「好改写 / 无关句」做判别力自检 |
-| **sacrebleu 默认 `13a`；`zh` 是字符级不是词级** | 数字内部自洽但与 CRUD-RAG 表格不可比 | 选 jieba 词级对齐论文；字符级另列作稳健性检查 |
+| **sacrebleu 默认 `13a`；`zh` 是字符级不是词级** | 数字内部自洽但与 CRUD-RAG 表格不可比 | M9a 已冻结独立 token-level 合同；sacrebleu 不再是 canonical runtime dependency，若做外部稳健性对照须单独命名并隔离 |
 | **CRUD-RAG 的 `bertScore` 不是 BERTScore** | 是 `text2vec-base-chinese` 句向量余弦；把你的真 BERTScore 和它放同列 = 无意义对比 | 两列分开命名并注明 |
-| **CRUD-RAG 默认除掉 BLEU 的 brevity penalty** | 他们的「bleu」不是标准 BLEU，短生成不受惩罚 | 两个都报，注明 |
-| **论文 Eq.(2) 与代码的 precision 分母不一致** | 代码版（两次过滤后 `np.mean`）系统性偏高 | 选一个、写明、全表不混 |
-| **`@catch_all_exceptions` 返回 `None` + `or 0.0`** | 崩掉的 ROUGE 变成 0.0 混进头条均值（BLEU 因返回 5 元组反而会 TypeError——失败模式还不一致） | 移植时改为显式失败计数，任一行失败拒绝出均值 |
+| **CRUD-RAG 默认除掉 BLEU 的 brevity penalty** | 他们的「bleu」不是标准 BLEU，短生成不受惩罚 | M9a 同时报标准 BP 与明确命名的 no-BP 兼容列 |
+| **论文 Eq.(2) 与代码的 precision 分母不一致** | 代码版（两次过滤后 `np.mean`）系统性偏高 | M9a 同时报告论文全问题分母与历史代码条件分母 |
+| **`@catch_all_exceptions` 返回 `None` + `or 0.0`** | 崩掉的 ROUGE 变成 0.0 混进头条均值（BLEU 因返回 5 元组反而会 TypeError——失败模式还不一致） | 独立实现显式失败计数，任一行失败拒绝出均值 |
 | **`Query:` 后面那个空格** | 模型卡自相矛盾（Python helper 无空格 / TEI curl 有空格）。选错 = 全库向量与线上查询前缀不一致，**索引完之后改不了，只能重嵌入** | 以 `config_sentence_transformers.json` 为准（**无空格**），定义成常量，永不改 |
 | **文档侧误加 instruct 前缀** | 模型是非对称的，document prompt 是空串。两边都加会静默掉几个点 R@1，**不报错** | 文档原文入库 |
 | **`padding_side` 不是 `'left'`（自建推理时）** | 右 padding + `hidden[:, -1]` → 短样本拿到 pad token 向量，全错且无异常 | 用模型卡的 `last_token_pool()`（按 attention_mask 分支） |
@@ -539,7 +515,7 @@ zhrag/
 | **重排输入远大于 embedding** | 消融矩阵会反复付同一笔钱 | 统一评分 top-100 一次，top-50/100 离线切窗；分数缓存保持 gitignored，绝不提交 |
 | **`无法推断` 是精确字符串比较** | 判官回「无法推断。」被算作「答上了」，静默抬高 recall | 归一化后再比，并记录近似哨兵率 |
 | **`bert-score` 0.3.13 停在 2023-02-20** | 整套栈里最可能装不上 Python 3.13 的包 | **设计指标表之前先装**；必要时 pin transformers |
-| **CRUD_RAG requirements 装不上** | pin 了 `llama_index==0.9.32` / `langchain==0.1.4` / `pymilvus==2.3.3`，全是 namespace 拆分前版本 | **不要 pip install 它**，把 `src/metric/` 那 ~150 行移植进自己的包 |
+| **CRUD_RAG requirements 装不上** | pin 了 `llama_index==0.9.32` / `langchain==0.1.4` / `pymilvus==2.3.3`，全是 namespace 拆分前版本；上游也没有代码许可证 | **不要安装、复制或移植上游代码**；M9a 只依据公开指标定义做独立实现，并保留 aggregate-only 来源证据 |
 | **`corpus_manifest.jsonl` 的 `id` 是内容哈希** | `id == git_blob_sha1` 500/500，内容一变 id 就变，不是稳定身份 | 稳定键 = `path`（500/500 唯一）；变更检测 = `sha256`；chunk id = `hash(path, ordinal, chunk_text)` 保证重跑是 upsert 不是重复插入 |
 | **gRPC 遵循 `HTTP_PROXY`，Milvus Lite 走的正是回环 gRPC** | 导出了代理的 shell 里，本机 Lite 连接被路由到代理，报 `code=2, illegal connection params or server unavailable`——**读起来像服务器没起来，其实 TCP 能连、握手被劫**。实测 `GRPC_ENABLE_HTTP_PROXY=0` 单独设**无效**，起作用的是绕行列表 | opt-in 校验脚本自己把 `127.0.0.1,localhost` 加进 `no_proxy`/`NO_PROXY`（见 `scripts/verify_milvus_store.py`），不要在库代码里偷改进程环境 |
 | **拿 Milvus 的 delete 计数当业务删除数** | Lite 对不存在的主键写 tombstone 并返回 `len(pks)`，删不存在的行不是错误 | 存储层只报「请求了几行、服务端确认了」；`{added, updated, deleted}` 一律来自 manifest diff |
@@ -573,9 +549,9 @@ zhrag/
   ① **蒙特卡洛分辨率地板**——估计量是 `(count+1)/(resamples+1)`，10,000 次重采样下最小可表示的 p 是 `9.999e-05`。0/10,000 个零分布样本达到观测值时，只能说 add-one **估计停在地板**，不能把它写成“真实 p `< floor`”。经 Holm 后还必须传播地板 provenance。当前统一用 `†` 标记（MRL 的 64 维为 `0.001†`），并明确它不是 `<` 上界；`bootstrap_p_floor()` 与 `holm_floor_flags()` 负责这一口径。
   ② **`observed <= 0` 直接返回 1.0 的短路**——保守、不产生假阳性，但会把一族真值各异的 p 压成同一个 1.0 再喂给 Holm。已改走通用路径；**副作用是 MRL 表 512 维那行的 p 从 1.000 变为 0.684**，README 与本文档已按硬规则 3 重出。
   ③ 二元指标新增 **`mcnemar_exact`**（精确、无下界、无种子、跨机器同值）与 **`win_loss_tie`**。dense vs BM25 的判定即由前者给出。⚠️ 注意 `recall_at_k(..., 1)` 在 2docs/3docs 上不是二元的（会返回 0.5 / 1/3 / 2/3），McNemar 会拒绝它——这是特性不是缺陷，混 arity 的列联表会把「部分得分变化」计成胜负。
-- [ ] **CRUD-RAG 论文 Table 8 的 baseline 数字**是 pypdf 文本抽取得来的，PDF 表格抽取可能错位相邻数字。**你实际引用的那 3–4 行**（summarization、QA-1doc）要对着原 PDF 逐个核对。
+- [x] **CRUD-RAG 论文 Table 8 的 baseline 数字**：已对照 arXiv `2401.17043v3` 的 HTML `S4.T8` 与 PDF 第 26 页核对实际引用的四行；固定证据保存在 `docs/evidence/crud_rag_table8_v3.json`，并记录 PDF SHA-256 `2e4ae0cb708fdca9d96bcf8d1c0713dae121195a0a31b78e3132e9ef4fa7db8a`。该文件只含 aggregate-only facts，不含语料或答案；数值仍不能当作本项目实现的 golden test。
 - [ ] **GitHub Actions `windows-latest` Python 的实际默认 codepage**。预期是 cp1252（美式 locale）而非你的 cp936——它复现的是「非 UTF-8 默认」，不是你的具体环境。要精确复现 cp936 得强制 locale 或在某个 job 里设 `PYTHONIOENCODING=gbk`。
-- [ ] **`rouge-chinese` 与 `evaluate + rouge_score + jieba` 两条路径的数值差多少。** 研究阶段只测了前者（好 0.8276 / 坏 0.1154，判别力正常），没有在同一输入上跑两者做对比。混用或替换前跑一次。
+- [x] **生成指标 canonical 路径是否需要 `rouge-chinese` / `sacrebleu`**：M9a 已冻结 provider-free 的独立 token-level BLEU-4 与 ROUGE-L 合同，并用合成测试固定 clipping、brevity penalty、LCS 和 fail-closed 语义；`rouge-chinese` 与 `sacrebleu` 不再是 runtime 依赖。若未来做第三方数值对照，必须另列 provenance，不能与 canonical 列混用。
 - [ ] **DeepInfra 的 Qwen3-Embedding-4B 标价 $0.020/M、比 8B 的 $0.010/M 贵一倍**，这个反常价格可能是促销或过期数据。做预算前在实时页面确认。
 - [ ] **英文 instruction 与中文 instruction 在你的中文语料上到底哪个好。** Qwen 基于训练数据来源推荐英文，但那是通用建议不是在 TiDB 文档上的实测。两次跑，同一评测，又一行诚实消融。
 - [x] **hybrid 到底能不能在你的 5,681 语料上打赢 char-bigram BM25 的 75.9%。** **能，且显著。** 离线 RRF 融合 dense-4096 与 BM25 两条 run：**R@1 79.9% / MRR@10 0.881**，对 BM25 **+4.00pp**（65 胜 33 负，McNemar 精确 p = **1.6e-03**）。同时**修正了本条此前的一个错误结论**：dense 单臂并没有「赢」——+2.12pp、95% CI **[−0.88, +5.12]pp**、p = **0.199**，**不显著**。当初「两臂接近不等于融合无用」的判断被证实了：列联表 538 / 69 / 86 / 107，φ = 0.455，并集 oracle 上限 **86.6%**；且一臂 rank-1 落空时 gold 在另一臂里 83–88% 落在前 3、掉出 top-100 的是 0.0%。三条工程结论：**融合深度 10 与 100 的逐查询 R@1 逐位相同**（0/800 条 top-1 改变）；k 从 60 调到 10 只动 0.1pp；**唯一有效的旋钮是权重**（0.3/0.7 是全表唯一显著优于 dense 单臂的配置，16 胜 4 负，Holm p=0.047）。复现：`uv run python scripts/compare_dense_bm25.py`（不联网）。⚠️ 四个融合配置是在同一批 800 条上选出又汇报的，最好那行是上界不是泛化估计。

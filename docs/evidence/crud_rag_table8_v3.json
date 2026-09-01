@@ -1,0 +1,63 @@
+{
+  "schema": "zhrag-crud-rag-table8-evidence-v1",
+  "source": {
+    "title": "CRUD-RAG: A Comprehensive Chinese Benchmark for Retrieval-Augmented Generation of Large Language Models",
+    "arxiv_id": "2401.17043",
+    "arxiv_version": 3,
+    "doi": "10.48550/arXiv.2401.17043",
+    "pdf_url": "https://arxiv.org/pdf/2401.17043v3",
+    "html_url": "https://ar5iv.labs.arxiv.org/html/2401.17043#S4.T8",
+    "pdf_sha256": "2e4ae0cb708fdca9d96bcf8d1c0713dae121195a0a31b78e3132e9ef4fa7db8a",
+    "pdf_page": 26,
+    "table": 8
+  },
+  "upstream": {
+    "repository": "https://github.com/IAAR-Shanghai/CRUD_RAG",
+    "commit": "1aace383994e1f68efa12cf2a8e2dadfb4102ceb",
+    "license_file": false,
+    "github_license_metadata": null,
+    "license_status_date": "2026-08-31"
+  },
+  "rows": [
+    {
+      "task": "summarization",
+      "model": "Qwen-14B",
+      "bleu": 32.51,
+      "rouge_l": 33.33,
+      "bert_score": 85.62,
+      "ragquest_precision": 68.94,
+      "ragquest_recall": 40.57,
+      "length": 139.1
+    },
+    {
+      "task": "summarization",
+      "model": "GPT-4-0613",
+      "bleu": 24.54,
+      "rouge_l": 35.91,
+      "bert_score": 89.39,
+      "ragquest_precision": 71.24,
+      "ragquest_recall": 50.53,
+      "length": 194.6
+    },
+    {
+      "task": "question answering 1-document",
+      "model": "Qwen-14B",
+      "bleu": 37.95,
+      "rouge_l": 55.13,
+      "bert_score": 83.25,
+      "ragquest_precision": 53.03,
+      "ragquest_recall": 73.92,
+      "length": 73.8
+    },
+    {
+      "task": "question answering 1-document",
+      "model": "GPT-4-0613",
+      "bleu": 33.87,
+      "rouge_l": 51.42,
+      "bert_score": 80.92,
+      "ragquest_precision": 53.14,
+      "ragquest_recall": 62.39,
+      "length": 95.9
+    }
+  ]
+}

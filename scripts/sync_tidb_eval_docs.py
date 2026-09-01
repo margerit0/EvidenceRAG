@@ -5,9 +5,9 @@ allowlist of aggregate counts and methodological statements is rendered into
 tracked documentation; query text, answers, chunk ids, raw judgements and
 provider responses never cross that boundary.
 
-Run tests with JUnit output before synchronization:
+After the paid/local evaluation artifacts are complete, synchronize the
+aggregate-only documentation:
 
-    uv run pytest --junitxml=indexes/tidb/eval/pytest.xml
     uv run python scripts/sync_tidb_eval_docs.py
     uv run python scripts/sync_tidb_eval_docs.py --check
 """
@@ -17,11 +17,10 @@ from __future__ import annotations
 import argparse
 import math
 import sys
-import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from zhrag.eval.tidb_quality import (
     PRIMARY_METRIC,
@@ -75,7 +74,6 @@ class EvalStatus:
     grade_two: int
     generating_disagreements: int
     generating_disagreement_rate: float
-    tests: int
     quality: Mapping[str, Any]
 
 
@@ -157,31 +155,6 @@ def _same(name: str, *values: object) -> None:
         raise SystemExit(f"! aggregate reports disagree on {name}: {values}")
 
 
-def _junit_counts(path: Path) -> tuple[int, int, int, int]:
-    try:
-        root = ET.fromstring(read_text(path))
-    except ET.ParseError as exc:
-        raise SystemExit(f"! malformed JUnit XML: {path}: {exc}") from exc
-    suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
-    if root.tag not in {"testsuite", "testsuites"} or not suites:
-        raise SystemExit(f"! malformed JUnit XML root: {path}")
-
-    counts: list[int] = []
-    for name in ("tests", "failures", "errors", "skipped"):
-        total = 0
-        for suite in suites:
-            raw = suite.get(name, "0")
-            try:
-                value = int(raw)
-            except ValueError as exc:
-                raise SystemExit(f"! {path}: JUnit {name} is not an integer") from exc
-            if value < 0:
-                raise SystemExit(f"! {path}: JUnit {name} must be non-negative")
-            total += value
-        counts.append(total)
-    return cast(tuple[int, int, int, int], tuple(counts))
-
-
 def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
     eval_root = artifacts / "eval"
     state_path = artifacts / "state.json"
@@ -189,7 +162,6 @@ def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
     pool_path = eval_root / "pool_report.json"
     qrels_path = eval_root / "qrels_report.json"
     quality_path = eval_root / "quality_report.json"
-    junit_path = eval_root / "pytest.xml"
     state = _object(state_path)
     qgen = _object(qgen_path)
     pool = _object(pool_path)
@@ -473,12 +445,6 @@ def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
                 ),
             )
 
-    tests, failures, errors, skipped = _junit_counts(junit_path)
-    if tests < 1 or failures or errors or skipped:
-        raise SystemExit(
-            f"! quality gate is not clean: tests={tests}, failures={failures}, "
-            f"errors={errors}, skipped={skipped}"
-        )
     # Cross-report reconciliation above gives precise diagnostics; this is the
     # check that actually authenticates the rendered numbers.
     _authenticate_quality(
@@ -509,7 +475,6 @@ def load_status(artifacts: Path) -> EvalStatus:  # noqa: PLR0912, PLR0915
         grade_two=grade_two,
         generating_disagreements=disagreements,
         generating_disagreement_rate=disagreement_rate,
-        tests=tests,
         quality=quality,
     )
 
@@ -757,19 +722,6 @@ def _readme_evidence(status: EvalStatus) -> str:
     return "\n".join(lines)
 
 
-def _quality_gate(status: EvalStatus) -> str:
-    # Only the JUnit report is parsed here, so only the pytest result may be
-    # claimed. Ruff / format / mypy are separate pre-commit gates that this
-    # synchronizer does not read and therefore must not certify.
-    return (
-        f"tests/                   {status.tests:,} 个单元测试\n"
-        "```\n\n"
-        f"质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` {status.tests:,} passed。"
-        "`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，"
-        "不由本报告认证。"
-    )
-
-
 def _architecture_corpus(status: EvalStatus) -> str:
     lines = [
         (
@@ -948,7 +900,6 @@ def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
             {
                 "TIDB-EVAL-STATUS": _readme_status,
                 "TIDB-EVAL-EVIDENCE": _readme_evidence,
-                "QUALITY-GATE-STATUS": _quality_gate,
             },
         ),
         _Target(

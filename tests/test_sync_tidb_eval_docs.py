@@ -4,7 +4,6 @@ import copy
 import importlib.util
 import os
 import sys
-import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -26,19 +25,6 @@ def _runner() -> ModuleType:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
-
-
-def _write_junit(path: Path, *, tests: int = 7, failures: int = 0, skipped: int = 0) -> None:
-    root = ET.Element("testsuites")
-    ET.SubElement(
-        root,
-        "testsuite",
-        tests=str(tests),
-        failures=str(failures),
-        errors="0",
-        skipped=str(skipped),
-    )
-    write_text(path, ET.tostring(root, encoding="unicode"))
 
 
 def _reports(
@@ -97,7 +83,6 @@ def _reports(
     write_json(eval_root / "quality_report.json", quality)
     write_jsonl(eval_root / "runs.jsonl", fixture.run_rows)
     write_jsonl(eval_root / "qrels.jsonl", fixture.qrel_rows)
-    _write_junit(eval_root / "pytest.xml")
     return artifacts
 
 
@@ -186,7 +171,7 @@ def _args(runner: ModuleType, root: Path, *, check: bool = False) -> object:
 
 
 class TestReportValidation:
-    def test_reconciles_all_report_families_and_junit(self, tmp_path: Path) -> None:
+    def test_reconciles_all_report_families(self, tmp_path: Path) -> None:
         runner = _runner()
         artifacts = _reports(tmp_path)
 
@@ -201,7 +186,6 @@ class TestReportValidation:
         assert status.judging_batches == fixture.qrels_report["batches"]
         assert status.quality["schema"] == "zhrag-tidb-retrieval-quality-v2"
         assert status.source_clusters == 2
-        assert status.tests == 7
 
     @pytest.mark.parametrize("name", ["runs.jsonl", "qrels.jsonl"])
     def test_requires_raw_artifacts_to_authenticate_the_report(
@@ -391,9 +375,9 @@ class TestReportValidation:
             runner.load_status(artifacts)
 
         artifacts = _reports(tmp_path)
-        _write_junit(artifacts / "eval" / "pytest.xml", failures=1)
-        with pytest.raises(SystemExit, match="quality gate is not clean"):
-            runner.load_status(artifacts)
+        status = runner.load_status(artifacts)
+        assert status.quality["schema"] == "zhrag-tidb-retrieval-quality-v2"
+        assert not (artifacts / "eval" / "pytest.xml").exists()
 
 
 class TestSynchronization:
@@ -416,7 +400,10 @@ class TestSynchronization:
         assert "词面重叠分层" in first[0]
         assert "same-model self-agreement" in first[0]
         assert "100% **已判断覆盖**" in first[0]
-        assert "`pytest` 7 passed" in first[0]
+        assert (
+            "<!-- BEGIN QUALITY-GATE-STATUS -->\nstale\n<!-- END QUALITY-GATE-STATUS -->"
+        ) in first[0]
+        assert "`pytest` 7 passed" not in first[0]
         assert "无上游人工 gold" in first[1]
         assert "HTTP 延迟/QPS 已由 M8 独立认证" in first[1]
         assert "增量重建仍待测" in first[1]

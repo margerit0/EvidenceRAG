@@ -118,23 +118,36 @@ churn = 0.80，delta 2.12pp —— 正落在上表「n=800、churn 0.8、α=0.05
 
 ## 实测驱动的工程决策
 
-### 中文 BLEU / ROUGE 的默认配置会产出"看起来合理的垃圾"
+<!-- BEGIN M9A-GENERATION-METRICS -->
+### 中文生成指标与 CRUD-RAG Table 8 历史证据
 
-生成侧指标在中文上极易配错，且错得**没有任何报错**。用一条真实 CRUD-RAG 样本测量（`ref` = 标准答案，`good` = 正确改写，`bad` = 完全不相关的另一段新闻）：
+M9a 冻结的是可复现的指标合同，不是一次真实生成实验。词法指标使用注入式 tokenizer，
+默认 CI 不加载模型；任一行 tokenization、语义评分、长度或数值校验失败，
+整个 report 拒绝发布，不会把失败行静默转成 0 或从 denominator 中删除。
 
-| 指标配置 | good | bad | 判定 |
-|---|---:|---:|---|
-| BLEU `tokenize=13a`（sacrebleu **默认**） | 31.95 | 0.00 | 低估约 24 分 |
-| BLEU `tokenize=zh` | **55.98** | 1.06 | ✅ 正确 |
-| BLEU `tokenize=char` | 67.67 | 0.65 | 可用 |
-| ROUGE-L `rouge_score` 直接跑中文 | **1.0000** | 0.0000 | ⚠️ **退化，不可用** |
-| ROUGE-L `rouge-chinese` + jieba 分词 | **0.8276** | 0.1154 | ✅ 正确 |
+**本项目的 canonical contracts**：
+- `mean_sentence_bleu4`：单 reference、token-level modified 1–4 gram precision、
+  几何均值与标准 brevity penalty；无 smoothing、无 effective-order，逐样本后取算术平均。
+- `crud_mean_sentence_bleu4_no_bp`：同一逐样本算法但移除 brevity penalty，只作兼容审计列，
+  不称为 standard BLEU；两者都不是 corpus BLEU。
+- `mean_sentence_rouge_l_f1`：token LCS 的 sentence-level precision/recall/F1（beta=1），
+  逐样本后取算术平均；是 rougeL，不是 rougeLsum。
+- `bert-base-chinese` 的真实 BERTScore 为可选模型适配器：lang=`zh`、layer=8、rescale_with_baseline=True、idf=False、batch=64、use_fast_tokenizer=False。
+- `zhrag-rag-quest-eval-v1`：无法回答哨兵为 `无法推断`；报告论文全问题分母与历史代码条件分母，不把空条件集合伪造为 0。
 
-`rouge_score` 对一个**改写句**给出满分 1.0——它按空格切词，而中文没有空格，整句坍缩成一个 token。数字很漂亮，但完全没有意义。
+**CRUD-RAG Table 8（历史 0–100 表格值，仅作来源锚点）**：
 
-因此本项目固定：**BLEU 用 sacrebleu `tokenize='zh'`；ROUGE-L 用 `rouge-chinese`（jieba 词级）；BERTScore 必须指定中文模型**（不能用默认的英文 RoBERTa）。
+| task | model | BLEU | ROUGE-L | `bertScore`（上游列名） | RAGQuest precision | RAGQuest recall | length |
+|---|---|---:|---:|---:|---:|---:|---:|
+| summarization | Qwen-14B | 32.51 | 33.33 | 85.62 | 68.94 | 40.57 | 139.1 |
+| summarization | GPT-4-0613 | 24.54 | 35.91 | 89.39 | 71.24 | 50.53 | 194.6 |
+| question answering 1-document | Qwen-14B | 37.95 | 55.13 | 83.25 | 53.03 | 73.92 | 73.8 |
+| question answering 1-document | GPT-4-0613 | 33.87 | 51.42 | 80.92 | 53.14 | 62.39 | 95.9 |
 
-> 注意这里的反直觉之处：**jieba 在 BM25 检索上输给字符 bigram，但在 ROUGE 评估上是正确选择。** 分词方案要按用途分别决定，不能一刀切。
+历史值来自 [arXiv 2401.17043v3](https://arxiv.org/pdf/2401.17043v3) 的 Table 8（HTML 锚点：[https://ar5iv.labs.arxiv.org/html/2401.17043#S4.T8](https://ar5iv.labs.arxiv.org/html/2401.17043#S4.T8)，PDF 第 26 页；副本 SHA-256 `2e4ae0cb708fdca9d96bcf8d1c0713dae121195a0a31b78e3132e9ef4fa7db8a`）。
+这些值不是本项目实现的 golden test：论文没有冻结足够的 tokenization、依赖版本、smoothing 或模型参数，且上游 `bertScore` 实际是 `text2vec-base-chinese` 句向量相似度，不是真 BERTScore。不要把它与本项目的真实 BERTScore 列直接横比。
+上游仓库固定为 `IAAR-Shanghai/CRUD_RAG@1aace383994e1f68efa12cf2a8e2dadfb4102ceb`；截至 2026-08-31 仍无 LICENSE。这里只引用聚合事实和公开定义，未复制上游代码或数据。
+<!-- END M9A-GENERATION-METRICS -->
 
 ### 中文 BM25：字符 bigram 优于 jieba 分词
 
@@ -693,6 +706,9 @@ src/zhrag/
     tidb_runs.py         冻结四系统 run、确定性排序、RRF 与 rerank 应用语义
     pool.py              pair-level pooling、rank-blinded 判断顺序与 multi-gold qrels
     tidb_quality.py      TiDB pair-aware 指标、95% CI、配对 bootstrap/Holm 与分层报告
+    metrics_gen.py       provider-free 生成指标合同：sentence BLEU/ROUGE-L + lazy BERTScore
+    quest_eval.py        provider-free RAGQuestEval answer scoring 与显式 denominator
+  quality_gate.py        严格 JUnit 解析与 clean quality gate
   providers/
     http.py               One Hub JSON transport：显式 UA、长退避、Retry-After、隐私化错误
     embedding.py          共享嵌入客户端：配置 / 批缓存 / 模型与 prompt sidecar
@@ -727,14 +743,16 @@ scripts/
   build_tidb_pool.py     冻结 BM25/dense/RRF/rerank runs 并构造 pair-level 判断池
   build_tidb_qrels.py    rank-blinded 判断缓存；只有 --finalize 发布 qrels/report
   evaluate_tidb_retrieval.py 只读冻结 runs/qrels，离线生成聚合质量报告
-  sync_tidb_eval_docs.py 校验本地聚合报告/JUnit 并同步 tracked 文档（支持 --check）
+  sync_tidb_eval_docs.py 只同步 TiDB 聚合状态/质量区域（支持 --check）
+  sync_m9a_docs.py       从 tracked aggregate-only evidence 同步生成指标合同与 Table 8 区域
+  sync_quality_gate_docs.py 从独立 JUnit 报告同步 README 测试数（支持 --check）
   evaluate_h_hybrid_mrl1024.py 只读完整 4096 cache，离线重建 A/E/H/G 并生成聚合报告
   sync_h_hybrid_mrl1024_docs.py 重算认证 H 报告并同步 tracked 文档（支持 --check）
 <!-- BEGIN QUALITY-GATE-STATUS -->
-tests/                   934 个单元测试
+tests/                   1,030 个单元测试
 ```
 
-质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 934 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
+质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 1,030 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
 <!-- END QUALITY-GATE-STATUS -->
 
 README 中每一个数字都由上述脚本生成，没有手工誊写。这不是洁癖：早期原型用固定 1.15 字符/token 估算，得出的 chunk 数与最终实现相差 2.4 倍；而最初那次 BM25 饱和实验是一次性脚本跑的、从未提交，导致 README 里的核心结论一度**无法被任何人复现**。
@@ -832,10 +850,15 @@ uv run python scripts/build_tidb_qrels.py --judge                  # 只补判�
 uv run python scripts/build_tidb_qrels.py --finalize               # 离线显式发布 qrels/report
 uv run python scripts/evaluate_tidb_retrieval.py --resamples 10000 --seed 0  # 严格离线质量
 
-# 10. 文档中的 TiDB 聚合状态、质量指标和测试数来自本地报告，不手工誊抄。
-uv run pytest --junitxml=indexes/tidb/eval/pytest.xml
+# 10. 文档同步分三条独立边界：M9a evidence、TiDB 聚合报告、JUnit 质量门禁。
+#     下面的 pytest.xml 只供质量门禁同步器读取；TiDB 同步器不依赖它。
+uv run pytest --junitxml=.pytest_tmp/pytest.xml
+uv run python scripts/sync_m9a_docs.py
+uv run python scripts/sync_m9a_docs.py --check
 uv run python scripts/sync_tidb_eval_docs.py
 uv run python scripts/sync_tidb_eval_docs.py --check
+uv run python scripts/sync_quality_gate_docs.py --junit .pytest_tmp/pytest.xml
+uv run python scripts/sync_quality_gate_docs.py --junit .pytest_tmp/pytest.xml --check
 
 # 11. 独立 H（A+dense-1024）基线：只读完整本地 cache，严格离线；缺失/漂移即失败。
 uv run python scripts/evaluate_h_hybrid_mrl1024.py --resamples 10000 --seed 0
@@ -859,7 +882,7 @@ uv run python scripts/sync_h_hybrid_mrl1024_docs.py --check
 
 本仓库**不提交任何语料原文**，仅提供可复现的下载与抽取脚本。完整说明见 **[DATA_LICENSE.md](DATA_LICENSE.md)**。
 
-要点（均于 2026-08-18 经 GitHub API 实测确认）：
+要点（TiDB/CRUD-RAG 授权状态按 2026-08-31 的审计记录整理；详见 DATA_LICENSE.md）：
 
 - **TiDB 中文文档**：[pingcap/docs-cn](https://github.com/pingcap/docs-cn) @ `26f202bc`，**CC BY-SA 3.0**。
   注意 ShareAlike 是有牙齿的：本项目切出的 chunk 构成该许可证定义的 **Adaptation**，

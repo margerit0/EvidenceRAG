@@ -51,5 +51,24 @@ crud-rag-subset/eval-expanded/
 *.db/
 *-smoke.db/
 
+# Generation artifacts may contain corpus-derived text and must never be tracked.
+# Keep explicit filename and directory rules even though current caches also live below indexes/ or runs/.
+quest_gt*
+generated_question*
+generated_answer*
+generation_cache*
+qg_cache*
+qa_cache*
+**/quest_gt*/
+**/generated_questions/
+**/generated_answers/
+**/generation_cache/
+results/quest_gt*
+results/generated_question*
+results/generated_answer*
+results/generation_cache*
+results/qg_cache*
+results/qa_cache*
+
 # Local historical document snapshot
 /docs/README.legacy.md

@@ -12,7 +12,7 @@ tidb-rag-curated/documents/
 仓库里保留的只有**清单、校验值和可复现的下载脚本**（`corpus_manifest.jsonl`、
 `subset_manifest.json`、`*.ps1`），它们描述数据但不复制数据。
 
-以下授权状态经 GitHub API 于 2026-08-18 实际查询确认，非转述。
+以下授权状态是截至 2026-08-31 冻结的审计记录，包含 GitHub API 的查询结果；本文件不声称本次会话重新联网核验。
 
 ---
 
@@ -60,9 +60,10 @@ CC BY-SA 3.0 的 **ShareAlike** 条款是有实质约束的，且很容易被忽
 
 风险有两层，且第二层更重：
 
-1. **代码层**：无 LICENSE 文件意味着默认「保留所有权利」。本项目未复制其任何代码 ——
-   `zhrag.eval.crud` 与 `zhrag.eval.metrics` 均为独立实现（这也是它们自带单元测试的原因之一）。
-   如后续需要移植其 `src/metric/` 的生成侧指标，须先与上游澄清授权。
+1. **代码层**：无 LICENSE 文件意味着默认「保留所有权利」。本项目没有复制、移植或改写其
+   `src/metric/` 或其它源文件；M9a 的 `metrics_gen.py` 与 `quest_eval.py` 只依据公开的
+   BLEU、ROUGE-L 和 answer-scoring 定义独立实现，并由本项目自己的合成测试覆盖。
+   **独立重实现不等于获得复制上游代码的权利**，也不授予使用上游数据的权利。
 
 2. **数据层（更重要）**：`split_merged.json` 内含约 8 万篇中文新闻正文，**上游未声明这些新闻的
    出处、版权归属或再分发许可**。这些文本的著作权属于原始新闻机构，不属于数据集作者，
@@ -71,8 +72,15 @@ CC BY-SA 3.0 的 **ShareAlike** 条款是有实质约束的，且很容易被忽
 因此本项目：
 
 - **不重新分发任何新闻正文**，包括「小样本」「示例几条」；
-- 仅将其用于**非商业的学术评测与个人技术验证**；
-- 所有相关产物（`eval-expanded/`）均为本地派生，已被 `.gitignore` 排除。
+- `docs/evidence/crud_rag_table8_v3.json` 只保存论文 Table 8 的聚合事实、来源定位、hash 和
+  上游审计元数据，作为 **aggregate-only historical evidence**；它不包含 question、answer、
+  reference、passage、chunk、embedding 或 provider payload。引用聚合事实不等于获得上游代码
+  或底层数据的再分发许可；
+- 不复制 CRUD-RAG 上游代码，也不把其 `quest_gt`、generated question/answer 或 generation
+  cache 加入仓库、发行包或公开 artifact；这些内容若在 M9b 本地生成，只能放在明确的
+  gitignored 本地目录；
+- 仅将原始数据用于**非商业的学术评测与个人技术验证**；所有语料、chunk、向量、检索分数、
+  QG/QA/生成文本及其缓存均为本地派生，已被 `.gitignore` 排除。
 
 **建议**：若要将本项目用于任何商业或公开托管场景，请先就数据授权向上游提 issue 澄清。
 
