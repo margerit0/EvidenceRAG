@@ -35,7 +35,7 @@
 | **服务层** | FastAPI + httpx（异步）+ tenacity（429 指数退避） | 三个依赖，全部薄，不侵入检索层 | — |
 | **前端** | FastAPI 挂一个单文件静态 HTML（检索框 + 结果卡片 + 命中 chunk 高亮 + 各阶段耗时条） | 界面优先展示**阶段耗时**和**检索证据**，便于检查系统行为 | Gradio / Streamlit（若你想 5 分钟部署到 HF Space）。改选条件：你决定公网 demo 放 HF Space 而非 Zilliz |
 | **评估** | 检索侧：**已建成**（R@k / MRR / nDCG / ALL-gold / bootstrap CI / paired bootstrap）。生成侧：**M9a 已冻结独立指标合同**（逐样本 BLEU/ROUGE-L、可选真实 BERTScore、RAGQuestEval 评分语义），真实生成实验留给 M9b | 不安装或移植无授权的 CRUD_RAG 代码；Table 8 只保留 aggregate-only 来源证据 | RAGAS 只作为「我知道这个框架」的一行说明。**不要当主力**：最后一次 commit 2026-02-24，559 open issues，而竞品当天都在发版 |
-| **可观测性** | **Phoenix**（`pip install arize-phoenix && phoenix serve`，SQLite 后端，**零 Docker**） | 你机器没 Docker；Phoenix 是唯一 pip 即用的 tracing UI；requires_python `>=3.10,<3.15` 覆盖 3.13.5 | Langfuse（33.2k stars，国内认知度最高）但需 6 个容器；改选条件：你已经在 WSL2 里装了 Docker。⚠️ Phoenix 是 Elastic-2.0，非 OSI 许可 |
+| **可观测性** | **provider-free retrieval trace contract**：默认 no-op sink，测试用 in-memory sink；可选 sink 只接收脱敏 span lifecycle、profile fingerprint、候选/输出计数与八阶段耗时 | 不把 Phoenix/OTEL 运行时或外部 UI 当作已验证交付；HTTP 服务当前只有检索阶段，生成状态固定为 `not_evaluated` | Phoenix / OpenTelemetry 可作为后续 exporter，但必须单独验证部署、许可与数据边界 |
 | **工程化/CI** | GitHub Actions：`ubuntu-latest`（全量快子集）+ `windows-latest`（**故意不设 PYTHONUTF8/PYTHONIOENCODING**）；ruff（含 PLW1514 禁裸 `open()`）+ mypy + pytest | Linux runner 是 UTF-8，会掩盖你本机 cp936 的裸 `open()` 崩溃；双系统 CI 验证不同默认编码下的行为 | — |
 
 ---
@@ -363,8 +363,10 @@ uv run python scripts/run_crud_generation.py --dry-run
 | **M9** | **生成侧评估（M9a ✅ / M9b1 编排合同 ✅；真实实验待授权）** | **2.0** | **M9a**：`eval/metrics_gen.py`、`eval/quest_eval.py`、合成测试、aggregate-only Table 8 evidence、独立文档同步；**M9b1**：纯内存合同、离线优先 CLI、QG/QA/生成 stage DAG（event_summary / questanswer_1doc）与 text-free finalizer | M9b1 已冻结 cache/provenance/privacy 合同；真实 provider 实验与结果数字不在本阶段发布 |
 <!-- END M9B-GENERATION-ROADMAP -->
 | **M10** | TiDB 第二后端 + 那一节 README | **1.0** | `store/tidb.py` + 「为什么 TiDB 的文档没有跑在 TiDB 上」 | 同一份 Protocol 双后端跑通 |
-| **M11** | 可观测性 + Bad Case 归因 | **1.0** | `phoenix serve` tracing；Bad-Case 归因表（召回失败 / 排序失败 / 生成失败三分类，各 20 例） | Bad Case 分布百分比 |
+| **M11** | **检索可观测性 + Bad Case 归因 ✅ 2026-09-02** | **1.0** | ✅ 脱敏 trace start/end 合同与 FastAPI 生命周期接入；✅ 离线认证 frozen TiDB runs/qrels 并发布 aggregate-only `bad_case_report.json`；不依赖 provider/Phoenix/OTEL。运维 trace 只保留脱敏计数、耗时与 fingerprint，不含 query 或文档内容 | 按系统汇总 recall failure / ranking failure / success；HTTP 无生成阶段，generation 固定 `not_evaluated` |
 | **M12** | 公网部署 + README 定稿 | **1.0** | Zilliz Cloud Free 集群 + 公网 demo 链接；README 首屏定稿 | 端到端在线可点 |
+
+> M11 已完成 provider-free retrieval/ranking 可观测性与离线 aggregate-only 归因；不声称 Phoenix/OTEL UI 或公网部署已验证。报告数字只从 gitignored `indexes/tidb/eval/bad_case_report.json` 读取，未经专用同步器认证不写入 README。generation=`not_evaluated`（当前 HTTP 服务没有 generation stage）。
 
 <!-- BEGIN M8-STATUS -->
 > M8 在线 pipeline、FastAPI/静态前端与 HTTP benchmark 已完成。当前认证 headline 只绑定 `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`：p95 **228.3 ms** / **4.97 QPS**；provider-included 与 cache-backed profile 必须分表，不能混成一个性能数字。
@@ -420,9 +422,11 @@ zhrag/
 │   │   ├── metrics_gen.py          # ✅ provider-free 生成指标合同与 lazy BERTScore
 │   │   ├── quest_eval.py           # ✅ provider-free RAGQuestEval 与显式 denominator
 │   │   ├── hybrid_mrl1024.py       # ✅ H 的离线 MRL 评估
-│   │   └── tidb_chunk_sweep_evaluation.py # ✅ M7 离线 chunk sweep
+│   │   ├── tidb_chunk_sweep_evaluation.py # ✅ M7 离线 chunk sweep
+│   │   └── tidb_bad_cases.py       # ✅ M11 aggregate-only retrieval attribution
 │   ├── service/
 │   │   ├── app.py                  # ✅ FastAPI
+│   │   ├── observability.py        # ✅ provider-free 脱敏 trace contract
 │   │   └── static/index.html       # ✅ 单文件静态前端 + 阶段耗时条
 │   └── ingest.py                   # ✅ 幂等：path 稳定键、sha256 变更检测、文档级 delta
 ├── docs/
@@ -441,6 +445,7 @@ zhrag/
 │   ├── sync_m9a_docs.py            # ✅ aggregate-only 证据与生成指标合同同步
 │   ├── run_crud_generation.py      # ✅ M9b1 known-context 生成/QG/QA/semantic 编排
 │   ├── sync_m9b_docs.py            # ✅ M9b1 合同状态与路线图同步
+│   ├── evaluate_tidb_bad_cases.py  # ✅ M11 离线 aggregate-only 归因
 │   └── sync_quality_gate_docs.py   # ✅ 独立 JUnit 质量门禁同步
 ├── tests/                          # ✅ provider-free、离线评测与集成回归测试
 ```
@@ -465,7 +470,7 @@ zhrag/
 | Milvus Lite / Standalone (WSL2) | 本地 | — | **¥0** |
 | Zilliz Cloud Free | 5 GB / 2.5M vCU/月 | 免费 | **¥0** |
 | GitHub Actions（公开仓库） | — | 免费 | **¥0** |
-| Phoenix tracing | 本地 SQLite | — | **¥0** |
+| M11 脱敏 trace contract + 离线归因 | 本地、provider-free | — | **¥0** |
 | **总计（含全部消融，保守）** | | | **≈ ¥200–250（约 $28–35）** |
 
 存储侧：1,832 TiDB chunks @ 4096 维 float32 ≈ **30.0 MB**；MRL-1024 ≈ **7.5 MB**；全部落在 Zilliz Free 的 5 GB 里，**约 175 倍余量**。
@@ -491,7 +496,7 @@ zhrag/
 | **不用 RAGAS 做主力评估框架** | 2026-02-24 起无提交、559 open issues，而 deepeval/langfuse/opik/phoenix 当天都在发版；且 `adapt()` 默认 `adapt_instruction=False`，中文提示词是半英半中 |
 | **不开数据库内置中文分词器** | Milvus `chinese` analyzer = jieba `cut_for_search` = 你实测最差的 73.4%，比 char bigram 低 2.5 分 |
 | **不提交任何语料字节（含「小样本」）** | CRUD_RAG **根本没有 LICENSE 文件**（Apache badge 只是 README 里的 shields.io 图片，GitHub API 报 `license: None`），8 万篇新闻无出处无授权声明；TiDB 文档是 CC BY-SA 3.0，你的 chunk 输出属于 Adaptation |
-| **不用 Docker（本阶段）** | 本机没装；Milvus Lite 纯 Python、Phoenix 是 SQLite，全链路可以零容器跑通。真需要 Standalone 时进 WSL2 |
+| **不用 Docker（本阶段）** | 本机没装；Milvus Lite 纯 Python；M11 只交付 provider-free trace contract 与离线归因，不把 Phoenix UI 作为已验证依赖。真需要 Standalone 时进 WSL2 |
 | **不做多租户 / RBAC / 审计** | 没有任何编排框架白送这些，它们来自数据库和应用层；且 Dify 的许可证明确禁止未授权的多租户运营 |
 | **不做移动端 / 复杂前端** | 优先展示阶段耗时和检索证据，控制前端维护成本 |
 
@@ -511,7 +516,7 @@ zhrag/
 
 **⑤ 用配对检验推翻自己的点估计，并据此改路线。** 8B 稠密检索相对 40 行纯标准库 BM25 名义领先 2.1pp，配对检验后判定**不显著**（95% CI **[−0.88, +5.12]pp**，McNemar 精确 p = **0.199**）；进一步用 R@1 列联表（both 538 / 仅 BM25 69 / 仅 dense 86 / 都不中 107，φ = 0.455，**并集 oracle 上限 86.6%**）判定两臂**互补而非冗余**，据此把主线从「换更强的单臂」改为「融合」，离线 RRF 兑现 **75.9% → 79.9%（p = 1.6e-03）**。同一批实验还显示**等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），只有加权 0.3/0.7 显著（16 胜 4 负，p=0.047）**——赢在少破坏，不在多修好。
 
-> ④ 中的 HTTP 性能句由 `M8-RESUME-PERFORMANCE` 区域从认证 numeric samples 生成；不要手写或跨 profile 混用。M4 的融合、M5 的离线 rerank 深度消融、M6 的 MRL 与 M8 的在线 pipeline/本机 HTTP benchmark 都已实测；①②③⑤ 每一个数字也都已实测。M11 的可观测性与 Bad Case 归因仍待完成。
+> ④ 中的 HTTP 性能句由 `M8-RESUME-PERFORMANCE` 区域从认证 numeric samples 生成；不要手写或跨 profile 混用。M4 的融合、M5 的离线 rerank 深度消融、M6 的 MRL、M8 的在线 pipeline/本机 HTTP benchmark，以及 M11 的 provider-free trace contract 与离线 retrieval attribution 均已完成；①②③⑤ 每一个数字也都已实测。M11 不包含生成阶段，generation 状态固定为 `not_evaluated`。
 >
 > ⚠️ **不要把「dense 打赢 BM25」写进任何一条要点。** 实测 +2.12pp、95% CI [−0.88, +5.12]pp、
 > McNemar p = 0.199 —— **在本语料上不显著**。可以写的是融合后对 BM25 的 +4.00pp（显著），
@@ -556,7 +561,7 @@ zhrag/
 | **拿 Milvus 的 delete 计数当业务删除数** | Lite 对不存在的主键写 tombstone 并返回 `len(pks)`，删不存在的行不是错误 | 存储层只报「请求了几行、服务端确认了」；`{added, updated, deleted}` 一律来自 manifest diff |
 | **把 `code=100` 当成「alias 还没发布」** | 100 被复用于多种「对象不存在」，若传输层故障恰好带上它，就会把一次连接失败读成「首次发布」，然后覆盖一个从未校验过的 collection | 只认消息里明说不存在的措辞（`not exist` / `not found`），码值不单独作数 |
 | **合并相邻小节时丢掉后续标题** | 「甲」「乙」两个兄弟小节合成一块，只有「甲」的路径留在 metadata，「乙」的标题在生成永久 chunk id 与向量之前就消失 | 只把**共同前缀**放进 metadata，各自剩余层级物化进被索引正文（`_materialize_sections`）；改这条会改 chunk 数，README 数字须重出 |
-| **README 里「企业级」不能只靠功能清单** | 已有 M8 本机 HTTP 延迟/QPS 证据，但仍缺公网 SLA、provider-included profile 与 M11 tracing/Bad Case 归因 | 保持本机 profile 的边界声明；完成 M11，并在公网部署后另测生产路径 |
+| **README 里「企业级」不能只靠功能清单** | 已有 M8 本机 HTTP 延迟/QPS 证据；M11 现在补齐 provider-free trace contract 与离线 retrieval attribution，但仍缺公网 SLA、provider-included profile、Phoenix/OTEL UI 与生成链路验证 | 保持本机 profile 的边界声明；M12 公网部署后另测生产路径；不要把 M11 写成已完成的外部 tracing 平台 |
 
 ---
 

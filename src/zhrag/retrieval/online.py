@@ -64,6 +64,7 @@ class OnlineSettings:
     rerank_request_depth: int
     rerank_apply_depth: int
     output_limit: int
+    rerank_enabled: bool = True
 
     def __post_init__(self) -> None:
         for name in ("profile_name", "embedding_profile", "rerank_profile"):
@@ -83,6 +84,8 @@ class OnlineSettings:
                 raise ValueError(f"{name} must be a positive integer")
         if isinstance(self.rrf_k, bool) or not isinstance(self.rrf_k, int) or self.rrf_k < 0:
             raise ValueError("rrf_k must be a non-negative integer")
+        if not isinstance(self.rerank_enabled, bool):
+            raise TypeError("rerank_enabled must be boolean")
         if self.fusion_depth > self.arm_depth:
             raise ValueError("fusion_depth cannot exceed arm_depth")
         if self.rerank_request_depth > 2 * self.fusion_depth:
@@ -117,6 +120,7 @@ class OnlineSettings:
         rerank_profile: str,
         dense_dimensions: int,
         output_limit: int = 10,
+        rerank_enabled: bool = True,
     ) -> OnlineSettings:
         """Name a product prompt/profile separately from benchmark evidence."""
         return cls(
@@ -130,6 +134,7 @@ class OnlineSettings:
             rerank_request_depth=100,
             rerank_apply_depth=50,
             output_limit=output_limit,
+            rerank_enabled=rerank_enabled,
         )
 
 

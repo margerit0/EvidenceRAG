@@ -172,6 +172,7 @@ def _settings(
         rerank_profile=rerank_profile,
         dense_dimensions=DENSE_WIDTH,
         output_limit=output_limit,
+        rerank_enabled=not no_rerank,
     )
 
 
@@ -313,7 +314,7 @@ def _build_retriever(
         profile_name=settings.profile_name,
         embedding_profile=settings.embedding_profile,
         rerank_profile=settings.rerank_profile,
-        rerank_enabled=not args.no_rerank,
+        rerank_enabled=settings.rerank_enabled,
     )
 
 
@@ -348,6 +349,7 @@ def main(argv: list[str] | None = None) -> int:
                 retriever,
                 info=info,
                 max_concurrency=args.max_concurrency,
+                published_index_identity=(f"{state.collection_name}:{state.sparse_fingerprint}"),
             )
             import uvicorn  # noqa: PLC0415 - optional service dependency
 

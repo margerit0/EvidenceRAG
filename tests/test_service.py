@@ -120,10 +120,20 @@ def result(query: str, *, settings: OnlineSettings) -> OnlineRetrievalResult:
 
 def client(
     retriever: FakeRetriever | None = None,
-    **kwargs: object,
+    *,
+    static_dir: Path | None = None,
+    max_concurrency: int = 1,
+    search_runner: Any = None,
+    trace_sink: Any = None,
 ) -> TestClient:
     fake = retriever or FakeRetriever()
-    app = create_app(cast(Any, fake), **kwargs)
+    app = create_app(
+        cast(Any, fake),
+        static_dir=static_dir,
+        max_concurrency=max_concurrency,
+        search_runner=search_runner,
+        trace_sink=trace_sink,
+    )
     return TestClient(app, raise_server_exceptions=False)
 
 

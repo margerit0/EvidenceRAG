@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from zhrag.retrieval.online import OnlineRetrievalResult, OnlineRetriever, StageTimings
+from zhrag.service.observability import TraceRecorder, TraceSink, profile_fingerprint
 from zhrag.store.base import MetadataValue
 
 __all__ = ["ServiceInfo", "create_app"]
@@ -171,11 +172,15 @@ def _metadata_allowlist(
     return {key: metadata[key] for key in sorted(_ALLOWED_METADATA & metadata.keys())}
 
 
-def _timings_response(timings: StageTimings) -> TimingResponse:
+def _timing_values(timings: StageTimings) -> dict[str, float]:
     values = {name: float(getattr(timings, name)) for name in TimingResponse.model_fields}
     if any(not math.isfinite(value) or value < 0 for value in values.values()):
         raise RuntimeError("retriever returned invalid stage timings")
-    return TimingResponse(**values)
+    return values
+
+
+def _timings_response(timings: StageTimings) -> TimingResponse:
+    return TimingResponse(**_timing_values(timings))
 
 
 def _search_response(
@@ -223,17 +228,32 @@ def _default_info(retriever: OnlineRetriever) -> ServiceInfo:
         profile_name=settings.profile_name,
         embedding_profile=settings.embedding_profile,
         rerank_profile=settings.rerank_profile,
-        rerank_enabled=True,
+        rerank_enabled=settings.rerank_enabled,
     )
 
 
-def create_app(
+def _trace_retrieval_settings(settings: object) -> dict[str, object]:
+    names = (
+        "dense_dimensions",
+        "arm_depth",
+        "fusion_depth",
+        "rrf_k",
+        "rerank_request_depth",
+        "rerank_apply_depth",
+        "output_limit",
+    )
+    return {name: getattr(settings, name) for name in names}
+
+
+def create_app(  # noqa: PLR0915
     retriever: OnlineRetriever,
     *,
     info: ServiceInfo | None = None,
     static_dir: Path | None = None,
     max_concurrency: int = 1,
     search_runner: SearchRunner | None = None,
+    trace_sink: TraceSink | None = None,
+    published_index_identity: str | None = None,
 ) -> FastAPI:
     """Create an app around an already-composed retriever.
 
@@ -251,12 +271,27 @@ def create_app(
         service_info.profile_name != settings.profile_name
         or service_info.embedding_profile != settings.embedding_profile
         or service_info.rerank_profile != settings.rerank_profile
+        or service_info.rerank_enabled != settings.rerank_enabled
     ):
         raise ValueError("service info does not match retriever settings")
     output_limit = settings.output_limit
     resolved_static = static_dir or Path(__file__).resolve().parent / "static"
     index_path = resolved_static / "index.html"
     runner = search_runner
+    recorder = TraceRecorder(
+        trace_sink,
+        profile_name=service_info.profile_name,
+        profile_fingerprint_value=profile_fingerprint(
+            profile_name=service_info.profile_name,
+            embedding_profile=service_info.embedding_profile,
+            rerank_profile=service_info.rerank_profile,
+            rerank_enabled=service_info.rerank_enabled,
+            output_limit=output_limit,
+            retrieval_settings=_trace_retrieval_settings(settings),
+            published_index_identity=published_index_identity,
+        ),
+        rerank_enabled=service_info.rerank_enabled,
+    )
 
     app = FastAPI(
         title="zhrag TiDB retrieval service",
@@ -275,6 +310,8 @@ def create_app(
         _request: Request,
         _exc: RequestValidationError,
     ) -> JSONResponse:
+        span = recorder.start_span()
+        span.end(status_code=422, outcome="invalid_request")
         return _error(422, "invalid_request", "The request body is invalid.")
 
     @app.get("/", include_in_schema=False, response_model=None)
@@ -311,6 +348,8 @@ def create_app(
         response.headers.update(_no_store_headers())
         top_k = payload.top_k or output_limit
         if top_k > output_limit:
+            span = recorder.start_span()
+            span.end(status_code=422, outcome="invalid_top_k")
             return _error(
                 422,
                 "invalid_top_k",
@@ -318,7 +357,10 @@ def create_app(
             )
         admission = app.state.admission
         if not admission.try_acquire():
+            span = recorder.start_span()
+            span.end(status_code=429, outcome="admission_rejected")
             return _error(429, "service_busy", "The service is at its concurrency limit.")
+        span = recorder.start_span()
         try:
             try:
                 if runner is None:
@@ -326,8 +368,17 @@ def create_app(
                 else:
                     value = runner(payload.query)
                     result = await value if inspect.isawaitable(value) else value
-                return _search_response(result, info=service_info, top_k=top_k)
+                output = _search_response(result, info=service_info, top_k=top_k)
+                span.end(
+                    status_code=200,
+                    outcome="success",
+                    candidate_count=len(result.fused_candidates),
+                    output_count=len(output.passages),
+                    stage_timings=_timing_values(result.timings),
+                )
+                return output
             except Exception:
+                span.end(status_code=503, outcome="retrieval_failed")
                 return _error(
                     503,
                     "retrieval_failed",
