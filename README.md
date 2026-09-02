@@ -158,6 +158,7 @@ M9b1 冻结合同 `m9b1-known-context-v1`，当前 profile 是 known-context：�
 - generation、QG、reference QA、prediction QA 和 semantic stage 按依赖图断点续跑；每 case 最多 8 个问题，prompt estimator 超过 30,000 个估算 token 即拒绝截断。
 - status/dry-run 是只读检查，不读取 `.env`，不导入 provider 或可选模型，不创建 cache、artifact directory 或 lock；付费 chat 与模型加载必须分别显式开启 guard。
 - cache sidecar 重新认证 input manifest、prompt、model/endpoint、served model、父级 fingerprint 和完整性；final report 只能由完整、认证过的 cache 离线重建。
+- 完成后的 provenance hardening 统一拒绝 Windows 路径别名与保留设备名，固定 artifact root 为项目内 `indexes/crud/generation/v1/`，拒绝运行/参考路径上的 symlink/junction，并要求 provider 显式返回且全程匹配 requested model；chat profile 域与公开 provenance envelope 已轮换到 v2，旧 v1 sidecar/samples/report 不会被新 runner 续跑、原地改写或发布。
 
 **artifact 与隐私边界**：
 - 文本型 cache、question/reference bank 和中间答案只允许存在于 `indexes/crud/generation/v1/` 的 gitignored 本地树；不提交 corpus、source、question、answer、prediction、embedding、provider payload 或 BERTScore 权重。
@@ -167,9 +168,9 @@ M9b1 冻结合同 `m9b1-known-context-v1`，当前 profile 是 known-context：�
 **RAGQuestEval 口径**：问题只从 exact ground-truth reference 生成；reference QA 与 prediction QA 分别使用 reference 和 evaluated prediction 作为 context，source article 不进入 QG 或任一 QA context。空的 conditional denominator 保持为 null/0，而不是伪造为零分。
 
 **真实实验状态**：
-尚未执行 `--generate`、`--generate-questions`、`--answer-reference`、
-`--answer-prediction` 或 `--score-semantic`；本 marker 不发布任何真实生成、QG、QA、
-BERTScore 或 RAGQuestEval 数字。真实实验仍需显式授权，并继续受许可与 ignored-artifact 边界约束。
+尚无通过 `numeric_samples.json` 重算认证并同步到文档的 M9b2 真实结果；
+本 marker 不发布任何真实生成、QG、QA、BERTScore 或 RAGQuestEval 数字。
+真实实验继续受显式授权、append-only cache、固定 case 上限与 ignored-artifact 边界约束。
 
 **入口**：
 ```bash

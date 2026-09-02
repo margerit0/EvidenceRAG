@@ -104,12 +104,13 @@ class TestChatClient:
         recorder = Recorder(
             json.dumps(
                 {
+                    "model": "model",
                     "choices": [
                         {
                             "finish_reason": "stop",
                             "message": {"content": "{}"},
                         }
-                    ]
+                    ],
                 }
             ).encode("utf-8")
         )
@@ -120,12 +121,40 @@ class TestChatClient:
             log=lambda _message: None,
         )
         reply = client.complete("system", "user")
+        assert reply.model == "model"
         assert (reply.prompt_tokens, reply.completion_tokens, reply.reasoning_tokens) == (
             None,
             None,
             None,
         )
-        payload = json.loads(recorder.requests[0].data or b"{}")
+
+    @pytest.mark.parametrize("served_model", [None, "", 42])
+    def test_rejects_missing_or_invalid_served_model(self, served_model: object) -> None:
+        recorder = Recorder(
+            json.dumps(
+                {
+                    "model": served_model,
+                    "choices": [
+                        {
+                            "finish_reason": "stop",
+                            "message": {"content": "{}"},
+                        }
+                    ],
+                }
+            ).encode("utf-8")
+        )
+        client = ChatClient(
+            ChatConfig("secret", "https://host", "model"),
+            transport=recorder,
+            sleep=lambda _seconds: None,
+            log=lambda _message: None,
+        )
+        with pytest.raises(SystemExit, match="served model"):
+            client.complete("system", "user")
+
+        request_data = recorder.requests[0].data
+        assert isinstance(request_data, bytes)
+        payload = json.loads(request_data)
         assert payload["reasoning_effort"] == "high"
         assert payload["response_format"] == {"type": "json_object"}
         assert payload["messages"] == [

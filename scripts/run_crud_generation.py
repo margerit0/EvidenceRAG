@@ -13,6 +13,7 @@ import hashlib
 import importlib
 import json
 import math
+import ntpath
 import re
 import sys
 import urllib.parse
@@ -24,6 +25,8 @@ from typing import Any, Literal, Protocol, cast
 
 from zhrag.eval.crud_generation import (
     CACHE_ROW_SCHEMA,
+    CHAT_PROFILE_CONTRACT_SHA256,
+    CHAT_PROFILE_SCHEMA,
     M9B_CONTRACT_VERSION,
     M9B_TASKS,
     GeneratedQuestion,
@@ -113,8 +116,9 @@ REFERENCE_QA_CACHE_KEY_SCHEMA = "zhrag-crud-reference-qa-cache-key-v1"
 PREDICTION_QA_CACHE_KEY_SCHEMA = "zhrag-crud-prediction-qa-cache-key-v1"
 SEMANTIC_CACHE_KEY_SCHEMA = "zhrag-crud-semantic-cache-key-v1"
 
-_SLUG = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,63})$")
+_SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,63})$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_ARTIFACT_PARTS = ("indexes", "crud", "generation", "v1")
 _META_KEYS = frozenset(
     {
         "schema",
@@ -322,11 +326,72 @@ def _action(args: argparse.Namespace) -> ActionName | None:
 
 
 def _slug(value: object, *, label: str) -> str:
-    if not isinstance(value, str) or _SLUG.fullmatch(value) is None:
+    if not isinstance(value, str) or _SLUG.fullmatch(value) is None or ntpath.isreserved(value):
         raise SystemExit(
-            f"! {label} must be a safe 1..64-character ASCII slug using letters, digits, . _ -"
+            f"! {label} must be a lowercase 1..64-character ASCII slug using letters, digits, . _ -"
         )
     return value
+
+
+def _guard_artifact_path(path: Path) -> Path:
+    artifact_root = ROOT.joinpath(*_ARTIFACT_PARTS)
+    try:
+        relative = path.relative_to(artifact_root)
+    except ValueError as exc:
+        raise SystemExit(f"! artifact path escapes the project generation root: {path}") from exc
+
+    current = ROOT
+    chain = [current]
+    for part in (*_ARTIFACT_PARTS, *relative.parts):
+        current /= part
+        chain.append(current)
+    for component in chain:
+        try:
+            redirected = component.is_symlink() or component.is_junction()
+        except OSError as exc:
+            raise SystemExit(f"! cannot authenticate artifact path component: {component}") from exc
+        if redirected:
+            raise SystemExit(f"! artifact path contains a symlink or junction: {component}")
+
+    resolved_root = artifact_root.resolve(strict=False)
+    try:
+        path.resolve(strict=False).relative_to(resolved_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise SystemExit(f"! artifact path escapes the project generation root: {path}") from exc
+    return path
+
+
+def _guard_artifact_tree(root: Path) -> Path:
+    _guard_artifact_path(root)
+    if not root.exists():
+        return root
+    if not root.is_dir():
+        raise SystemExit(f"! artifact root must be a directory: {root}")
+    try:
+        for directory, dirnames, filenames in root.walk(top_down=True, follow_symlinks=False):
+            for name in (*dirnames, *filenames):
+                child = directory / name
+                if child.is_symlink() or child.is_junction():
+                    raise SystemExit(f"! artifact tree contains a symlink or junction: {child}")
+    except OSError as exc:
+        raise SystemExit(f"! cannot authenticate artifact tree: {root}") from exc
+    return root
+
+
+def _artifact_root(raw: object) -> Path:
+    if not isinstance(raw, Path):
+        raise SystemExit("! --artifacts must be a filesystem path")
+    candidate = raw.expanduser()
+    if not candidate.is_absolute():
+        candidate = ROOT / candidate
+    expected = ROOT.joinpath(*_ARTIFACT_PARTS)
+    try:
+        matches_expected = candidate.resolve(strict=False) == expected.resolve(strict=False)
+    except OSError as exc:
+        raise SystemExit(f"! cannot authenticate --artifacts path: {candidate}") from exc
+    if not matches_expected:
+        raise SystemExit(f"! --artifacts must be the project generation root: {expected}")
+    return _guard_artifact_path(expected)
 
 
 def _validate_args(args: argparse.Namespace, action: ActionName | None) -> None:  # noqa: PLR0912
@@ -338,14 +403,6 @@ def _validate_args(args: argparse.Namespace, action: ActionName | None) -> None:
         raise SystemExit("! --confidence must be in (0, 1)")
     if args.seed < 0:
         raise SystemExit("! --seed must be non-negative")
-    if action is None:
-        if args.max_calls is not None:
-            raise SystemExit("! --max-calls requires a paid chat action")
-        if args.allow_paid_provider or args.allow_model_download:
-            raise SystemExit("! provider/model guards require an explicit action")
-        if args.canonical and args.run_id is None:
-            raise SystemExit("! --canonical requires --run-id")
-        return
     if action in _PAID_ACTIONS and not args.allow_paid_provider:
         raise SystemExit(
             f"! --{action.replace('_', '-')} sends paid chat requests; "
@@ -355,6 +412,15 @@ def _validate_args(args: argparse.Namespace, action: ActionName | None) -> None:
         raise SystemExit(
             "! --score-semantic loads BERTScore weights; repeat with --allow-model-download"
         )
+    args.artifacts = _artifact_root(args.artifacts)
+    if action is None:
+        if args.max_calls is not None:
+            raise SystemExit("! --max-calls requires a paid chat action")
+        if args.allow_paid_provider or args.allow_model_download:
+            raise SystemExit("! provider/model guards require an explicit action")
+        if args.canonical and args.run_id is None:
+            raise SystemExit("! --canonical requires --run-id")
+        return
     if action not in _PAID_ACTIONS and args.max_calls is not None:
         raise SystemExit("! --max-calls applies only to paid chat actions")
     if action != "score_semantic" and args.allow_model_download:
@@ -468,14 +534,14 @@ def _run_root(args: argparse.Namespace) -> Path:
         raise AssertionError("run id is required after argument validation")
     group = "canonical" if args.canonical else "trials"
     run_id = _slug(args.run_id, label="--run-id")
-    return Path(args.artifacts) / "runs" / group / run_id
+    return _guard_artifact_tree(Path(args.artifacts) / "runs" / group / run_id)
 
 
 def _reference_root(args: argparse.Namespace) -> Path:
     if args.reference_profile is None:
         raise AssertionError("reference profile is required after argument validation")
     profile = _slug(args.reference_profile, label="--reference-profile")
-    return Path(args.artifacts) / "reference_banks" / profile
+    return _guard_artifact_tree(Path(args.artifacts) / "reference_banks" / profile)
 
 
 def _manifest_path(root: Path) -> Path:
@@ -531,7 +597,7 @@ def _profile_fingerprint(
     json_object: bool,
 ) -> str:
     return canonical_fingerprint(
-        "zhrag-crud-chat-profile-v1",
+        CHAT_PROFILE_SCHEMA,
         _text(model, label="model"),
         _normalise_endpoint(endpoint),
         _text(reasoning_effort, label="reasoning effort"),
@@ -1607,7 +1673,7 @@ def _qa_expected(
     )
 
 
-def _run_answer_reference(args: argparse.Namespace, state: InputState) -> int:
+def _run_answer_reference(args: argparse.Namespace, state: InputState) -> int:  # noqa: PLR0915
     root = _reference_root(args)
     question = _build_question_state(state, root, require_marker=True)
     if (root / REFERENCE_BANK).exists():
@@ -1636,6 +1702,7 @@ def _run_answer_reference(args: argparse.Namespace, state: InputState) -> int:
             )
         except ValueError as exc:
             raise SystemExit(f"! reference QA cache validation failed: {exc}") from exc
+        _validate_served_models(typed_old, recorded, label="reference QA cache")
         if recorded["complete"]:
             print(
                 f"reference QA: complete ({len(typed_old):,}/{len(question.questions):,}); "
@@ -1698,6 +1765,7 @@ def _run_answer_reference(args: argparse.Namespace, state: InputState) -> int:
             )
         except ValueError as exc:
             raise SystemExit(f"! reference QA cache validation failed: {exc}") from exc
+        _validate_served_models(typed, recorded, label="reference QA cache")
         _finish_cache(root, definition, recorded, typed)
     print(
         f"reference QA: complete ({len(typed):,}/{len(question.questions):,}); "
@@ -1760,6 +1828,7 @@ def _run_answer_prediction(args: argparse.Namespace, state: InputState) -> int: 
             )
         except ValueError as exc:
             raise SystemExit(f"! prediction QA cache validation failed: {exc}") from exc
+        _validate_served_models(typed_old, recorded, label="prediction QA cache")
         if recorded["complete"]:
             print(
                 f"prediction QA: complete ({len(typed_old):,}/"
@@ -1826,6 +1895,7 @@ def _run_answer_prediction(args: argparse.Namespace, state: InputState) -> int: 
             )
         except ValueError as exc:
             raise SystemExit(f"! prediction QA cache validation failed: {exc}") from exc
+        _validate_served_models(typed, recorded, label="prediction QA cache")
         _finish_cache(run_root, definition, recorded, typed)
     print(f"prediction QA: complete ({len(typed):,}/{len(reference.question.questions):,})")
     return 0
@@ -1971,6 +2041,7 @@ def _build_final_artifacts(
     if reference_profile != prediction_profile:
         raise SystemExit("! reference and prediction QA model profiles differ")
     fingerprints = {
+        "chat_profile_contract_sha256": CHAT_PROFILE_CONTRACT_SHA256,
         "dataset_snapshot_sha256": state.manifest.dataset_snapshot_sha256,
         "input_manifest_sha256": state.manifest_sha256,
         "generation_model_profile_sha256": cast(str, generation.meta["model_profile_sha256"]),
@@ -2058,6 +2129,8 @@ def _cache_status(path: Path) -> str:  # noqa: PLR0911
                 return "invalid"
             return f"partial 0/{cast(int, meta['expected_count']):,}"
         rows = _read_rows(path, definition.parser)
+        if definition.stage != "semantic":
+            _validate_served_models(rows, meta, label=f"{definition.stage} cache")
         count = len(rows)
         expected = cast(int, meta["expected_count"])
         if meta["complete"]:
@@ -2134,11 +2207,16 @@ def _status(args: argparse.Namespace) -> int:  # noqa: PLR0912
     if args.reference_profile is not None:
         reference_roots.append(_reference_root(args))
     else:
-        parent = args.artifacts / "reference_banks"
+        parent = _guard_artifact_path(args.artifacts / "reference_banks")
         if parent.is_dir():
-            reference_roots.extend(sorted(path for path in parent.iterdir() if path.is_dir()))
+            for path in parent.iterdir():
+                if path.is_symlink() or path.is_junction():
+                    raise SystemExit(f"! artifact path contains a symlink or junction: {path}")
+                if path.is_dir():
+                    _slug(path.name, label="reference profile directory")
+                    reference_roots.append(_guard_artifact_tree(path))
     if reference_roots:
-        for root in reference_roots:
+        for root in sorted(reference_roots):
             _status_root(root, state, kind="reference bank")
     else:
         print("reference banks: none")
@@ -2148,11 +2226,16 @@ def _status(args: argparse.Namespace) -> int:  # noqa: PLR0912
         run_roots.append(_run_root(args))
     else:
         for group in ("trials", "canonical"):
-            parent = args.artifacts / "runs" / group
+            parent = _guard_artifact_path(args.artifacts / "runs" / group)
             if parent.is_dir():
-                run_roots.extend(sorted(path for path in parent.iterdir() if path.is_dir()))
+                for path in parent.iterdir():
+                    if path.is_symlink() or path.is_junction():
+                        raise SystemExit(f"! artifact path contains a symlink or junction: {path}")
+                    if path.is_dir():
+                        _slug(path.name, label="run directory")
+                        run_roots.append(_guard_artifact_tree(path))
     if run_roots:
-        for root in run_roots:
+        for root in sorted(run_roots):
             _status_root(root, state, kind="run")
     else:
         print("runs: none")

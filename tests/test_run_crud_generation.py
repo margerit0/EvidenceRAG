@@ -18,7 +18,7 @@ from zhrag.eval.crud_generation import (
     generation_cache_id,
 )
 from zhrag.eval.metrics_gen import SemanticProvenance, TokenizerProvenance
-from zhrag.io_utils import read_json, read_jsonl, write_json, write_text
+from zhrag.io_utils import read_json, read_jsonl, write_json, write_jsonl, write_text
 
 RAW = {
     "event_summary": [
@@ -123,7 +123,7 @@ class FakeSemanticScorer:
         return ([0.6] * count, [0.7] * count, [0.65] * count)
 
 
-def _runner() -> ModuleType:
+def _runner(root: Path | None = None) -> ModuleType:
     path = Path(__file__).resolve().parent.parent / "scripts" / "run_crud_generation.py"
     spec = importlib.util.spec_from_file_location("run_crud_generation_test_module", path)
     if spec is None or spec.loader is None:
@@ -131,6 +131,8 @@ def _runner() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    if root is not None:
+        module.__dict__["ROOT"] = root
     return module
 
 
@@ -218,6 +220,75 @@ def _generation_args(
     return args
 
 
+def _build_question_bank(
+    runner: ModuleType,
+    input_path: Path,
+    artifacts: Path,
+    env: Path,
+) -> None:
+    assert (
+        runner.main(
+            [
+                *_base(input_path, artifacts, env),
+                "--generate-questions",
+                "--reference-profile",
+                "ref-a",
+                "--allow-paid-provider",
+            ]
+        )
+        == 0
+    )
+    assert (
+        runner.main(
+            [
+                *_base(input_path, artifacts, env),
+                "--finalize-questions",
+                "--reference-profile",
+                "ref-a",
+            ]
+        )
+        == 0
+    )
+
+
+def _build_reference_bank(
+    runner: ModuleType,
+    input_path: Path,
+    artifacts: Path,
+    env: Path,
+) -> None:
+    _build_question_bank(runner, input_path, artifacts, env)
+    assert (
+        runner.main(
+            [
+                *_base(input_path, artifacts, env),
+                "--answer-reference",
+                "--reference-profile",
+                "ref-a",
+                "--allow-paid-provider",
+            ]
+        )
+        == 0
+    )
+    assert (
+        runner.main(
+            [
+                *_base(input_path, artifacts, env),
+                "--finalize-reference-bank",
+                "--reference-profile",
+                "ref-a",
+            ]
+        )
+        == 0
+    )
+
+
+def _replace_first_served_model(path: Path, value: str) -> None:
+    rows = list(read_jsonl(path))
+    rows[0]["served_model"] = value
+    write_jsonl(path, rows)
+
+
 class TestStatusAndGuards:
     def test_default_status_is_read_only_and_does_not_read_env_or_create_artifacts(
         self,
@@ -225,7 +296,7 @@ class TestStatusAndGuards:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
         artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         missing_env = tmp_path / "does-not-exist.env"
@@ -266,9 +337,9 @@ class TestStatusAndGuards:
         message: str,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         missing_input = tmp_path / "missing-input.json"
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         argv = [*_base(missing_input, artifacts, tmp_path / "missing.env"), action]
         if action in {"--generate", "--generate-questions", "--answer-reference"}:
             argv += (
@@ -289,9 +360,9 @@ class TestStatusAndGuards:
         self,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         with pytest.raises(SystemExit, match="requires --reference-profile"):
             runner.main(
                 [
@@ -310,9 +381,9 @@ class TestLifecycle:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         env = tmp_path / "missing.env"
         generation = FakeChat("generation")
         qg = FakeChat("qg")
@@ -457,9 +528,9 @@ class TestLifecycle:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         chat = FakeChat("generation")
         _install_chat_profiles(
             monkeypatch,
@@ -485,9 +556,9 @@ class TestLifecycle:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         bad = FakeChat("generation", malformed=True)
         _install_chat_profiles(
             monkeypatch,
@@ -510,9 +581,9 @@ class TestLifecycle:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         failing = FakeChat("generation", failing=True)
         _install_chat_profiles(
             monkeypatch,
@@ -535,9 +606,9 @@ class TestArtifactBoundaries:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         root = artifacts / "runs" / "trials" / "trial-a"
         write_text(root / runner.GENERATION_CACHE, '{"unexpected":"row"}\n')
         chat = FakeChat("generation")
@@ -559,9 +630,9 @@ class TestArtifactBoundaries:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         chat = FakeChat("generation")
         _install_chat_profiles(
             monkeypatch,
@@ -592,9 +663,9 @@ class TestArtifactBoundaries:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         chat = FakeChat("generation")
         _install_chat_profiles(
             monkeypatch,
@@ -637,9 +708,9 @@ class TestArtifactBoundaries:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         chat = FakeChat("generation")
         qg = FakeChat("qg")
         _install_chat_profiles(
@@ -680,9 +751,9 @@ class TestArtifactBoundaries:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         chat = FakeChat("generation")
         _install_chat_profiles(
             monkeypatch,
@@ -704,14 +775,419 @@ class TestArtifactBoundaries:
 
 
 class TestHardening:
+    @pytest.mark.parametrize(
+        "slug",
+        ["a", "trial-a", "trial_1.v2", "x" * 64],
+    )
+    def test_accepts_only_canonical_lowercase_slugs(self, slug: str) -> None:
+        runner = _runner()
+        assert runner._slug(slug, label="slug") == slug
+
+    @pytest.mark.parametrize(
+        "slug",
+        ["", "Trial-a", "trial-a.", "con", "aux.txt", "com1", "a/b", "x" * 65],
+    )
+    def test_rejects_windows_aliases_and_noncanonical_slugs(self, slug: str) -> None:
+        runner = _runner()
+        with pytest.raises(SystemExit, match="lowercase"):
+            runner._slug(slug, label="slug")
+
+    def test_rejects_external_artifact_root_before_reading_input(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner(tmp_path)
+
+        def fail_input(_path: Path) -> object:
+            raise AssertionError("input must not be read for an invalid artifact root")
+
+        monkeypatch.setattr(runner, "_load_input", fail_input)
+        with pytest.raises(SystemExit, match="project generation root"):
+            runner.main(
+                [
+                    *_base(
+                        tmp_path / "missing-input.json",
+                        tmp_path / "external-artifacts",
+                        tmp_path / "missing.env",
+                    ),
+                    "--status",
+                ]
+            )
+
+    def test_rejects_artifact_root_junction_before_reading_input(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner(tmp_path)
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
+        artifacts.mkdir(parents=True)
+        path_type = type(artifacts)
+        real_is_junction = path_type.is_junction
+
+        def fake_is_junction(path: Path) -> bool:
+            return path == artifacts or real_is_junction(path)
+
+        def fail_input(_path: Path) -> object:
+            raise AssertionError("input must not be read through a redirected artifact root")
+
+        monkeypatch.setattr(path_type, "is_junction", fake_is_junction)
+        monkeypatch.setattr(runner, "_load_input", fail_input)
+        with pytest.raises(SystemExit, match="symlink or junction"):
+            runner.main(
+                [
+                    *_base(
+                        tmp_path / "missing-input.json",
+                        artifacts,
+                        tmp_path / "missing.env",
+                    ),
+                    "--status",
+                ]
+            )
+
+    def test_status_rejects_a_redirected_discovered_run_before_inspection(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner(tmp_path)
+        input_path = _write_input(tmp_path)
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
+        redirected = artifacts / "runs" / "trials" / "trial-a"
+        redirected.mkdir(parents=True)
+        path_type = type(redirected)
+        real_is_symlink = path_type.is_symlink
+
+        def fake_is_symlink(path: Path) -> bool:
+            return path == redirected or real_is_symlink(path)
+
+        def fail_status_root(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("redirected run content must not be inspected")
+
+        monkeypatch.setattr(path_type, "is_symlink", fake_is_symlink)
+        monkeypatch.setattr(runner, "_status_root", fail_status_root)
+        with pytest.raises(SystemExit, match="symlink or junction"):
+            runner.main([*_base(input_path, artifacts, tmp_path / "missing.env"), "--status"])
+
+    @pytest.mark.parametrize(
+        ("action", "selector", "relative"),
+        [
+            ("--generate", ("--run-id", "trial-a"), ("runs", "trials", "trial-a")),
+            (
+                "--generate-questions",
+                ("--reference-profile", "ref-a"),
+                ("reference_banks", "ref-a"),
+            ),
+        ],
+    )
+    def test_paid_actions_reject_redirected_selected_roots_before_provider_load(
+        self,
+        action: str,
+        selector: tuple[str, str],
+        relative: tuple[str, ...],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner(tmp_path)
+        input_path = _write_input(tmp_path)
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
+        redirected = artifacts.joinpath(*relative)
+        redirected.mkdir(parents=True)
+        path_type = type(redirected)
+        real_is_junction = path_type.is_junction
+
+        def fake_is_junction(path: Path) -> bool:
+            return path == redirected or real_is_junction(path)
+
+        def fail_profile(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("provider profile must not load through a redirected root")
+
+        monkeypatch.setattr(path_type, "is_junction", fake_is_junction)
+        monkeypatch.setattr(runner, "_load_chat_profile", fail_profile)
+        with pytest.raises(SystemExit, match="symlink or junction"):
+            runner.main(
+                [
+                    *_base(input_path, artifacts, tmp_path / "missing.env"),
+                    action,
+                    *selector,
+                    "--allow-paid-provider",
+                ]
+            )
+
+    def test_status_rejects_a_redirected_cache_file_before_inspection(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner(tmp_path)
+        input_path = _write_input(tmp_path)
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
+        root = artifacts / "runs" / "trials" / "trial-a"
+        cache = root / runner.GENERATION_CACHE
+        write_text(cache, "")
+        path_type = type(cache)
+        real_is_symlink = path_type.is_symlink
+
+        def fake_is_symlink(path: Path) -> bool:
+            return path == cache or real_is_symlink(path)
+
+        def fail_status_root(*_args: object, **_kwargs: object) -> None:
+            raise AssertionError("redirected cache content must not be inspected")
+
+        monkeypatch.setattr(path_type, "is_symlink", fake_is_symlink)
+        monkeypatch.setattr(runner, "_status_root", fail_status_root)
+        with pytest.raises(SystemExit, match="artifact tree contains"):
+            runner.main([*_base(input_path, artifacts, tmp_path / "missing.env"), "--status"])
+
+    def test_paid_action_rejects_a_redirected_cache_file_before_provider_load(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner(tmp_path)
+        input_path = _write_input(tmp_path)
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
+        root = artifacts / "runs" / "trials" / "trial-a"
+        cache = root / runner.GENERATION_CACHE
+        write_text(cache, "")
+        path_type = type(cache)
+        real_is_junction = path_type.is_junction
+
+        def fake_is_junction(path: Path) -> bool:
+            return path == cache or real_is_junction(path)
+
+        def fail_profile(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("provider profile must not load through a redirected cache")
+
+        monkeypatch.setattr(path_type, "is_junction", fake_is_junction)
+        monkeypatch.setattr(runner, "_load_chat_profile", fail_profile)
+        with pytest.raises(SystemExit, match="artifact tree contains"):
+            runner.main(_generation_args(input_path, artifacts, tmp_path / "missing.env"))
+
+    def test_reference_qa_rejects_served_model_drift_before_resume_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner(tmp_path)
+        input_path = _write_input(tmp_path)
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
+        env = tmp_path / "missing.env"
+        qa = FakeChat("qa")
+        _install_chat_profiles(
+            monkeypatch,
+            runner,
+            generation=FakeChat("generation"),
+            qg=FakeChat("qg"),
+            qa=qa,
+        )
+        _build_question_bank(runner, input_path, artifacts, env)
+        args = [
+            *_base(input_path, artifacts, env),
+            "--answer-reference",
+            "--reference-profile",
+            "ref-a",
+            "--allow-paid-provider",
+            "--max-calls",
+            "1",
+        ]
+        assert runner.main(args) == 0
+        cache = artifacts / "reference_banks" / "ref-a" / runner.REFERENCE_QA_CACHE
+        _replace_first_served_model(cache, "unexpected-served-model")
+        calls_before = len(qa.calls)
+
+        with pytest.raises(SystemExit, match="served model drift"):
+            runner.main(args)
+        assert len(qa.calls) == calls_before
+
+    def test_prediction_qa_rejects_served_model_drift_before_resume_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner(tmp_path)
+        input_path = _write_input(tmp_path)
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
+        env = tmp_path / "missing.env"
+        qa = FakeChat("qa")
+        _install_chat_profiles(
+            monkeypatch,
+            runner,
+            generation=FakeChat("generation"),
+            qg=FakeChat("qg"),
+            qa=qa,
+        )
+        assert runner.main(_generation_args(input_path, artifacts, env)) == 0
+        _build_reference_bank(runner, input_path, artifacts, env)
+        args = [
+            *_base(input_path, artifacts, env),
+            "--answer-prediction",
+            "--run-id",
+            "trial-a",
+            "--reference-profile",
+            "ref-a",
+            "--allow-paid-provider",
+            "--max-calls",
+            "1",
+        ]
+        assert runner.main(args) == 0
+        cache = artifacts / "runs" / "trials" / "trial-a" / runner.PREDICTION_QA_CACHE
+        _replace_first_served_model(cache, "unexpected-served-model")
+        calls_before = len(qa.calls)
+
+        with pytest.raises(SystemExit, match="served model drift"):
+            runner.main(args)
+        assert len(qa.calls) == calls_before
+
+    def test_reference_qa_rejects_served_model_drift_before_completion(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner(tmp_path)
+        input_path = _write_input(tmp_path)
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
+        env = tmp_path / "missing.env"
+        qa = FakeChat("qa")
+        _install_chat_profiles(
+            monkeypatch,
+            runner,
+            generation=FakeChat("generation"),
+            qg=FakeChat("qg"),
+            qa=qa,
+        )
+        _build_question_bank(runner, input_path, artifacts, env)
+        real_append = runner._append_row
+        corrupted = False
+
+        def append_then_corrupt(path: Path, row: object) -> None:
+            nonlocal corrupted
+            real_append(path, row)
+            if path.name == runner.REFERENCE_QA_CACHE and not corrupted:
+                _replace_first_served_model(path, "unexpected-served-model")
+                corrupted = True
+
+        monkeypatch.setattr(runner, "_append_row", append_then_corrupt)
+        with pytest.raises(SystemExit, match="served model drift"):
+            runner.main(
+                [
+                    *_base(input_path, artifacts, env),
+                    "--answer-reference",
+                    "--reference-profile",
+                    "ref-a",
+                    "--allow-paid-provider",
+                ]
+            )
+
+        root = artifacts / "reference_banks" / "ref-a"
+        meta = read_json(root / f"{runner.REFERENCE_QA_CACHE}.meta.json")
+        assert meta["complete"] is False
+        assert len(qa.calls) == 4
+
+    def test_prediction_qa_rejects_served_model_drift_before_completion(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner(tmp_path)
+        input_path = _write_input(tmp_path)
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
+        env = tmp_path / "missing.env"
+        qa = FakeChat("qa")
+        _install_chat_profiles(
+            monkeypatch,
+            runner,
+            generation=FakeChat("generation"),
+            qg=FakeChat("qg"),
+            qa=qa,
+        )
+        assert runner.main(_generation_args(input_path, artifacts, env)) == 0
+        _build_reference_bank(runner, input_path, artifacts, env)
+        real_append = runner._append_row
+        corrupted = False
+
+        def append_then_corrupt(path: Path, row: object) -> None:
+            nonlocal corrupted
+            real_append(path, row)
+            if path.name == runner.PREDICTION_QA_CACHE and not corrupted:
+                _replace_first_served_model(path, "unexpected-served-model")
+                corrupted = True
+
+        monkeypatch.setattr(runner, "_append_row", append_then_corrupt)
+        with pytest.raises(SystemExit, match="served model drift"):
+            runner.main(
+                [
+                    *_base(input_path, artifacts, env),
+                    "--answer-prediction",
+                    "--run-id",
+                    "trial-a",
+                    "--reference-profile",
+                    "ref-a",
+                    "--allow-paid-provider",
+                ]
+            )
+
+        root = artifacts / "runs" / "trials" / "trial-a"
+        meta = read_json(root / f"{runner.PREDICTION_QA_CACHE}.meta.json")
+        assert meta["complete"] is False
+        assert len(qa.calls) == 8
+
+    def test_legacy_chat_profile_sidecar_is_rejected_before_resume_call(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        runner = _runner(tmp_path)
+        input_path = _write_input(tmp_path)
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
+        chat = FakeChat("generation")
+        profiles = _install_chat_profiles(
+            monkeypatch,
+            runner,
+            generation=chat,
+            qg=FakeChat("qg"),
+            qa=FakeChat("qa"),
+        )
+        assert (
+            runner.main(
+                _generation_args(
+                    input_path,
+                    artifacts,
+                    tmp_path / "missing.env",
+                    max_calls=0,
+                )
+            )
+            == 0
+        )
+        meta_path = (
+            artifacts / "runs" / "trials" / "trial-a" / f"{runner.GENERATION_CACHE}.meta.json"
+        )
+        profile = profiles["generation"]
+        legacy_fingerprint = runner.canonical_fingerprint(
+            "zhrag-crud-chat-profile-v1",
+            profile.model,
+            profile.endpoint,
+            profile.reasoning_effort,
+            str(profile.retries),
+            "True",
+        )
+        meta = read_json(meta_path)
+        meta["model_profile_sha256"] = legacy_fingerprint
+        write_json(meta_path, meta)
+
+        with pytest.raises(SystemExit, match="profile drift"):
+            runner.main(_generation_args(input_path, artifacts, tmp_path / "missing.env"))
+        assert chat.calls == []
+
     def test_chat_sidecar_profile_fields_are_authenticated_before_resume(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         chat = FakeChat("generation")
         _install_chat_profiles(
             monkeypatch,
@@ -746,9 +1222,9 @@ class TestHardening:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         env = tmp_path / "missing.env"
         generation = FakeChat("generation")
         qg = FakeChat("qg")
@@ -841,9 +1317,9 @@ class TestHardening:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         env = tmp_path / "missing.env"
         generation = FakeChat("generation")
         _install_chat_profiles(
@@ -898,7 +1374,7 @@ class TestHardening:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
         state = runner._load_input(input_path)
         root = tmp_path / "run-root"
@@ -933,9 +1409,9 @@ class TestHardening:
         tmp_path: Path,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         env = tmp_path / "missing.env"
         _install_chat_profiles(
             monkeypatch,
@@ -975,9 +1451,9 @@ class TestHardening:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        runner = _runner()
+        runner = _runner(tmp_path)
         input_path = _write_input(tmp_path)
-        artifacts = tmp_path / "artifacts"
+        artifacts = tmp_path / "indexes" / "crud" / "generation" / "v1"
         chat = FakeChat("generation")
         _install_chat_profiles(
             monkeypatch,

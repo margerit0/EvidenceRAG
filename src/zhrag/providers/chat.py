@@ -183,9 +183,11 @@ class ChatClient:
         details = usage.get("completion_tokens_details")
         details = details if isinstance(details, Mapping) else {}
         model = raw.get("model")
+        if not isinstance(model, str) or not model.strip():
+            raise SystemExit("! chat response omitted a non-empty served model")
         return ChatReply(
             content=content,
-            model=model if isinstance(model, str) and model else self.config.model,
+            model=model,
             prompt_tokens=_int_field(usage, "prompt_tokens"),
             completion_tokens=_int_field(usage, "completion_tokens"),
             reasoning_tokens=_int_field(details, "reasoning_tokens"),

@@ -79,6 +79,13 @@ def _status_lines(heading: str) -> list[str]:
             "- cache sidecar 重新认证 input manifest、prompt、model/endpoint、served model、"
             "父级 fingerprint 和完整性；final report 只能由完整、认证过的 cache 离线重建。"
         ),
+        (
+            "- 完成后的 provenance hardening 统一拒绝 Windows 路径别名与保留设备名，固定 artifact "
+            "root 为项目内 `indexes/crud/generation/v1/`，拒绝运行/参考路径上的 symlink/junction，"
+            "并要求 provider 显式返回且全程匹配 requested model；chat profile 域与公开 provenance "
+            "envelope 已轮换到 v2，旧 v1 sidecar/samples/report 不会被新 runner 续跑、原地改写"
+            "或发布。"
+        ),
         "",
         "**artifact 与隐私边界**：",
         (
@@ -105,10 +112,9 @@ def _status_lines(heading: str) -> list[str]:
         ),
         "",
         "**真实实验状态**：",
-        "尚未执行 `--generate`、`--generate-questions`、`--answer-reference`、",
-        "`--answer-prediction` 或 `--score-semantic`；本 marker 不发布任何真实生成、QG、QA、",
-        "BERTScore 或 RAGQuestEval 数字。真实实验仍需显式授权，并继续受许可与 "
-        "ignored-artifact 边界约束。",
+        "尚无通过 `numeric_samples.json` 重算认证并同步到文档的 M9b2 真实结果；",
+        "本 marker 不发布任何真实生成、QG、QA、BERTScore 或 RAGQuestEval 数字。",
+        "真实实验继续受显式授权、append-only cache、固定 case 上限与 ignored-artifact 边界约束。",
         "",
         "**入口**：",
         "```bash",

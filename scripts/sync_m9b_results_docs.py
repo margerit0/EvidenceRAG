@@ -22,9 +22,10 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from zhrag.eval.crud_generation import (
+    CHAT_PROFILE_CONTRACT_SHA256,
     M9B_TASKS,
     PUBLIC_INPUT_FINGERPRINT_KEYS,
     build_generation_report,
@@ -44,7 +45,8 @@ NUMERIC_SAMPLES = "numeric_samples.json"
 REPORT = "report.json"
 RESULTS_MARKER = "M9B-GENERATION-RESULTS"
 
-_SLUG = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,63})$")
+_SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9._-]{0,63})$")
+_ARTIFACT_PARTS = ("indexes", "crud", "generation", "v1")
 
 #: Display label per published metric. Keyed by the frozen metric constants so a
 #: metric added upstream fails the render instead of silently disappearing.
@@ -108,13 +110,76 @@ def _slug(value: str, *, label: str) -> str:
     # id that would alias an existing directory under Windows semantics is
     # rejected here rather than resolving to a neighbouring run's numbers.
     if not _SLUG.fullmatch(value) or ntpath.isreserved(value):
-        raise SystemExit(f"! {label} must be a safe slug: {value!r}")
+        raise SystemExit(f"! {label} must be a lowercase safe slug: {value!r}")
     return value
+
+
+def _guard_artifact_path(path: Path) -> Path:
+    artifact_root = ROOT.joinpath(*_ARTIFACT_PARTS)
+    try:
+        relative = path.relative_to(artifact_root)
+    except ValueError as exc:
+        raise SystemExit(f"! artifact path escapes the project generation root: {path}") from exc
+
+    current = ROOT
+    chain = [current]
+    for part in (*_ARTIFACT_PARTS, *relative.parts):
+        current /= part
+        chain.append(current)
+    for component in chain:
+        try:
+            redirected = component.is_symlink() or component.is_junction()
+        except OSError as exc:
+            raise SystemExit(f"! cannot authenticate artifact path component: {component}") from exc
+        if redirected:
+            raise SystemExit(f"! artifact path contains a symlink or junction: {component}")
+
+    resolved_root = artifact_root.resolve(strict=False)
+    try:
+        path.resolve(strict=False).relative_to(resolved_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise SystemExit(f"! artifact path escapes the project generation root: {path}") from exc
+    return path
+
+
+def _guard_artifact_tree(root: Path) -> Path:
+    _guard_artifact_path(root)
+    if not root.exists():
+        return root
+    if not root.is_dir():
+        raise SystemExit(f"! artifact root must be a directory: {root}")
+    try:
+        for directory, dirnames, filenames in root.walk(top_down=True, follow_symlinks=False):
+            for name in (*dirnames, *filenames):
+                child = directory / name
+                if child.is_symlink() or child.is_junction():
+                    raise SystemExit(f"! artifact tree contains a symlink or junction: {child}")
+    except OSError as exc:
+        raise SystemExit(f"! cannot authenticate artifact tree: {root}") from exc
+    return root
+
+
+def _artifact_root(raw: object) -> Path:
+    if not isinstance(raw, Path):
+        raise SystemExit("! --artifacts must be a filesystem path")
+    candidate = raw.expanduser()
+    if not candidate.is_absolute():
+        candidate = ROOT / candidate
+    expected = ROOT.joinpath(*_ARTIFACT_PARTS)
+    try:
+        matches_expected = candidate.resolve(strict=False) == expected.resolve(strict=False)
+    except OSError as exc:
+        raise SystemExit(f"! cannot authenticate --artifacts path: {candidate}") from exc
+    if not matches_expected:
+        raise SystemExit(f"! --artifacts must be the project generation root: {expected}")
+    return _guard_artifact_path(expected)
 
 
 def _run_root(args: argparse.Namespace) -> Path:
     kind = "canonical" if args.canonical else "trials"
-    return args.artifacts / "runs" / kind / _slug(args.run_id, label="--run-id")
+    return _guard_artifact_tree(
+        args.artifacts / "runs" / kind / _slug(args.run_id, label="--run-id")
+    )
 
 
 def load_results(run_root: Path) -> dict[str, Any]:
@@ -137,6 +202,9 @@ def load_results(run_root: Path) -> dict[str, Any]:
         typed = _mapping(report, "report")
         design = _mapping(typed["design"], "report design")
         digest = numeric_samples_sha256(_mapping(samples, "samples"))
+        inputs = _mapping(typed["inputs"], "report inputs")
+        if inputs["chat_profile_contract_sha256"] != CHAT_PROFILE_CONTRACT_SHA256:
+            raise ValueError("report was not produced by the current chat profile contract")
         if _mapping(typed["samples"], "report samples")["sha256"] != digest:
             raise ValueError("report does not reference this numeric samples artifact")
         confidence = float(design["confidence"])
@@ -167,7 +235,7 @@ def _mapping(value: object, label: str) -> Mapping[str, Any]:
 def _fmt(value: object) -> str:
     if value is None:
         return "—"
-    return f"{float(value):.4f}"
+    return f"{float(cast(Any, value)):.4f}"
 
 
 def _estimate(entry: Mapping[str, Any]) -> str:
@@ -346,6 +414,7 @@ def _render_target(target: _Target) -> tuple[str, str]:
 def synchronize(args: argparse.Namespace) -> tuple[Path, ...]:
     """Authenticate the report, then atomically publish both document regions."""
 
+    args.artifacts = _artifact_root(args.artifacts)
     run_root = _run_root(args)
     with exclusive_lock(args.artifacts / ARTIFACT_LOCK):
         report = load_results(run_root)

@@ -44,6 +44,8 @@ from zhrag.tokens import estimate_tokens
 
 __all__ = [
     "CACHE_ROW_SCHEMA",
+    "CHAT_PROFILE_CONTRACT_SHA256",
+    "CHAT_PROFILE_SCHEMA",
     "GENERATION_CASE_KEY_SCHEMA",
     "GENERATION_EXPERIMENT_SCHEMA",
     "GENERATION_REPORT_SCHEMA",
@@ -117,8 +119,12 @@ GENERATION_CASE_KEY_SCHEMA = "zhrag-crud-generation-case-key-v1"
 CACHE_ROW_SCHEMA = "zhrag-crud-generation-cache-row-v1"
 QUESTION_BANK_SCHEMA = "zhrag-crud-question-bank-v1"
 REFERENCE_BANK_SCHEMA = "zhrag-crud-reference-bank-v1"
-GENERATION_SAMPLES_SCHEMA = "zhrag-crud-generation-samples-v1"
-GENERATION_REPORT_SCHEMA = "zhrag-crud-generation-report-v1"
+GENERATION_SAMPLES_SCHEMA = "zhrag-crud-generation-samples-v2"
+GENERATION_REPORT_SCHEMA = "zhrag-crud-generation-report-v2"
+CHAT_PROFILE_SCHEMA = "zhrag-crud-chat-profile-v2"
+CHAT_PROFILE_CONTRACT_SHA256 = hashlib.sha256(
+    b"zhrag-crud-chat-profile-contract-v1\0" + CHAT_PROFILE_SCHEMA.encode("ascii")
+).hexdigest()
 
 type TaskName = Literal["event_summary", "questanswer_1doc"]
 M9B_TASKS: tuple[TaskName, ...] = ("event_summary", "questanswer_1doc")
@@ -177,6 +183,7 @@ _RAG_METRIC_NAMES = (
 )
 PUBLIC_INPUT_FINGERPRINT_KEYS = frozenset(
     {
+        "chat_profile_contract_sha256",
         "dataset_snapshot_sha256",
         "input_manifest_sha256",
         "generation_model_profile_sha256",
@@ -1718,11 +1725,13 @@ def validate_numeric_samples(raw: object) -> None:  # noqa: PLR0912, PLR0915
         raise ValueError("RAGQuest metric order drift")
     case_count = _require_int(root["case_count"], label="case_count", minimum=2)
     question_count = _require_int(root["question_count"], label="question_count", minimum=2)
-    _validate_fingerprint_map(
+    input_fingerprints = _validate_fingerprint_map(
         root["input_fingerprints"],
         label="input fingerprints",
         expected_keys=PUBLIC_INPUT_FINGERPRINT_KEYS,
     )
+    if input_fingerprints["chat_profile_contract_sha256"] != CHAT_PROFILE_CONTRACT_SHA256:
+        raise ValueError("chat profile contract fingerprint drift")
     _parse_tokenizer_provenance(root["tokenizer"])
     _parse_semantic_provenance(root["semantic_provenance"])
 
@@ -2003,6 +2012,8 @@ def build_generation_report(
         label="report input fingerprints",
         expected_keys=PUBLIC_INPUT_FINGERPRINT_KEYS,
     )
+    if inputs["chat_profile_contract_sha256"] != CHAT_PROFILE_CONTRACT_SHA256:
+        raise ValueError("chat profile contract fingerprint drift")
     report: dict[str, object] = {
         "schema": GENERATION_REPORT_SCHEMA,
         "contract": M9B_CONTRACT_VERSION,
@@ -2109,11 +2120,13 @@ def validate_generation_report(raw: object) -> None:
         raise ValueError("report confidence must be in (0, 1)")
     _require_int(design["resamples"], label="report resamples", minimum=1)
     _require_int(design["seed"], label="report seed", minimum=0)
-    _validate_fingerprint_map(
+    inputs = _validate_fingerprint_map(
         root["inputs"],
         label="report inputs",
         expected_keys=PUBLIC_INPUT_FINGERPRINT_KEYS,
     )
+    if inputs["chat_profile_contract_sha256"] != CHAT_PROFILE_CONTRACT_SHA256:
+        raise ValueError("chat profile contract fingerprint drift")
     sample_ref = _exact_mapping(
         root["samples"],
         keys={"schema", "sha256"},

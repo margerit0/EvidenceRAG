@@ -8,6 +8,7 @@ import pytest
 
 from zhrag.eval.crud_generation import (
     CACHE_ROW_SCHEMA,
+    CHAT_PROFILE_CONTRACT_SHA256,
     GENERATION_REPORT_SCHEMA,
     GENERATION_SAMPLES_SCHEMA,
     MAX_INPUT_ESTIMATED_TOKENS,
@@ -91,10 +92,12 @@ DATASET_SHA = "e" * 64
 
 
 def _input_fingerprints() -> dict[str, str]:
-    return {
+    fingerprints = {
         key: format(index, "064x")
         for index, key in enumerate(sorted(PUBLIC_INPUT_FINGERPRINT_KEYS), start=1)
     }
+    fingerprints["chat_profile_contract_sha256"] = CHAT_PROFILE_CONTRACT_SHA256
+    return fingerprints
 
 
 def _cases():  # type annotation omitted to keep fixture call sites compact
@@ -645,6 +648,30 @@ class TestBanksAndScoring:
             "无法推断",
         ):
             assert secret not in encoded
+
+    def test_chat_profile_contract_fingerprint_is_authenticated(self) -> None:
+        cases = _cases()
+        samples = build_numeric_samples(
+            cases,
+            generation_rows=_generation_rows(cases),
+            semantic_rows=_semantic_rows(cases),
+            questions=_questions(cases),
+            reference_qa_rows=_qa_rows(cases, lane="reference"),
+            prediction_qa_rows=_qa_rows(cases, lane="prediction"),
+            tokenizer=SpaceTokenizer(),
+            semantic_provenance=SemanticProvenance(),
+            input_fingerprints=_input_fingerprints(),
+        )
+        tampered_samples = copy.deepcopy(samples)
+        tampered_samples["input_fingerprints"]["chat_profile_contract_sha256"] = "f" * 64
+        with pytest.raises(ValueError, match="chat profile contract fingerprint drift"):
+            validate_numeric_samples(tampered_samples)
+
+        report = build_generation_report(samples, resamples=5)
+        tampered_report = copy.deepcopy(report)
+        tampered_report["inputs"]["chat_profile_contract_sha256"] = "f" * 64
+        with pytest.raises(ValueError, match="chat profile contract fingerprint drift"):
+            validate_generation_report(tampered_report)
 
     def test_public_validators_reject_raw_field_injection(self) -> None:
         cases = _cases()

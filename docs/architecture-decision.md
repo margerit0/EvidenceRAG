@@ -296,6 +296,7 @@ M9b1 冻结合同 `m9b1-known-context-v1`，当前 profile 是 known-context：�
 - generation、QG、reference QA、prediction QA 和 semantic stage 按依赖图断点续跑；每 case 最多 8 个问题，prompt estimator 超过 30,000 个估算 token 即拒绝截断。
 - status/dry-run 是只读检查，不读取 `.env`，不导入 provider 或可选模型，不创建 cache、artifact directory 或 lock；付费 chat 与模型加载必须分别显式开启 guard。
 - cache sidecar 重新认证 input manifest、prompt、model/endpoint、served model、父级 fingerprint 和完整性；final report 只能由完整、认证过的 cache 离线重建。
+- 完成后的 provenance hardening 统一拒绝 Windows 路径别名与保留设备名，固定 artifact root 为项目内 `indexes/crud/generation/v1/`，拒绝运行/参考路径上的 symlink/junction，并要求 provider 显式返回且全程匹配 requested model；chat profile 域与公开 provenance envelope 已轮换到 v2，旧 v1 sidecar/samples/report 不会被新 runner 续跑、原地改写或发布。
 
 **artifact 与隐私边界**：
 - 文本型 cache、question/reference bank 和中间答案只允许存在于 `indexes/crud/generation/v1/` 的 gitignored 本地树；不提交 corpus、source、question、answer、prediction、embedding、provider payload 或 BERTScore 权重。
@@ -305,9 +306,9 @@ M9b1 冻结合同 `m9b1-known-context-v1`，当前 profile 是 known-context：�
 **RAGQuestEval 口径**：问题只从 exact ground-truth reference 生成；reference QA 与 prediction QA 分别使用 reference 和 evaluated prediction 作为 context，source article 不进入 QG 或任一 QA context。空的 conditional denominator 保持为 null/0，而不是伪造为零分。
 
 **真实实验状态**：
-尚未执行 `--generate`、`--generate-questions`、`--answer-reference`、
-`--answer-prediction` 或 `--score-semantic`；本 marker 不发布任何真实生成、QG、QA、
-BERTScore 或 RAGQuestEval 数字。真实实验仍需显式授权，并继续受许可与 ignored-artifact 边界约束。
+尚无通过 `numeric_samples.json` 重算认证并同步到文档的 M9b2 真实结果；
+本 marker 不发布任何真实生成、QG、QA、BERTScore 或 RAGQuestEval 数字。
+真实实验继续受显式授权、append-only cache、固定 case 上限与 ignored-artifact 边界约束。
 
 **入口**：
 ```bash
@@ -604,7 +605,7 @@ zhrag/
 <!-- BEGIN M8-CHECKLIST -->
 - [x] **M8：FastAPI 服务与 HTTP 性能基准。** 服务层只编排现有 `OnlineRetriever`，有严格输入、脱敏错误、metadata allowlist、fail-fast 并发 admission 与单文件静态 UI；benchmark 排除 warm-up，报告 p50/p95/p99、成功 QPS、错误率/status 与八阶段耗时。当前认证 HTTP p95 **228.3 ms** / **4.97 QPS**。同步器从无文本 numeric samples 重算 aggregate；不调用 chat completion。
 <!-- END M8-CHECKLIST -->
-- [ ] **M9b1 完成后的可选 hardening（后续修复候选，不回退 M9b1 完成状态）。** 三项均由 M9b1 交付后的审计发现，不影响已冻结的离线合同、合成测试与当前门禁，但会在真实实验、多 profile 并行或跨机器复现时削弱 provenance 强度：① **Windows slug 别名**——`scripts/run_crud_generation.py` 的 `_SLUG` 允许大写与结尾句点，`trial-a.` / `TRIAL-A` 在普通 Windows 卷上与 `trial-a` 落到同一目录，两个「不同」的 run/reference profile 会静默共用同一份 cache 与 marker；`CON` / `COM1` 一类保留设备名也未被拦截（`ntpath.isreserved()` 可在 Linux CI 上一并校验 Windows 规则）。② **`--artifacts` 边界**——CLI 接受任意路径，`_run_root()` / `_reference_root()` 只做词法拼接，既不校验解析后仍位于 ignored 的 `indexes/crud/generation/v1/`，也不拒绝路径上已存在的 symlink/junction；文本型 cache 因此可能落到文档声明之外的位置，而 `.gitignore` 只是纵深防御、不是包含性保证（`reference_qa_cache*` / `prediction_qa_cache*` 也不匹配现有的 `qa_cache*` 通配）。③ **served-model provenance**——`src/zhrag/providers/chat.py` 在响应 `model` 缺失/为空时回落到 requested model，M9b 随后把它当作 served model 认证，于是「provider 未声明身份」看起来像「provider 确认了 requested model」；此外 reference/prediction QA 的 resume 与 completion 路径没有调用 `_validate_served_models()`，同类漂移要到 `--finalize` 才暴露，中间可能已多花付费调用。
+- [x] **M9b1 完成后的 provenance hardening（不回退、不重算 M9b1 完成状态）。** 已修复交付后审计发现的三项跨机器/多 profile 风险：① run/reference profile 统一为小写 1–64 字符 canonical slug，并用 `ntpath.isreserved()` 跨平台拒绝结尾句点、`CON` / `COM1` 等 Windows 别名；② `run_crud_generation.py` 与结果文档同步器把 `--artifacts` 固定到项目内 gitignored 的 `indexes/crud/generation/v1/`，并在 status、显式 run/reference 选择、读写或 provider import 前拒绝 artifact 树中现有的 symlink/junction；③ chat provider 不再把缺失/空白 `response.model` 回落为 requested model，generation/QG/reference QA/prediction QA 的 status、resume 与 completion 路径均认证每条 `served_model`。核心生成/cache row contract、prompt、stage DAG 与统计口径未改；chat profile fingerprint 域以及 text-free samples/report provenance envelope 有意升至 v2，公开 artifact 携带固定 `chat_profile_contract_sha256`。旧 v1 sidecar/samples/report 保留在磁盘但不能由新 runner 原地续跑、迁移或发布，实验必须换新 slug 重启。M9b2 仍须在完整 text-free numeric samples/report 重算认证后才能发布数字。
 - [ ] **RAGAS / DeepEval 内置指标提示词在中文上的校准度。** 研究只验证了管道（`base_url` 支持、`adapt_instruction` 语义、DeepSeek/Kimi 类），**零中文评测**。人工标 ~50 行，先测判官与你的一致率。
 
 **部署与生态待验证事项**
