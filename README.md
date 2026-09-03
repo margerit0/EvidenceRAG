@@ -600,6 +600,29 @@ vocabulary + IDF 写成 `sparse_index.json`，查询端加载后先比对 `state
 > ⚠️ 这是**一条查询的观察**，不是延迟基准也不是质量证据——p50/p95/QPS 属于 M8；
 > 系统级检索质量见下方 490-pair 离线评估，不能用这一条冒烟查询替代。
 
+### 为什么 TiDB 的文档没有跑在 TiDB 上
+
+这不是因为 TiDB 不能存向量。仓库已有惰性加载的 `TiDBStore`：通过 MySQL protocol 写入原生
+`VECTOR` 列，用 `VEC_COSINE_DISTANCE` + HNSW 做 dense 检索；同一 `VectorStore` Protocol 下的
+upsert/delete/fetch/count 与 shadow-table 发布合同都有合成测试。char-bigram BM25 则进入 companion
+postings table，查询时做精确稀疏内积；exact RRF 继续由已有客户端实现完成，不引入第二套融合语义。
+
+但它现在仍是**离线认证的 adapter contract，不是已验证的第二生产后端**：
+
+- [TiDB Vector Search](https://docs.pingcap.com/ai/vector-search-overview/) 当前仍标 public preview；
+  [HNSW vector index](https://docs.pingcap.com/tidb/stable/vector-search-index/) 依赖 TiFlash replica，且 ANN
+  查询的 `ORDER BY` 只能包含匹配的 distance expression。仓库尚无真实 TiDB endpoint，因此还没有
+  `EXPLAIN` 中的 `annIndex`、建索引进度、写后读、alias 切换和重连证据。
+- [TiDB Full-Text Search](https://docs.pingcap.com/ai/vector-search-full-text-search-sql.md) 仍是 early-stage、
+  region-gated 的 Cloud Starter 功能，使用自己的 `MULTILINGUAL` parser 与 BM25。直接换用它会把本项目
+  已冻结并实测的 client-side char-bigram analyzer、全局 IDF 和稀疏 arm 一起换掉，结果不再是后端消融。
+- 当前 Milvus Lite 路径已经完成真实 schema、dense/sparse 两臂、alias 与重开验证；在 TiDB live smoke
+  达到同一证据级别前，把现有语料迁过去只会降低可复现性，不会增加可信度。
+
+因此 Milvus 仍是 canonical 在线后端；TiDB adapter 保留为受相同 Protocol 约束的第二实现。只有真实
+TiDB Cloud 实例通过建表/HNSW、两臂排序、完整行 round-trip、shadow publish 与 reconnect 检查后，
+项目才会声称“同一份 Protocol 双后端跑通”。
+
 <!-- BEGIN M8-SERVICE-BENCHMARK -->
 ### HTTP 服务与 M8 性能基准
 
@@ -754,6 +777,7 @@ src/zhrag/
   store/
     base.py              与厂商无关的 ChunkRecord / ArmHit / Passage 与 VectorStore Protocol
     milvus.py            惰性导入的 pymilvus 适配器：固定 schema、完整行 upsert、alias 切换
+    tidb.py              惰性 PyMySQL 的 TiDB Vector + 精确 sparse postings + alias registry 适配器
   lexical/
     sparse.py            客户端 char-bigram BM25 稀疏向量（与本地 BM25 内积等价）
   ingest.py              manifest 校验、稳定身份、scope 隔离与文档级 delta
@@ -769,6 +793,7 @@ scripts/
   evaluate_rerank.py     top-100 断点续评分 + top-50/100 离线重排与分层配对检验
   smoke_milvus_lite.py   Milvus Lite 在 Windows + Python 3.13 的冒烟测试
   verify_milvus_store.py 正式 store 的 Milvus Lite 集成校验（schema / 两臂 / alias / 重开）
+  verify_tidb_store.py   opt-in TiDB Cloud synthetic smoke（HNSW / 两臂 / round-trip / alias / 重连）
   build_index.py         manifest → chunk → 稀疏重建 → shadow collection → alias 切换（默认干跑）
   query_index.py         在线组合根：嵌入 + 词表 + Milvus alias + 重排，打印排序与各阶段耗时
   build_tidb_queries.py  分层抽样 → 生成 direct/paraphrase → 单独验证 pass → 发布 query pair
@@ -783,10 +808,10 @@ scripts/
   evaluate_h_hybrid_mrl1024.py 只读完整 4096 cache，离线重建 A/E/H/G 并生成聚合报告
   sync_h_hybrid_mrl1024_docs.py 重算认证 H 报告并同步 tracked 文档（支持 --check）
 <!-- BEGIN QUALITY-GATE-STATUS -->
-tests/                   1,095 个单元测试
+tests/                   1,199 个单元测试
 ```
 
-质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 1,095 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
+质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` 1,199 passed。`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，不由本报告认证。
 <!-- END QUALITY-GATE-STATUS -->
 
 README 中每一个数字都由上述脚本生成，没有手工誊写。这不是洁癖：早期原型用固定 1.15 字符/token 估算，得出的 chunk 数与最终实现相差 2.4 倍；而最初那次 BM25 饱和实验是一次性脚本跑的、从未提交，导致 README 里的核心结论一度**无法被任何人复现**。

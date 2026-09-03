@@ -1,4 +1,4 @@
-"""Vendor-neutral storage contracts and optional Milvus implementation."""
+"""Vendor-neutral storage contracts and optional database implementations."""
 
 from zhrag.store.base import (
     ArmHit,
@@ -9,6 +9,7 @@ from zhrag.store.base import (
     VectorStore,
 )
 from zhrag.store.milvus import MilvusConfig, MilvusStore, MilvusUnavailableError
+from zhrag.store.tidb import TiDBConfig, TiDBStore, TiDBUnavailableError
 
 __all__ = [
     "ArmHit",
@@ -19,5 +20,8 @@ __all__ = [
     "MilvusStore",
     "MilvusUnavailableError",
     "Passage",
+    "TiDBConfig",
+    "TiDBStore",
+    "TiDBUnavailableError",
     "VectorStore",
 ]

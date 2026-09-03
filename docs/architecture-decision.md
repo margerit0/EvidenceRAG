@@ -55,8 +55,8 @@ pgvector README 的 FAQ 只给三条出路：half-precision（≤4000，还是�
 | 维度 | Milvus | Qdrant | TiDB Vector |
 |---|---|---|---|
 | **4096 维原生支持** | ✅ 上限 32,768 | ✅ 上限 65,535 | ✅ 上限 16,383 |
-| **混合检索** | ✅ 服务端 `hybrid_search([AnnSearchRequest...], ranker=RRFRanker())`，Lite 本地也支持 | ✅ `prefetch` + `rrf`/`dbsf`（v1.10+），RRF 的 k 可调（v1.16+），加权 RRF（v1.17+）——融合 API 比 Milvus 更干净 | ❌ **融合在 pytidb 客户端做，不是一条 SQL**。官方文档自己说「用 pytidb 完全可选，你也可以直接写 SQL 然后自带 rerank 模型」 |
-| **中文全文检索** | ✅ 内置 `chinese` analyzer = jieba + cnalphanumonly；另有独立 `jieba`/ICU/Lindera tokenizer。**但你不该用**（见下） | ❌ 无 jieba，只有 `multilingual` tokenizer + BM25-as-sparse-vector + `idf` modifier | ⚠️ `WITH PARSER MULTILINGUAL` 支持中日韩，**但只在 TiDB Cloud Starter/Essential 的两个 region（Frankfurt、Singapore）可用，无中国大陆 region**，文档自称「still in the early stages」 |
+| **混合检索** | ✅ 服务端 `hybrid_search([AnnSearchRequest...], ranker=RRFRanker())`，Lite 本地也支持 | ✅ `prefetch` + `rrf`/`dbsf`（v1.10+），RRF 的 k 可调（v1.16+），加权 RRF（v1.17+）——融合 API 比 Milvus 更干净 | SQL 暴露 vector/full-text 两臂；本仓库为保持 frozen exact RRF 语义在客户端融合。`pytidb` 不是 runtime 依赖 |
+| **中文全文检索** | ✅ 内置 `chinese` analyzer = jieba + cnalphanumonly；另有独立 `jieba`/ICU/Lindera tokenizer。**但你不该用**（见下） | ❌ 无 jieba，只有 `multilingual` tokenizer + BM25-as-sparse-vector + `idf` modifier | ⚠️ `WITH PARSER MULTILINGUAL` 支持中日韩；当前仍称 early stages，限 TiDB Cloud Starter 的 Oregon / N. Virginia / Tokyo / Frankfurt / Singapore。它不等于本项目实测的 char-bigram arm |
 | **元数据过滤** | ✅ 完整 Milvus 表达式：`text_match()`、JSON path、`array_contains`、`$meta[...]` | ✅ payload filter，每个 prefetch 可独立带 filter | ✅ 就是 SQL WHERE（这点最强） |
 | **Windows / WSL2** | ✅ Lite 3.2.0 是纯 Python `py3-none-any` wheel，官方 Requirements 明写 Windows；faiss-cpu 1.15.0 有 cp313 win_amd64 wheel。⚠️ **Windows+3.13 组合不在上游 CI 矩阵内** | ✅✅ 官方发布 `qdrant-x86_64-pc-windows-msvc.zip`，解压即跑，**安装路径最干净** | ☁️ 纯云，本地无关 |
 | **免费额度长期存活** | ✅ Zilliz Cloud Free：5 GB / 2.5M vCU/月 / 5 collections。官方页面**没有写 Free 集群闲置 N 天自动删除/挂起**；但 Terms 保留服务终止权，且终止后不承诺保留数据。不能承诺永久存活，必须保留可重建 artifact | ⚠️ 原生 Windows 运行路径干净；免费云集群的闲置/删除策略必须按当前官方条款自行核对，不能把未经一手来源确认的“1 周挂起、4 周删除”写成定论 | ⚠️ Starter：5 GiB 行存 + 5 GiB 列存 + 50M RU/月，免信用卡。配额耗尽会影响新请求，长期闲置/归档条款仍需单独核对 |
@@ -76,16 +76,16 @@ Milvus 内置 `chinese` analyzer 等价于 `{"tokenizer": "jieba", "filter": ["c
 
 **做，但只做成 adapter 接口后面的第二后端，绝不做主存储。**
 
-理由是 2026 年的事实不支持它承重：
-- 向量检索在 2026-08 的官方文档里**仍标注 beta**（"might be changed without prior notice"）；
-- 向量索引**强制要求 TiFlash 副本**；
-- 全文检索只在两个 region 可用，**无中国大陆节点**——这直接拆掉「企业级中文部署」的叙事支点；
-- RRF/加权融合在 **pytidb 客户端**完成，不是服务端 SQL；
-- **pytidb 版本号是 0.0.14，且无 Python 3.13 classifier**。
+理由是当前一手文档与本项目验证状态都不支持它承重：
+- 向量检索当前仍是 **public preview**（"might be changed without prior notice"）；
+- HNSW 向量索引依赖 **TiFlash replica**，ANN 查询形状也有限制；
+- 全文检索仍在 early stages，限 TiDB Cloud Starter 的五个 AWS region，且其 `MULTILINGUAL` parser / BM25 不是本项目实测的 char-bigram arm；
+- 本项目的 frozen exact RRF 已在客户端实现；换用另一套融合会让“后端对照”同时改变算法；
+- 仓库没有真实 TiDB endpoint，尚无 `EXPLAIN annIndex`、建索引、两臂排序、round-trip、publish/reconnect 证据。
 
-把头条指标压在一个 0.0.x SDK 后面的 beta 功能上，会增加尚未验证的部署故障风险。
+把头条指标压在未经本项目 live smoke 的 preview 能力上，会使复现路径缺少完整的验证闭环。
 
-**正确的吃法**：定义 `VectorStore` Protocol，`MilvusStore` 为主，`TiDBStore` 为第二实现，然后在 README 写一节 **「为什么 TiDB 的文档没有跑在 TiDB 上」**，列出 beta 状态、TiFlash 依赖、两 region 全文检索限制、客户端融合、SDK 版本号。
+**当前实现**：`VectorStore` Protocol 下保留 `MilvusStore` 主路径，并新增惰性 PyMySQL 的 `TiDBStore`：dense 使用原生 VECTOR/HNSW，char-bigram BM25 使用 companion sparse postings，exact RRF 仍在客户端。README 已写明「为什么 TiDB 的文档没有跑在 TiDB 上」；只有真实 TiDB Cloud 实例通过上述 smoke 后，才声称“双后端跑通”。
 
 **这一节比那个噱头本身更有价值**——它证明你拿一手文档验证了厂商宣传并做了判断。可插拔后端接口本身就是整个项目最强的工程信号。
 
@@ -363,7 +363,7 @@ uv run python scripts/run_crud_generation.py --dry-run
 <!-- BEGIN M9B-GENERATION-ROADMAP -->
 | **M9** | **生成侧评估（M9a ✅ / M9b1 编排合同 ✅；真实实验待授权）** | **2.0** | **M9a**：`eval/metrics_gen.py`、`eval/quest_eval.py`、合成测试、aggregate-only Table 8 evidence、独立文档同步；**M9b1**：纯内存合同、离线优先 CLI、QG/QA/生成 stage DAG（event_summary / questanswer_1doc）与 text-free finalizer | M9b1 已冻结 cache/provenance/privacy 合同；真实 provider 实验与结果数字不在本阶段发布 |
 <!-- END M9B-GENERATION-ROADMAP -->
-| **M10** | TiDB 第二后端 + 那一节 README | **1.0** | `store/tidb.py` + 「为什么 TiDB 的文档没有跑在 TiDB 上」 | 同一份 Protocol 双后端跑通 |
+| **M10** | **TiDB 第二后端：离线合同已实现 / live smoke 待外部实例** | **1.0** | ✅ `store/tidb.py`：原生 VECTOR/HNSW dense、精确 sparse postings、alias registry 与合成合同测试；✅ README「为什么 TiDB 的文档没有跑在 TiDB 上」；⏳ TiDB Cloud schema/index、`EXPLAIN annIndex`、两臂排序、round-trip、publish/reconnect 真机验证 | 只有 live smoke 通过后才声称同一份 Protocol 双后端跑通 |
 | **M11** | **检索可观测性 + Bad Case 归因 ✅ 2026-09-02** | **1.0** | ✅ 脱敏 trace start/end 合同与 FastAPI 生命周期接入；✅ 离线认证 frozen TiDB runs/qrels 并发布 aggregate-only `bad_case_report.json`；不依赖 provider/Phoenix/OTEL。运维 trace 只保留脱敏计数、耗时与 fingerprint，不含 query 或文档内容 | 按系统汇总 recall failure / ranking failure / success；HTTP 无生成阶段，generation 固定 `not_evaluated` |
 | **M12** | 公网部署 + README 定稿 | **1.0** | Zilliz Cloud Free 集群 + 公网 demo 链接；README 首屏定稿 | 端到端在线可点 |
 
@@ -408,7 +408,8 @@ zhrag/
 │   │   └── adapters.py             # ✅ provider 与在线 Protocol 的接缝
 │   ├── store/
 │   │   ├── base.py                 # ✅ VectorStore / ChunkRecord Protocol
-│   │   └── milvus.py               # ✅ Lite / Standalone / Zilliz 适配器
+│   │   ├── milvus.py               # ✅ Lite / Standalone / Zilliz 适配器
+│   │   └── tidb.py                 # ✅ 离线 TiDB Vector/HNSW + sparse postings 适配器
 │   ├── providers/
 │   │   ├── http.py                 # ✅ One Hub JSON transport：UA / 长退避 / Retry-After
 │   │   ├── embedding.py            # ✅ embedding prompt / 批缓存 / provenance sidecar
@@ -447,6 +448,7 @@ zhrag/
 │   ├── run_crud_generation.py      # ✅ M9b1 known-context 生成/QG/QA/semantic 编排
 │   ├── sync_m9b_docs.py            # ✅ M9b1 合同状态与路线图同步
 │   ├── evaluate_tidb_bad_cases.py  # ✅ M11 离线 aggregate-only 归因
+│   ├── verify_tidb_store.py         # ⏳ opt-in TiDB Cloud synthetic smoke
 │   └── sync_quality_gate_docs.py   # ✅ 独立 JUnit 质量门禁同步
 ├── tests/                          # ✅ provider-free、离线评测与集成回归测试
 ```
@@ -492,7 +494,7 @@ zhrag/
 | **不上 GraphRAG / Self-RAG / CRAG** | 每一个都能单独吃掉 5 周，而且和「检索评估」这条主线正交。README 提一句「已知但本项目未覆盖，见 Roadmap」即可 |
 | **不做微调（embedding / reranker / LLM）** | 需要标注数据与 GPU 时长，且会让「我的评估集有效吗」这条主线被稀释 |
 | **不用 pgvector** | 索引维度 4096 > halfvec 上限 4000，物理上做不到原生索引。写成 `docs/why-not-pgvector.md` 反而是加分项 |
-| **不把 TiDB 做主存储** | 向量检索仍标 beta、强依赖 TiFlash、全文检索只在 Frankfurt/Singapore 两地、融合在客户端、pytidb 版本号 0.0.14 |
+| **不把 TiDB 做主存储** | Vector Search 仍是 public preview，HNSW 依赖 TiFlash；Full-Text Search 仍 early-stage/region-gated 且 tokenizer 语义不同；TiDB adapter 只有离线合同，live smoke 尚未完成 |
 | **不用 Qdrant Cloud 免费层挂公网链接** | 在本次验证范围内**没有找到一手官方页面支持“闲置 1 周挂起、4 周删除”这一精确说法**，因此不把它写成事实。若使用 Qdrant Cloud，部署前必须按当前计划条款核对；否则使用可重建的 Milvus/Zilliz 或自托管方案 |
 | **不用 RAGAS 做主力评估框架** | 2026-02-24 起无提交、559 open issues，而 deepeval/langfuse/opik/phoenix 当天都在发版；且 `adapt()` 默认 `adapt_instruction=False`，中文提示词是半英半中 |
 | **不开数据库内置中文分词器** | Milvus `chinese` analyzer = jieba `cut_for_search` = 你实测最差的 73.4%，比 char bigram 低 2.5 分 |
