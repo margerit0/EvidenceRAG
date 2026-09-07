@@ -8,13 +8,16 @@ Milvus Lite's single local database into an unbounded work queue.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import math
 import threading
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -22,6 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+from zhrag.answering import PUBLIC_MESSAGES, Answerer, AnswerOutcome, AnswerStatus
 from zhrag.retrieval.online import OnlineRetrievalResult, OnlineRetriever, StageTimings
 from zhrag.service.observability import TraceRecorder, TraceSink, profile_fingerprint
 from zhrag.store.base import MetadataValue
@@ -121,6 +125,53 @@ class SearchResponse(BaseModel):
     rerank_enabled: bool
     passages: list[PassageResponse]
     timings: TimingResponse
+
+
+class CapabilitiesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    generation_enabled: bool
+    output_limit: int
+    generation_profile: str | None
+
+
+class AnswerBlockResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    citations: list[int]
+
+
+class AnswerSourceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    citation_id: int
+    rank: int
+    title: str
+    text: str
+    source_url: str | None
+
+
+class ContextResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_count: int
+    skipped_budget_count: int
+    prompt_estimated_tokens: int
+
+
+class AskResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: AnswerStatus
+    message: str
+    blocks: list[AnswerBlockResponse]
+    sources: list[AnswerSourceResponse]
+    retrieval: SearchResponse
+    generation_profile: str
+    context: ContextResponse
+    generation_seconds: float
+    total_seconds: float
 
 
 class _RetrieverLike(Protocol):
@@ -245,6 +296,60 @@ def _trace_retrieval_settings(settings: object) -> dict[str, object]:
     return {name: getattr(settings, name) for name in names}
 
 
+def _safe_source_url(value: MetadataValue) -> str | None:
+    if not isinstance(value, str) or len(value) > 4_000:
+        return None
+    if any(ord(char) < 33 for char in value) or "\\" in value:
+        return None
+    try:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme in {"http", "https"}
+            and parsed.hostname
+            and parsed.username is None
+            and parsed.password is None
+        ):
+            return value
+    except ValueError:
+        pass
+    return None
+
+
+def _ask_response(
+    outcome: AnswerOutcome,
+    retrieval: SearchResponse,
+    *,
+    total_seconds: float,
+) -> AskResponse:
+    sources = [
+        AnswerSourceResponse(
+            citation_id=row.citation_id,
+            rank=row.ranked.rank,
+            title=row.title,
+            text=row.ranked.passage.text,
+            source_url=_safe_source_url(row.ranked.passage.metadata.get("source_url")),
+        )
+        for row in outcome.context.evidence
+    ]
+    return AskResponse(
+        status=outcome.status,
+        message=PUBLIC_MESSAGES[outcome.status],
+        blocks=[
+            AnswerBlockResponse(text=b.text, citations=list(b.citations)) for b in outcome.blocks
+        ],
+        sources=sources,
+        retrieval=retrieval,
+        generation_profile=outcome.profile_fingerprint,
+        context=ContextResponse(
+            evidence_count=len(sources),
+            skipped_budget_count=outcome.context.skipped_budget_count,
+            prompt_estimated_tokens=outcome.context.prompt_estimated_tokens,
+        ),
+        generation_seconds=outcome.generation_seconds,
+        total_seconds=total_seconds,
+    )
+
+
 def create_app(  # noqa: PLR0915
     retriever: OnlineRetriever,
     *,
@@ -252,6 +357,7 @@ def create_app(  # noqa: PLR0915
     static_dir: Path | None = None,
     max_concurrency: int = 1,
     search_runner: SearchRunner | None = None,
+    answerer: Answerer | None = None,
     trace_sink: TraceSink | None = None,
     published_index_identity: str | None = None,
 ) -> FastAPI:
@@ -304,6 +410,17 @@ def create_app(  # noqa: PLR0915
     app.state.service_info = service_info
     app.state.max_concurrency = max_concurrency
     app.state.admission = _AdmissionGate(max_concurrency)
+    # Keep shielded work alive when its HTTP caller disconnects.
+    pending_asks: set[asyncio.Task[AskResponse | JSONResponse]] = set()
+
+    @app.get("/api/capabilities", response_model=CapabilitiesResponse)
+    async def capabilities(response: Response) -> CapabilitiesResponse:
+        response.headers.update(_no_store_headers())
+        return CapabilitiesResponse(
+            generation_enabled=answerer is not None,
+            output_limit=output_limit,
+            generation_profile=answerer.profile_fingerprint if answerer else None,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(
@@ -386,5 +503,77 @@ def create_app(  # noqa: PLR0915
                 )
         finally:
             admission.release()
+
+    async def run_ask(
+        payload: SearchRequest,
+        top_k: int,
+        active_answerer: Answerer,
+    ) -> AskResponse | JSONResponse:
+        started = time.perf_counter()
+        span = recorder.start_span()
+        try:
+            try:
+                if runner is None:
+                    result = await run_in_threadpool(retriever.retrieve, payload.query)
+                else:
+                    value = runner(payload.query)
+                    result = await value if inspect.isawaitable(value) else value
+                retrieval = _search_response(result, info=service_info, top_k=top_k)
+            except (Exception, SystemExit):
+                span.end(status_code=503, outcome="retrieval_failed")
+                return _error(503, "retrieval_failed", "Retrieval failed; try again later.")
+            # M11 remains a retrieval-only span, not an end-to-end generation trace.
+            span.end(
+                status_code=200,
+                outcome="success",
+                candidate_count=len(result.fused_candidates),
+                output_count=len(retrieval.passages),
+                stage_timings=_timing_values(result.timings),
+            )
+            try:
+                outcome = await run_in_threadpool(
+                    active_answerer.answer,
+                    payload.query,
+                    result.passages[:top_k],
+                )
+                output = _ask_response(
+                    outcome,
+                    retrieval,
+                    total_seconds=time.perf_counter() - started,
+                )
+            except (Exception, SystemExit):
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "code": "generation_failed",
+                        "message": PUBLIC_MESSAGES["generation_failed"],
+                        "retrieval": retrieval.model_dump(),
+                    },
+                    headers=_no_store_headers(),
+                )
+            if outcome.status in {"generation_failed", "generation_timeout", "invalid_answer"}:
+                return JSONResponse(
+                    status_code=503,
+                    content=output.model_dump(),
+                    headers=_no_store_headers(),
+                )
+            return output
+        finally:
+            app.state.admission.release()
+
+    @app.post("/api/ask", response_model=AskResponse)
+    async def ask(payload: SearchRequest, response: Response) -> AskResponse | JSONResponse:
+        response.headers.update(_no_store_headers())
+        if answerer is None:
+            return _error(503, "generation_unavailable", "Answer generation is not enabled.")
+        top_k = payload.top_k or output_limit
+        if top_k > output_limit:
+            return _error(422, "invalid_top_k", f"top_k must be between 1 and {output_limit}.")
+        if not app.state.admission.try_acquire():
+            return _error(429, "service_busy", "The service is at its concurrency limit.")
+        work = asyncio.create_task(run_ask(payload, top_k, answerer))
+        pending_asks.add(work)
+        work.add_done_callback(pending_asks.discard)
+        return await asyncio.shield(work)
 
     return app

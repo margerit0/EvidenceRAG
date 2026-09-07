@@ -13,7 +13,7 @@ from typing import Any, cast
 import pytest
 
 from zhrag.ingest import IngestState, write_state
-from zhrag.io_utils import write_json, write_jsonl
+from zhrag.io_utils import write_json, write_jsonl, write_text
 from zhrag.lexical import build_sparse_index, write_sparse_index
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -247,6 +247,75 @@ class TestStoreValidation:
         store = FakeStore()
         serve._verify_store(cast(Any, store), alias="tidb_chunks", state=state())
         assert store.ensure_calls == 1
+
+
+class TestAnswerComposition:
+    def test_default_does_not_read_chat_configuration(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        args = serve._parse_args([])
+        assert args.enable_generation is False
+        assert args.generation_retries == 15
+        assert serve._build_answerer(args) is None
+
+    @pytest.mark.parametrize(
+        "options,expected_retries",
+        [([], 15), (["--generation-retries", "0"], 0), (["--generation-retries", "3"], 3)],
+    )
+    def test_explicit_generation_uses_configured_chat_without_network(
+        self,
+        tmp_path: Path,
+        options: list[str],
+        expected_retries: int,
+    ) -> None:
+        env = tmp_path / ".env"
+        write_text(
+            env,
+            "LLM_API_KEY=synthetic\nLLM_BASE_URL=https://example.invalid\nLLM_MODEL_NAME=model\n",
+        )
+        args = serve._parse_args(["--enable-generation", "--env", str(env), *options])
+        answerer = serve._build_answerer(args)
+        assert answerer is not None
+        assert answerer.generator.config.model == "model"
+        assert answerer.generator.max_output_tokens == 2048
+        assert answerer.generator.reasoning_effort is None
+        assert answerer.generator.max_retries == expected_retries
+
+    def test_generation_and_query_cache_fail_before_loading_artifacts(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        def fail(_path: Path) -> None:
+            raise AssertionError("must not read artifacts")
+
+        monkeypatch.setattr(serve, "_load_published_artifacts", fail)
+        assert (
+            serve.main(["--enable-generation", "--query-cache", "cache.jsonl", "--no-rerank"]) == 1
+        )
+
+    @pytest.mark.parametrize(
+        "option,value",
+        [
+            ("--generation-timeout", "nan"),
+            ("--generation-timeout", "0"),
+            ("--generation-retries", "-1"),
+            ("--generation-retries", "16"),
+            ("--generation-max-tokens", "8193"),
+            ("--context-tokens", "0"),
+            ("--context-passages", "21"),
+        ],
+    )
+    def test_invalid_generation_options_fail_before_artifacts(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        option: str,
+        value: str,
+    ) -> None:
+        def fail(_path: Path) -> None:
+            raise AssertionError("must not read artifacts")
+
+        monkeypatch.setattr(serve, "_load_published_artifacts", fail)
+        assert serve.main(["--enable-generation", option, value]) == 1
 
 
 class TestCli:

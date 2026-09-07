@@ -134,12 +134,25 @@ class ChatClient:
             kwargs["transport"] = self.transport
         return JsonClient(**kwargs)
 
-    def complete(self, system: str, user: str, *, json_object: bool = True) -> ChatReply:
+    def complete(
+        self,
+        system: str,
+        user: str,
+        *,
+        json_object: bool = True,
+        max_output_tokens: int | None = None,
+    ) -> ChatReply:
         """Send one two-message turn and return the assistant's text."""
         if not isinstance(system, str) or not system.strip():
             raise ValueError("system message must be a non-empty string")
         if not isinstance(user, str) or not user.strip():
             raise ValueError("user message must be a non-empty string")
+        if max_output_tokens is not None and (
+            not isinstance(max_output_tokens, int)
+            or isinstance(max_output_tokens, bool)
+            or max_output_tokens < 1
+        ):
+            raise ValueError("max_output_tokens must be a positive integer or None")
 
         payload: dict[str, Any] = {
             "model": self.config.model,
@@ -152,6 +165,11 @@ class ChatClient:
             payload["reasoning_effort"] = self.reasoning_effort
         if json_object:
             payload["response_format"] = {"type": "json_object"}
+        if max_output_tokens is not None:
+            # OpenAI-compatible relays use this newer spelling for chat output
+            # caps.  Do not add it by default: existing batch callers rely on the
+            # exact historical payload contract.
+            payload["max_completion_tokens"] = max_output_tokens
 
         raw = self._client().post(payload)
         return self._reply(raw)

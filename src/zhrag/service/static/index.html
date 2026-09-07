@@ -3,87 +3,126 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>zhrag · TiDB 文档检索</title>
+  <title>zhrag · TiDB 文档助手</title>
   <style>
     :root {
-      color-scheme: dark;
-      --bg: #08111f;
-      --panel: #101d30;
-      --panel-2: #16263d;
-      --line: #29405f;
-      --text: #e8f0fb;
-      --muted: #9db0c9;
-      --accent: #63d4ff;
-      --accent-2: #8bf0c8;
-      --error: #ff9caa;
+      color-scheme: light;
+      --bg: #f4f7f6;
+      --surface: #ffffff;
+      --surface-muted: #eef4f2;
+      --line: #cbd9d4;
+      --text: #1f2b2a;
+      --muted: #5d706b;
+      --accent: #087f5b;
+      --accent-strong: #075c43;
+      --link: #075ea8;
+      --error: #a6293f;
+      --warning: #795400;
     }
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; letter-spacing: 0; }
     body {
       margin: 0;
       min-height: 100vh;
-      background:
-        radial-gradient(circle at 10% 0%, #12365b 0, transparent 32rem),
-        linear-gradient(145deg, var(--bg), #0c1728 65%, #08101c);
+      background: var(--bg);
       color: var(--text);
-      font: 15px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+      font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
     }
-    main { width: min(1060px, calc(100% - 32px)); margin: 0 auto; padding: 64px 0 96px; }
-    header { margin-bottom: 32px; }
-    .eyebrow { color: var(--accent); font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
-    h1 { margin: 8px 0 6px; font-size: clamp(2rem, 6vw, 4.25rem); line-height: 1.05; }
-    header p { max-width: 720px; margin: 0; color: var(--muted); }
+    main { width: min(1060px, calc(100% - 32px)); margin: 0 auto; padding: 40px 0 72px; }
+    header { margin-bottom: 28px; }
+    .eyebrow { color: var(--accent-strong); font-size: .8rem; font-weight: 700; text-transform: uppercase; }
+    h1 { margin: 6px 0 4px; font-size: 2rem; line-height: 1.2; }
+    header p { max-width: 760px; margin: 0; color: var(--muted); }
     .panel {
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      background: color-mix(in srgb, var(--panel) 94%, transparent);
-      box-shadow: 0 22px 80px #0006;
-      padding: 22px;
+      border-top: 1px solid var(--line);
+      border-radius: 0;
+      background: transparent;
+      padding: 20px 0;
     }
-    form { display: grid; grid-template-columns: 1fr auto; gap: 12px; }
+    .controls { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+    .mode-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    .mode-switch button {
+      min-height: 38px;
+      border: 0;
+      border-right: 1px solid var(--line);
+      border-radius: 0;
+      background: var(--surface);
+      color: var(--text);
+      padding: 0 14px;
+      font: inherit;
+      cursor: pointer;
+    }
+    .mode-switch button:last-child { border-right: 0; }
+    .mode-switch button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+    .mode-switch button:disabled { cursor: not-allowed; color: var(--muted); opacity: .6; }
+    form { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
     label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-    input, button { border-radius: 12px; font: inherit; }
+    input, button { font: inherit; }
     input {
-      width: 100%; border: 1px solid var(--line); background: #091425;
-      color: var(--text); padding: 14px 16px; outline: none;
+      width: 100%; min-height: 46px; border: 1px solid var(--line); border-radius: 6px;
+      background: var(--surface); color: var(--text); padding: 10px 13px; outline: none;
     }
-    input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px #63d4ff22; }
-    button {
-      border: 0; padding: 0 23px; color: #06131e; font-weight: 800;
-      background: linear-gradient(135deg, var(--accent), var(--accent-2)); cursor: pointer;
+    input:focus { border-color: var(--link); box-shadow: 0 0 0 3px #075ea81f; }
+    #submit {
+      min-height: 46px; border: 1px solid var(--accent); border-radius: 6px;
+      background: var(--accent); color: #fff; padding: 0 20px; font-weight: 700; cursor: pointer;
     }
-    button:disabled { cursor: wait; filter: grayscale(.6); opacity: .65; }
-    #status { min-height: 1.65em; margin: 13px 2px 0; color: var(--muted); }
+    #submit:hover:not(:disabled), .mode-switch button:hover:not(:disabled) { border-color: var(--accent-strong); }
+    #submit:disabled { cursor: wait; opacity: .65; }
+    #status { min-height: 1.6em; margin: 12px 2px 0; color: var(--muted); }
     #status.error { color: var(--error); }
+    #status.warning { color: var(--warning); }
     section[hidden] { display: none; }
-    h2 { margin: 34px 0 14px; }
-    .profile { color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
-    .timings { display: grid; gap: 9px; margin-top: 16px; }
-    .timing { display: grid; grid-template-columns: 150px 1fr 80px; gap: 12px; align-items: center; }
-    .track { height: 8px; border-radius: 999px; background: #07101c; overflow: hidden; }
-    .bar { height: 100%; min-width: 2px; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+    h2 { margin: 30px 0 12px; font-size: 1.25rem; }
+    h3 { margin: 0 0 7px; font-size: 1rem; line-height: 1.4; overflow-wrap: anywhere; }
+    .profile { color: var(--muted); font-size: .88rem; overflow-wrap: anywhere; }
+    .timings { display: grid; gap: 8px; margin-top: 14px; }
+    .timing { display: grid; grid-template-columns: 155px 1fr 88px; gap: 10px; align-items: center; }
+    .track { height: 7px; border-radius: 4px; background: var(--surface-muted); overflow: hidden; }
+    .bar { height: 100%; min-width: 2px; border-radius: 4px; background: var(--accent); }
     .value { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
-    .results { display: grid; gap: 14px; }
-    article { border: 1px solid var(--line); border-radius: 15px; background: var(--panel-2); padding: 18px; }
-    article h3 { margin: 0 0 6px; font-size: 1.05rem; overflow-wrap: anywhere; }
-    .meta { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-bottom: 10px; color: var(--muted); font-size: .86rem; }
-    .passage { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .results { display: grid; gap: 10px; }
+    article { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 15px; }
+    .answer-block { border-left: 3px solid var(--accent); border-radius: 2px; background: var(--surface); padding: 13px 15px; }
+    .answer-block + .answer-block { margin-top: 10px; }
+    .answer-block p, .passage { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-bottom: 9px; color: var(--muted); font-size: .84rem; }
+    .citations { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .citation {
+      border: 1px solid #a7c7bd; border-radius: 4px; background: #eff8f4; color: var(--accent-strong);
+      padding: 2px 8px; cursor: pointer; font-size: .86rem;
+    }
+    .citation:hover, .citation:focus { border-color: var(--accent); }
+    .citation { overflow-wrap: anywhere; max-width: 100%; }
+    input { min-width: 0; }
+    #submit { min-width: 120px; }
+    .source-link { color: var(--link); overflow-wrap: anywhere; }
+    .empty { margin: 0; color: var(--muted); }
     @media (max-width: 640px) {
-      main { padding-top: 36px; }
+      main { padding-top: 28px; }
+      .controls { align-items: stretch; flex-direction: column; gap: 10px; }
+      .mode-switch { width: 100%; }
+      .mode-switch button { flex: 1; }
       form { grid-template-columns: 1fr; }
-      button { min-height: 48px; }
-      .timing { grid-template-columns: 105px 1fr 66px; gap: 8px; }
+      #submit { width: 100%; }
+      .timing { grid-template-columns: 105px 1fr 70px; gap: 7px; font-size: .9rem; }
     }
   </style>
 </head>
 <body>
   <main>
     <header>
-      <div class="eyebrow">Reproducible Chinese RAG</div>
-      <h1>TiDB 文档检索</h1>
-      <p>Dense + char-bigram sparse retrieval，经本地 exact RRF 融合与可选 rerank。页面展示真实服务阶段耗时，不生成答案。</p>
+      <div class="eyebrow">zhrag · TiDB docs</div>
+      <h1>TiDB 文档检索与问答</h1>
+      <p id="service-mode">正在连接服务</p>
     </header>
 
     <div class="panel">
+      <div class="controls">
+        <div class="mode-switch" role="group" aria-label="工作模式">
+          <button id="ask-mode" type="button" data-mode="ask" aria-pressed="false">问答</button>
+          <button id="search-mode" type="button" data-mode="search" aria-pressed="true">检索</button>
+        </div>
+      </div>
       <form id="search-form">
         <label for="query">检索问题</label>
         <input id="query" name="query" maxlength="2000" autocomplete="off" required
@@ -92,6 +131,11 @@
       </form>
       <div id="status" role="status" aria-live="polite"></div>
     </div>
+
+    <section id="answer-section" hidden>
+      <h2>回答</h2>
+      <div id="answer" class="results"></div>
+    </section>
 
     <section id="diagnostics" hidden>
       <h2>阶段耗时</h2>
@@ -102,7 +146,7 @@
     </section>
 
     <section id="result-section" hidden>
-      <h2>检索结果</h2>
+      <h2 id="result-heading">检索结果</h2>
       <div id="results" class="results"></div>
     </section>
   </main>
@@ -114,9 +158,14 @@
     const status = document.querySelector("#status");
     const diagnostics = document.querySelector("#diagnostics");
     const resultSection = document.querySelector("#result-section");
+    const resultHeading = document.querySelector("#result-heading");
     const timings = document.querySelector("#timings");
     const profile = document.querySelector("#profile");
     const results = document.querySelector("#results");
+    const answerSection = document.querySelector("#answer-section");
+    const answer = document.querySelector("#answer");
+    const askMode = document.querySelector("#ask-mode");
+    const searchMode = document.querySelector("#search-mode");
 
     const stageLabels = {
       dense_encode_seconds: "Dense encode",
@@ -128,6 +177,21 @@
       rerank_seconds: "Rerank",
       total_seconds: "Total"
     };
+    const answerMessages = {
+      answered: "已生成回答。",
+      insufficient_evidence: "证据不足，未生成回答。",
+      context_limit: "上下文预算不足，未生成回答。",
+      generation_failed: "回答生成失败，以下为检索到的证据。",
+      generation_timeout: "回答生成超时，以下为检索到的证据。",
+      invalid_answer: "回答格式无效，以下为检索到的证据。"
+    };
+    const knownAnswerStatuses = new Set(Object.keys(answerMessages));
+    const fallbackCapabilities = { generation_enabled: false, output_limit: 10, generation_profile: null };
+    let capabilities = {...fallbackCapabilities};
+    let mode = "search";
+    let requestNumber = 0;
+    let activeController = null;
+    let capabilitiesReady = false;
 
     function element(tag, className, text) {
       const node = document.createElement(tag);
@@ -136,13 +200,105 @@
       return node;
     }
 
-    function showTimings(data) {
+    function safeText(value, fallback = "") {
+      return typeof value === "string" ? value : fallback;
+    }
+
+    function isSafeUrl(value) {
+      if (typeof value !== "string") return false;
+      try {
+        const parsed = new URL(value);
+        return (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+          parsed.username === "" && parsed.password === "";
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function setStatus(text, className = "") {
+      status.className = className;
+      status.textContent = text;
+    }
+
+    function clearOutput() {
+      diagnostics.hidden = true;
+      resultSection.hidden = true;
+      answerSection.hidden = true;
       timings.replaceChildren();
-      const max = Math.max(...Object.values(data.timings), Number.EPSILON);
-      for (const [key, label] of Object.entries(stageLabels)) {
-        const seconds = data.timings[key];
+      profile.replaceChildren();
+      results.replaceChildren();
+      answer.replaceChildren();
+    }
+
+    function updateModeButtons() {
+      askMode.setAttribute("aria-pressed", String(mode === "ask"));
+      searchMode.setAttribute("aria-pressed", String(mode === "search"));
+      askMode.disabled = !capabilitiesReady || !capabilities.generation_enabled;
+      searchMode.disabled = !capabilitiesReady;
+      submit.disabled = !capabilitiesReady;
+      submit.textContent = mode === "ask" ? "生成回答" : "检索文档";
+    }
+
+    function setMode(nextMode, clear = true) {
+      if (nextMode === "ask" && !capabilities.generation_enabled) nextMode = "search";
+      mode = nextMode === "ask" ? "ask" : "search";
+      requestNumber += 1;
+      if (activeController) activeController.abort();
+      activeController = null;
+      if (clear) clearOutput();
+      updateModeButtons();
+      if (clear) setStatus("");
+    }
+
+    function normaliseCapabilities(data) {
+      const outputLimit = Number.isInteger(data && data.output_limit) ? data.output_limit : 10;
+      return {
+        generation_enabled: data && data.generation_enabled === true,
+        output_limit: Math.max(1, Math.min(2000, outputLimit)),
+        generation_profile: typeof (data && data.generation_profile) === "string"
+          ? data.generation_profile : null
+      };
+    }
+
+    async function loadCapabilities() {
+      try {
+        const response = await fetch("/api/capabilities", {headers: {"Accept": "application/json"}});
+        if (!response.ok) throw new Error("capabilities unavailable");
+        capabilities = normaliseCapabilities(await response.json());
+      } catch (_) {
+        capabilities = {...fallbackCapabilities};
+      }
+      capabilitiesReady = true;
+      document.querySelector("#service-mode").textContent = capabilities.generation_enabled
+        ? "问答服务已启用" : "检索服务 · 未启用答案生成";
+      setMode(capabilities.generation_enabled ? "ask" : "search", false);
+    }
+
+    function showTimings(data, generationSeconds, totalSeconds) {
+      const source = data && data.timings;
+      if (!source || typeof source !== "object") {
+        diagnostics.hidden = true;
+        return;
+      }
+      const values = {};
+      for (const key of Object.keys(stageLabels)) {
+        const value = Number(source[key]);
+        if (Number.isFinite(value) && value >= 0) values[key] = value;
+      }
+      if (Number.isFinite(generationSeconds) && generationSeconds >= 0) {
+        values.generation_seconds = generationSeconds;
+      }
+      if (Number.isFinite(totalSeconds) && totalSeconds >= 0) values.ask_total_seconds = totalSeconds;
+      if (!Object.keys(values).length) {
+        diagnostics.hidden = true;
+        return;
+      }
+      const labels = {...stageLabels, total_seconds: "Retrieval total", generation_seconds: "Generation", ask_total_seconds: "Ask total"};
+      const max = Math.max(...Object.values(values), Number.EPSILON);
+      timings.replaceChildren();
+      for (const [key, seconds] of Object.entries(values)) {
         const row = element("div", "timing");
-        row.append(element("span", "", label));
+        row.append(element("span", "", labels[key] || key));
         const track = element("div", "track");
         const bar = element("div", "bar");
         bar.style.width = `${Math.max(0.5, 100 * seconds / max)}%`;
@@ -150,54 +306,197 @@
         row.append(track, element("span", "value", `${(1000 * seconds).toFixed(1)} ms`));
         timings.append(row);
       }
-      const mode = data.rerank_enabled ? "rerank enabled" : "rerank disabled";
-      profile.textContent = `${data.profile_name} · ${mode}`;
+      const name = safeText(data.profile_name, safeText(data.profile_fingerprint, ""));
+      const rerank = data.rerank_enabled === false ? "rerank disabled" : "rerank enabled";
+      profile.textContent = name ? `${name} · ${rerank}` : rerank;
       diagnostics.hidden = false;
     }
 
-    function showResults(data) {
+    function addExternalSource(parent, url) {
+      if (!isSafeUrl(url)) return;
+      const link = element("a", "source-link", "打开来源");
+      link.href = url;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      parent.append(link);
+    }
+
+    function addCitationButton(parent, citationId, title) {
+      const button = element("button", "citation", `[${citationId}]${title ? ` ${title}` : ""}`);
+      button.type = "button";
+      button.addEventListener("click", () => {
+        const target = document.querySelector(`#source-${CSS.escape(String(citationId))}`);
+        if (target) {
+          target.scrollIntoView({behavior: "smooth", block: "start"});
+          target.focus({preventScroll: true});
+        }
+      });
+      parent.append(button);
+    }
+
+    function showAnswer(data) {
+      answer.replaceChildren();
+      answerSection.hidden = false;
+      const message = answerMessages[data.status] || "未生成回答。";
+      if (data.status !== "answered" || !Array.isArray(data.blocks) || data.blocks.length === 0) {
+        answer.append(element("p", "empty", message));
+        return;
+      }
+      for (const block of data.blocks) {
+        if (!block || typeof block.text !== "string") continue;
+        const article = element("article", "answer-block");
+        article.append(element("p", "", block.text));
+        if (Array.isArray(block.citations) && block.citations.length) {
+          const citationRow = element("div", "citations");
+          for (const citationId of block.citations) {
+            if (!Number.isInteger(citationId)) continue;
+            const source = Array.isArray(data.sources)
+              ? data.sources.find((item) => item && item.citation_id === citationId) : null;
+            addCitationButton(citationRow, citationId, source && safeText(source.title));
+          }
+          article.append(citationRow);
+        }
+        answer.append(article);
+      }
+      if (!answer.children.length) answer.append(element("p", "empty", message));
+    }
+
+    function showSources(sources) {
       results.replaceChildren();
-      for (const passage of data.passages) {
+      if (!Array.isArray(sources) || sources.length === 0) {
+        results.append(element("p", "empty", "本次请求没有可展示的证据。"));
+        resultSection.hidden = false;
+        return;
+      }
+      for (const source of sources) {
+        if (!source || !Number.isInteger(source.citation_id)) continue;
         const card = element("article");
-        const heading = passage.metadata.heading_path || passage.metadata.path || passage.source_key;
-        card.append(element("h3", "", `#${passage.rank} · ${heading}`));
+        card.id = `source-${source.citation_id}`;
+        card.tabIndex = -1;
+        const title = safeText(source.title, "未命名来源");
+        card.append(element("h3", "", `[${source.citation_id}] ${title}`));
         const meta = element("div", "meta");
-        meta.append(
-          element("span", "", `fused #${passage.fused_rank}`),
-          element("span", "", `rerank ${passage.rerank_score.toFixed(4)}`),
-          element("span", "", `chunk ${passage.ordinal}`)
-        );
-        card.append(meta, element("p", "passage", passage.text));
+        if (Number.isInteger(source.rank)) meta.append(element("span", "", `rank ${source.rank}`));
+        addExternalSource(meta, source.source_url);
+        card.append(meta, element("p", "passage", safeText(source.text, "")));
         results.append(card);
       }
       resultSection.hidden = false;
     }
 
+    function showSearchPassages(passages) {
+      results.replaceChildren();
+      if (!Array.isArray(passages) || passages.length === 0) {
+        results.append(element("p", "empty", "没有找到可展示的检索结果。"));
+        resultSection.hidden = false;
+        return;
+      }
+      for (const passage of passages) {
+        if (!passage) continue;
+        const card = element("article");
+        const metadata = passage.metadata && typeof passage.metadata === "object" ? passage.metadata : {};
+        const heading = safeText(metadata.heading_path, safeText(metadata.path, safeText(passage.source_key, "未命名来源")));
+        card.append(element("h3", "", `#${Number.isInteger(passage.rank) ? passage.rank : "?"} · ${heading}`));
+        const meta = element("div", "meta");
+        if (Number.isInteger(passage.fused_rank)) meta.append(element("span", "", `fused #${passage.fused_rank}`));
+        if (typeof passage.rerank_score === "number" && Number.isFinite(passage.rerank_score)) {
+          meta.append(element("span", "", `rerank ${passage.rerank_score.toFixed(4)}`));
+        }
+        if (Number.isInteger(passage.ordinal)) meta.append(element("span", "", `chunk ${passage.ordinal}`));
+        addExternalSource(meta, metadata.source_url);
+        card.append(meta, element("p", "passage", safeText(passage.text, "")));
+        results.append(card);
+      }
+      resultSection.hidden = false;
+    }
+
+    function showAskData(data) {
+      showAnswer(data);
+      const retrieval = data.retrieval && typeof data.retrieval === "object" ? data.retrieval : null;
+      showTimings(retrieval, Number(data.generation_seconds), Number(data.total_seconds));
+      if (Array.isArray(data.sources) && data.sources.length) {
+        resultHeading.textContent = "本次选入的证据";
+        showSources(data.sources);
+      } else if (retrieval) {
+        resultHeading.textContent = "检索证据";
+        showSearchPassages(retrieval.passages);
+      } else {
+        resultSection.hidden = true;
+      }
+      setStatus(answerMessages[data.status] || "未生成回答。", data.status === "answered" ? "" : "warning");
+    }
+
+    function showSearchData(data) {
+      answerSection.hidden = true;
+      resultHeading.textContent = "检索结果";
+      showTimings(data, null, null);
+      showSearchPassages(data.passages);
+      const count = Array.isArray(data.passages) ? data.passages.length : 0;
+      setStatus(`完成，共返回 ${count} 个 passage。`);
+    }
+
+    async function readJson(response) {
+      try { return await response.json(); } catch (_) { return null; }
+    }
+
+    function isStructuredAnswer(data) {
+      return data && typeof data === "object" && knownAnswerStatuses.has(data.status);
+    }
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
+      if (!capabilitiesReady || submit.disabled) return;
+      const thisRequest = ++requestNumber;
+      if (activeController) activeController.abort();
+      activeController = new AbortController();
+      const requestMode = mode;
+      clearOutput();
       submit.disabled = true;
-      status.className = "";
-      status.textContent = "正在检索……";
-      diagnostics.hidden = true;
-      resultSection.hidden = true;
+      askMode.disabled = true;
+      searchMode.disabled = true;
+      setStatus(requestMode === "ask" ? "正在生成回答……" : "正在检索……");
       try {
-        const response = await fetch("/api/search", {
+        // The search mode continues to use the original fetch("/api/search") contract.
+        const response = await fetch(requestMode === "ask" ? "/api/ask" : "/api/search", {
           method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({query: query.value, top_k: 10})
+          headers: {"Content-Type": "application/json", "Accept": "application/json"},
+          body: JSON.stringify({query: query.value, top_k: capabilities.output_limit}),
+          signal: activeController.signal
         });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.message || "检索失败");
-        showTimings(data);
-        showResults(data);
-        status.textContent = `完成，共返回 ${data.passages.length} 个 passage。`;
+        const data = await readJson(response);
+        if (thisRequest !== requestNumber) return;
+        if (requestMode === "ask" && isStructuredAnswer(data)) {
+          showAskData(data);
+          if (!response.ok && data.status === "generation_unavailable") {
+            setStatus("回答功能当前不可用。", "error");
+          }
+          return;
+        }
+        if (!response.ok) {
+          if (data && data.retrieval) showSearchData(data.retrieval);
+          const message = data && typeof data.message === "string" ? data.message :
+            (requestMode === "ask" ? "回答请求失败。" : "检索请求失败。");
+          throw new Error(message);
+        }
+        if (requestMode === "ask") showAskData(data);
+        else showSearchData(data);
       } catch (error) {
-        status.className = "error";
-        status.textContent = error instanceof Error ? error.message : "检索失败";
+        if (error && error.name === "AbortError") return;
+        if (thisRequest !== requestNumber) return;
+        setStatus(error instanceof Error ? error.message : "请求失败。", "error");
       } finally {
-        submit.disabled = false;
+        if (thisRequest === requestNumber) {
+          submit.disabled = false;
+          updateModeButtons();
+          activeController = null;
+        }
       }
     });
+
+    askMode.addEventListener("click", () => setMode("ask"));
+    searchMode.addEventListener("click", () => setMode("search"));
+    updateModeButtons();
+    loadCapabilities();
   </script>
 </body>
 </html>

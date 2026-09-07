@@ -191,6 +191,38 @@ class TestChatClient:
             client.complete(" ", "user")
         assert not recorder.requests
 
+    def test_adds_optional_completion_token_cap(self) -> None:
+        recorder = Recorder(
+            json.dumps(
+                {
+                    "model": "model",
+                    "choices": [
+                        {"finish_reason": "stop", "message": {"content": "{}"}},
+                    ],
+                }
+            ).encode("utf-8")
+        )
+        client = ChatClient(
+            ChatConfig("secret", "https://host", "model"),
+            transport=recorder,
+            sleep=lambda _seconds: None,
+            log=lambda _message: None,
+        )
+
+        client.complete("system", "user", max_output_tokens=2048)
+
+        request_data = recorder.requests[0].data
+        assert isinstance(request_data, bytes)
+        assert json.loads(request_data)["max_completion_tokens"] == 2048
+
+    @pytest.mark.parametrize("value", [0, -1, True, False, 1.5])
+    def test_rejects_invalid_completion_token_cap(self, value: object) -> None:
+        recorder = Recorder(b"{}")
+        client = ChatClient(ChatConfig("secret", "https://host", "model"), transport=recorder)
+        with pytest.raises(ValueError, match="max_output_tokens"):
+            client.complete("system", "user", max_output_tokens=value)  # type: ignore[arg-type]
+        assert not recorder.requests
+
 
 class TestCacheSidecar:
     def test_creates_loads_and_validates_generic_provenance(self, tmp_path: Path) -> None:

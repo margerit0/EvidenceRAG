@@ -13,6 +13,8 @@
 ---
 
 
+> **在线问答增补（2026-09-07）**：新增显式启用的 `/api/ask` 单轮证据问答，包含完整段落预算、结构化引用校验、拒答/故障分离和问答界面。详见 [问答合同](answering.md)。下文“HTTP 无生成阶段”的历史描述仅适用于原 `/api/search` 与已认证 M8 profile；M11 trace 仍仅覆盖检索子阶段，生成耗时单独返回。当前合成回归已验证功能合同，并完成小规模真实问答冒烟；观察到生成失败与引用支持不完整，尚无答案准确率或端到端性能基准；M9b known-context 评测状态不因此改变。
+
 > **M9a 状态（2026-08-31）**：生成指标合同、RAGQuestEval answer-scoring 语义、aggregate-only Table 8 证据和独立同步器已完成；本阶段没有生成真实答案，也没有付费调用。M9b 才会在本地 gitignored 目录中运行 QG/QA/生成实验。
 
 **自研薄检索层（Protocol + YAML config）+ Milvus 三级部署（Lite on Windows → Standalone in WSL2 → Zilliz Cloud Free 公网）+ Qwen3-Embedding-8B（客户端拼 instruct 前缀、MRL 降至 1024 维）+ One Hub 上的 Qwen3-Reranker-8B（离线消融支持 top-50 / top-100，当前证据选 top-50）+ 客户端 char-bigram BM25 稀疏向量做词法臂 + 服务端 RRF 融合，评估侧以已建成的 R@1/MRR@10/nDCG@10 为主指标、M9a 的独立生成指标合同为辅，全部跑在 GitHub Actions 双 OS CI 上。**
@@ -605,7 +607,7 @@ zhrag/
 - [x] **H：dense-1024 + char-bigram BM25 的独立等权 exact RRF 基线。** 已在 5,681 篇完整文档 / 2,394 条 query 上从同一 4096 维 cache 双侧前缀切片并重归一化，零 API、无 rerank；1doc nDCG@10 **0.908 [0.895, 0.921]**。H−G 两个 retention family 共 2/12 项通过 Holm；未拒绝项只写“未检测到差异”，不写“无损/等价”。复现：`scripts/evaluate_h_hybrid_mrl1024.py`。
 <!-- END H-HYBRID-MRL1024-CHECKLIST -->
 <!-- BEGIN M8-CHECKLIST -->
-- [x] **M8：FastAPI 服务与 HTTP 性能基准。** 服务层只编排现有 `OnlineRetriever`，有严格输入、脱敏错误、metadata allowlist、fail-fast 并发 admission 与单文件静态 UI；benchmark 排除 warm-up，报告 p50/p95/p99、成功 QPS、错误率/status 与八阶段耗时。当前认证 HTTP p95 **228.3 ms** / **4.97 QPS**。同步器从无文本 numeric samples 重算 aggregate；不调用 chat completion。
+- [x] **M8：FastAPI 服务与 HTTP 性能基准。** `/api/search` 只编排现有 `OnlineRetriever`，有严格输入、脱敏错误、metadata allowlist、fail-fast 并发 admission 与单文件静态 UI；benchmark 排除 warm-up，报告 p50/p95/p99、成功 QPS、错误率/status 与八阶段耗时。当前认证 HTTP p95 **228.3 ms** / **4.97 QPS**。同步器从无文本 numeric samples 重算 aggregate；不调用 chat completion。
 <!-- END M8-CHECKLIST -->
 - [x] **M9b1 完成后的 provenance hardening（不回退、不重算 M9b1 完成状态）。** 已修复交付后审计发现的三项跨机器/多 profile 风险：① run/reference profile 统一为小写 1–64 字符 canonical slug，并用 `ntpath.isreserved()` 跨平台拒绝结尾句点、`CON` / `COM1` 等 Windows 别名；② `run_crud_generation.py` 与结果文档同步器把 `--artifacts` 固定到项目内 gitignored 的 `indexes/crud/generation/v1/`，并在 status、显式 run/reference 选择、读写或 provider import 前拒绝 artifact 树中现有的 symlink/junction；③ chat provider 不再把缺失/空白 `response.model` 回落为 requested model，generation/QG/reference QA/prediction QA 的 status、resume 与 completion 路径均认证每条 `served_model`。核心生成/cache row contract、prompt、stage DAG 与统计口径未改；chat profile fingerprint 域以及 text-free samples/report provenance envelope 有意升至 v2，公开 artifact 携带固定 `chat_profile_contract_sha256`。旧 v1 sidecar/samples/report 保留在磁盘但不能由新 runner 原地续跑、迁移或发布，实验必须换新 slug 重启。M9b2 仍须在完整 text-free numeric samples/report 重算认证后才能发布数字。
 - [ ] **RAGAS / DeepEval 内置指标提示词在中文上的校准度。** 研究只验证了管道（`base_url` 支持、`adapt_instruction` 语义、DeepSeek/Kimi 类），**零中文评测**。人工标 ~50 行，先测判官与你的一致率。

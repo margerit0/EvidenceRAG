@@ -205,8 +205,9 @@ def _evaluation_benchmark(report: Mapping[str, Any]) -> str:
         "",
         (
             "FastAPI 服务复用同一条同步 `OnlineRetriever`：dense / sparse 两臂各取 100，"
-            "客户端 exact RRF，再按 profile 选择 rerank；单文件前端只展示检索 passage 与阶段耗时，"
+            "客户端 exact RRF，再按 profile 选择 rerank；本节只认证 `/api/search` 检索路径，"
             "**不生成答案，也不调用 chat completion**。"
+            "可选的 `/api/ask` 问答另计生成耗时，不包含在本基准内。"
         ),
         "",
         (
@@ -298,7 +299,7 @@ def _architecture_checklist(report: Mapping[str, Any]) -> str:
     measurement = _mapping(report, "measurement")
     latency = _mapping(measurement, "http_latency")
     return (
-        "- [x] **M8：FastAPI 服务与 HTTP 性能基准。** 服务层只编排现有 "
+        "- [x] **M8：FastAPI 服务与 HTTP 性能基准。** `/api/search` 只编排现有 "
         "`OnlineRetriever`，有严格输入、脱敏错误、metadata allowlist、fail-fast 并发 admission 与"
         "单文件静态 UI；benchmark 排除 warm-up，报告 p50/p95/p99、成功 QPS、错误率/status 与八阶段"
         f"耗时。当前认证 HTTP p95 **{_milliseconds(latency, 95):,.1f} ms** / "

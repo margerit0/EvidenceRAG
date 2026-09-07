@@ -631,7 +631,7 @@ TiDB Cloud 实例通过建表/HNSW、两臂排序、完整行 round-trip、shado
 <!-- BEGIN M8-SERVICE-BENCHMARK -->
 ### HTTP 服务与 M8 性能基准
 
-FastAPI 服务复用同一条同步 `OnlineRetriever`：dense / sparse 两臂各取 100，客户端 exact RRF，再按 profile 选择 rerank；单文件前端只展示检索 passage 与阶段耗时，**不生成答案，也不调用 chat completion**。
+FastAPI 服务复用同一条同步 `OnlineRetriever`：dense / sparse 两臂各取 100，客户端 exact RRF，再按 profile 选择 rerank；本节只认证 `/api/search` 检索路径，**不生成答案，也不调用 chat completion**。可选的 `/api/ask` 问答另计生成耗时，不包含在本基准内。
 
 **正式 profile**：`tidb-docs-exact-rrf10-cached-query-no-rerank-v1`（embedding=`cached-qwen3-embedding-8b-tidb-query-4096-v1`；rerank=`disabled-identity-fused-order-v1`；cache-backed，本地测量不包含 provider 墙钟）。通过 HTTP 完成 980 次正式请求（另有 20 次 warm-up，全部排除）；fixture 含 980 条本地 query，仅发布其 SHA-256。
 

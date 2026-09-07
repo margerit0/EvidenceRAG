@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from zhrag.answering import Answerer, AnswerSettings
 from zhrag.embedding_contract import validate_embedding_cache
 from zhrag.ingest import IngestState, read_state
 from zhrag.io_utils import read_jsonl
@@ -121,7 +122,50 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="preserve fused order and do not create or call a rerank client",
     )
+    parser.add_argument(
+        "--enable-generation",
+        action="store_true",
+        help="allow paid chat calls through /api/ask; requires LLM_* configuration",
+    )
+    parser.add_argument("--generation-timeout", type=float, default=60.0)
+    parser.add_argument(
+        "--generation-retries",
+        type=int,
+        default=15,
+        help="retries after the first chat attempt (0-15); wait 5, 10, ... seconds",
+    )
+    parser.add_argument("--generation-max-tokens", type=int, default=2048)
+    parser.add_argument("--context-tokens", type=int, default=12_000)
+    parser.add_argument("--context-passages", type=int, default=6)
+    parser.add_argument(
+        "--generation-reasoning-effort",
+        choices=("minimal", "low", "medium", "high"),
+    )
     return parser.parse_args(argv)
+
+
+def _build_answerer(args: argparse.Namespace) -> Answerer | None:
+    if not args.enable_generation:
+        return None
+    if args.query_cache is not None:
+        raise ValueError("generation is incompatible with query-cache")
+    from zhrag.providers.answering import ChatAnswerGenerator  # noqa: PLC0415
+    from zhrag.providers.chat import ChatConfig  # noqa: PLC0415
+    from zhrag.providers.embedding import load_env  # noqa: PLC0415
+
+    return Answerer(
+        ChatAnswerGenerator(
+            ChatConfig.from_env(load_env(args.env)),
+            max_output_tokens=args.generation_max_tokens,
+            timeout_seconds=args.generation_timeout,
+            reasoning_effort=args.generation_reasoning_effort,
+            max_retries=args.generation_retries,
+        ),
+        settings=AnswerSettings(
+            max_passages=args.context_passages,
+            max_prompt_tokens=args.context_tokens,
+        ),
+    )
 
 
 def _load_published_artifacts(artifacts: Path) -> tuple[IngestState, SparseIndex]:
@@ -330,6 +374,15 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("query-cache requires --no-rerank")
         if args.query_fixture is not None and args.query_cache is None:
             raise ValueError("query-fixture requires --query-cache")
+        if args.enable_generation and args.query_cache is not None:
+            raise ValueError("generation is incompatible with query-cache")
+        if not math.isfinite(args.generation_timeout) or not 0 < args.generation_timeout <= 300:
+            raise ValueError("generation-timeout must be in (0, 300]")
+        if not 0 <= args.generation_retries <= 15:
+            raise ValueError("generation-retries must be in [0, 15]")
+        if not 1 <= args.generation_max_tokens <= 8_192:
+            raise ValueError("generation-max-tokens must be in [1, 8192]")
+        AnswerSettings(max_passages=args.context_passages, max_prompt_tokens=args.context_tokens)
         state, index = _load_published_artifacts(args.artifacts)
         store = MilvusStore(
             MilvusConfig(
@@ -349,6 +402,7 @@ def main(argv: list[str] | None = None) -> int:
                 retriever,
                 info=info,
                 max_concurrency=args.max_concurrency,
+                answerer=_build_answerer(args),
                 published_index_identity=(f"{state.collection_name}:{state.sparse_fingerprint}"),
             )
             import uvicorn  # noqa: PLC0415 - optional service dependency
