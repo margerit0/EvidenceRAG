@@ -32,6 +32,7 @@ from zhrag.service.bench import (
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "indexes" / "tidb" / "eval"
 README = ROOT / "README.md"
+EVALUATION_DOC = ROOT / "docs" / "evaluation.md"
 ARCHITECTURE = ROOT / "docs" / "architecture-decision.md"
 CLAUDE_CONTEXT = ROOT / "CLAUDE.md"
 SAMPLES_NAME = "m8_http_samples.json"
@@ -68,7 +69,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Sync tracked M8 documentation from authenticated local artifacts."
     )
     parser.add_argument("--artifacts", type=Path, default=ARTIFACTS)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=ROOT,
+        help="directory holding the shared docs lock taken by every synchronizer",
+    )
     parser.add_argument("--readme", type=Path, default=README)
+    parser.add_argument("--evaluation", type=Path, default=EVALUATION_DOC)
     parser.add_argument("--architecture", type=Path, default=ARCHITECTURE)
     parser.add_argument("--claude-context", type=Path, default=CLAUDE_CONTEXT)
     parser.add_argument("--check", action="store_true", help="fail if tracked docs are stale")
@@ -161,7 +169,30 @@ def _profile_description(report: Mapping[str, Any]) -> str:
     )
 
 
-def _readme_evidence(report: Mapping[str, Any]) -> str:
+def _readme_headline(report: Mapping[str, Any]) -> str:
+    """One plain-language inline sentence for the README; numbers come from the report."""
+    measurement = _mapping(report, "measurement")
+    latency = _mapping(measurement, "http_latency")
+    configuration = _mapping(report, "configuration")
+    profile = _mapping(report, "profile")
+    if bool(profile["provider_stages_included"]):
+        scope = (
+            "包含向量模型与重排模型的调用耗时"
+            if bool(profile["rerank_enabled"])
+            else "包含向量模型的调用耗时，未启用重排"
+        )
+    else:
+        scope = "查询向量走本地缓存、未启用重排，不含模型调用耗时"
+    return (
+        f"本机 HTTP 基准（{int(measurement['request_count']):,} 次正式请求，并发 "
+        f"{int(configuration['concurrency'])}，{scope}）："
+        f"p50 {_fmt_ms(_milliseconds(latency, 50))}，p95 {_fmt_ms(_milliseconds(latency, 95))}，"
+        f"吞吐 {_fmt_qps(float(measurement['successful_qps']))} QPS，成功 "
+        f"{int(measurement['success_count']):,}/{int(measurement['request_count']):,}。"
+    )
+
+
+def _evaluation_benchmark(report: Mapping[str, Any]) -> str:
     measurement = _mapping(report, "measurement")
     latency = _mapping(measurement, "http_latency")
     stages = _mapping(measurement, "stages")
@@ -287,7 +318,8 @@ def _architecture_resume_evidence(report: Mapping[str, Any]) -> str:
     )
 
 
-def _architecture_resume_performance(report: Mapping[str, Any]) -> str:
+def _resume_performance(report: Mapping[str, Any]) -> str:
+    """The inline performance sentence embedded in the ADR resume bullet."""
     measurement = _mapping(report, "measurement")
     latency = _mapping(measurement, "http_latency")
     configuration = _mapping(report, "configuration")
@@ -350,14 +382,15 @@ def _render_target(
             name,
             render(report),
             path=target.path,
-            inline=name == "M8-RESUME-PERFORMANCE",
+            inline=name in {"M8-RESUME-PERFORMANCE", "M8-README-HEADLINE"},
         )
     return before, after
 
 
 def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
     return (
-        _Target(args.readme, {"M8-SERVICE-BENCHMARK": _readme_evidence}),
+        _Target(args.readme, {"M8-README-HEADLINE": _readme_headline}),
+        _Target(args.evaluation, {"M8-SERVICE-BENCHMARK": _evaluation_benchmark}),
         _Target(
             args.architecture,
             {
@@ -367,7 +400,7 @@ def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
                 # Older fixture documents may not yet carry these optional markers;
                 # the canonical repository document does, and new renders own them.
                 "M8-RESUME-EVIDENCE": _architecture_resume_evidence,
-                "M8-RESUME-PERFORMANCE": _architecture_resume_performance,
+                "M8-RESUME-PERFORMANCE": _resume_performance,
             },
         ),
         _Target(args.claude_context, {"M8-LOCAL-ARTIFACTS": _claude_artifact}),
@@ -378,7 +411,7 @@ def synchronize(args: argparse.Namespace) -> tuple[Path, ...]:
     # Every docs synchronizer takes the repository lock first, then its artifact
     # lock. The benchmark publisher takes only .m8.lock, so no reverse order exists.
     with (
-        exclusive_lock(args.readme.parent / DOCS_LOCK),
+        exclusive_lock(args.repo_root / DOCS_LOCK),
         exclusive_lock(args.artifacts / ARTIFACT_LOCK),
     ):
         report = load_status(args.artifacts)

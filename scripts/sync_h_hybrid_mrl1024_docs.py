@@ -35,6 +35,7 @@ from zhrag.io_utils import (
 ROOT = Path(__file__).resolve().parent.parent
 EXPANDED = ROOT / "crud-rag-subset" / "eval-expanded"
 README = ROOT / "README.md"
+EVALUATION_DOC = ROOT / "docs" / "evaluation.md"
 ARCHITECTURE = ROOT / "docs" / "architecture-decision.md"
 CLAUDE_CONTEXT = ROOT / "CLAUDE.md"
 REPORT_NAME = "h_hybrid_rrf_mrl1024_report.json"
@@ -73,9 +74,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Sync tracked H hybrid documentation from an authenticated local report."
     )
     parser.add_argument("--expanded", type=Path, default=EXPANDED)
-    parser.add_argument("--readme", type=Path, default=README)
+    parser.add_argument(
+        "--evaluation",
+        "--readme",
+        dest="evaluation",
+        type=Path,
+        default=EVALUATION_DOC,
+        help="detailed evaluation document (legacy alias: --readme)",
+    )
     parser.add_argument("--architecture", type=Path, default=ARCHITECTURE)
     parser.add_argument("--claude-context", type=Path, default=CLAUDE_CONTEXT)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=ROOT,
+        help="directory holding the shared docs lock",
+    )
     parser.add_argument("--check", action="store_true", help="fail if tracked docs are stale")
     return parser.parse_args(argv)
 
@@ -417,7 +431,7 @@ def _render_target(
 
 def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
     return (
-        _Target(args.readme, {"H-HYBRID-MRL1024-EVIDENCE": _readme_h}),
+        _Target(args.evaluation, {"H-HYBRID-MRL1024-EVIDENCE": _readme_h}),
         _Target(
             args.architecture,
             {
@@ -434,7 +448,7 @@ def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
 
 
 def synchronize(args: argparse.Namespace) -> tuple[Path, ...]:
-    docs_lock = args.readme.parent / DOCS_LOCK
+    docs_lock = args.repo_root / DOCS_LOCK
     # All synchronizers take the repository-wide docs lock first, then their own
     # artifact lock. The fixed order prevents two report readers from deadlocking
     # while both want to replace README/ADR/CLAUDE.md.

@@ -37,6 +37,7 @@ from zhrag.io_utils import exclusive_lock, read_json, read_text, replace_files, 
 
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
+EVALUATION_DOC = ROOT / "docs" / "evaluation.md"
 ARCHITECTURE = ROOT / "docs" / "architecture-decision.md"
 DEFAULT_ARTIFACTS = ROOT / "indexes" / "crud" / "generation" / "v1"
 ARTIFACT_LOCK = ".artifacts.lock"
@@ -99,8 +100,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="read runs/canonical/<run-id> instead of runs/trials/<run-id>",
     )
-    parser.add_argument("--readme", type=Path, default=README)
+    parser.add_argument(
+        "--evaluation",
+        "--readme",
+        dest="evaluation",
+        type=Path,
+        default=EVALUATION_DOC,
+        help="detailed evaluation document (legacy alias: --readme)",
+    )
     parser.add_argument("--architecture", type=Path, default=ARCHITECTURE)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=ROOT,
+        help="directory holding the shared docs lock",
+    )
     parser.add_argument("--check", action="store_true", help="fail if tracked docs are stale")
     return parser.parse_args(argv)
 
@@ -383,7 +397,7 @@ def _replace_region(text: str, marker: str, body: str, *, path: Path) -> str:
 def _targets(args: argparse.Namespace, report: Mapping[str, Any]) -> tuple[_Target, ...]:
     return (
         _Target(
-            args.readme,
+            args.evaluation,
             (
                 (
                     RESULTS_MARKER,
@@ -418,7 +432,7 @@ def synchronize(args: argparse.Namespace) -> tuple[Path, ...]:
     run_root = _run_root(args)
     with exclusive_lock(args.artifacts / ARTIFACT_LOCK):
         report = load_results(run_root)
-    with exclusive_lock(args.readme.parent / DOCS_LOCK):
+    with exclusive_lock(args.repo_root / DOCS_LOCK):
         rendered = [(target.path, *_render_target(target)) for target in _targets(args, report)]
         stale = tuple(path for path, before, after in rendered if before != after)
         if args.check:

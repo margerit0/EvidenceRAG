@@ -32,6 +32,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Synchronize README quality-gate status from a JUnit report."
     )
     parser.add_argument("--junit", type=Path, default=DEFAULT_JUNIT)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=ROOT,
+        help="directory holding the shared docs lock taken by every synchronizer",
+    )
     parser.add_argument("--readme", type=Path, default=README)
     parser.add_argument("--check", action="store_true", help="fail if README is stale")
     return parser.parse_args(argv)
@@ -47,37 +53,33 @@ def load_counts(path: Path) -> JunitCounts:
 
 
 def render(counts: JunitCounts) -> str:
-    """Render only the marker body; the surrounding README remains untouched."""
+    """Render the compact inline README test status."""
 
     if not isinstance(counts, JunitCounts):
         raise TypeError("counts must be JunitCounts")
     require_clean(counts)
-    return (
-        f"tests/                   {counts.tests:,} 个单元测试\n"
-        "```\n\n"
-        f"质量门禁（本行仅由 `pytest.xml` 生成）：`pytest` {counts.tests:,} passed。"
-        "`ruff check` / `ruff format --check` / `mypy --strict` 是独立的提交前门禁，"
-        "不由本报告认证。"
-    )
+    return f"`pytest` {counts.tests:,} passed；ruff 和 mypy 作为独立门禁。"
 
 
-def _replace_region(text: str, body: str, *, path: Path) -> str:
+def _replace_region(text: str, body: str, *, path: Path, inline: bool = False) -> str:
     start = f"<!-- BEGIN {MARKER} -->"
     end = f"<!-- END {MARKER} -->"
     if text.count(start) != 1 or text.count(end) != 1:
         raise SystemExit(f"! {path}: marker pair {MARKER!r} must occur exactly once")
     prefix, remainder = text.split(start, 1)
     _old, suffix = remainder.split(end, 1)
+    if inline:
+        return f"{prefix}{start}{body.strip()}{end}{suffix}"
     return f"{prefix}{start}\n{body.rstrip()}\n{end}{suffix}"
 
 
 def synchronize(args: argparse.Namespace) -> tuple[Path, ...]:
     """Validate JUnit, render README, and publish it atomically."""
 
-    with exclusive_lock(args.readme.parent / DOCS_LOCK):
+    with exclusive_lock(args.repo_root / DOCS_LOCK):
         counts = load_counts(args.junit)
         before = read_text(args.readme)
-        after = _replace_region(before, render(counts), path=args.readme)
+        after = _replace_region(before, render(counts), path=args.readme, inline=True)
         if before == after:
             return ()
         if args.check:

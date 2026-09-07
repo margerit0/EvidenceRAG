@@ -51,6 +51,8 @@ def _args(runner: ModuleType, root: Path, *, check: bool = False) -> argparse.Na
     argv = [
         "--junit",
         str(root / "reports" / "pytest.xml"),
+        "--repo-root",
+        str(root),
         "--readme",
         str(root / "README.md"),
     ]
@@ -64,7 +66,7 @@ def _readme(root: Path, *, duplicate: bool = False) -> Path:
     if duplicate:
         marker = f"{marker}\n{marker}"
     path = root / "README.md"
-    write_text(path, f"before\n{marker}\nafter\n")
+    write_text(path, f"before\n- 自动化测试：{marker}\nafter\n")
     return path
 
 
@@ -142,10 +144,18 @@ class TestQualityGateSynchronization:
         args = _args(runner, tmp_path)
         assert runner.synchronize(args) == (readme,)
         rendered = read_text(readme)
-        assert "tests/                   7 个单元测试" in rendered
         assert "`pytest` 7 passed" in rendered
-        assert "ruff check" in rendered
+        assert "ruff" in rendered
+        assert "mypy" in rendered
+        assert "tests/                   7 个单元测试" not in rendered
+        assert "```" not in rendered
         assert not (tmp_path / "indexes" / "tidb" / "eval" / "pytest.xml").exists()
+
+    def test_shared_lock_blocks_before_loading_junit(self, tmp_path: Path) -> None:
+        runner = _runner()
+        write_text(tmp_path / runner.DOCS_LOCK, "pid=123\n")
+        with pytest.raises(SystemExit, match="another writer"):
+            runner.synchronize(_args(runner, tmp_path))
 
     def test_is_idempotent_and_check_accepts_fresh_documentation(self, tmp_path: Path) -> None:
         runner = _runner()

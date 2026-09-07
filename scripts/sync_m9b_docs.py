@@ -18,6 +18,7 @@ from zhrag.io_utils import exclusive_lock, read_text, replace_files, write_text
 
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
+EVALUATION_DOC = ROOT / "docs" / "evaluation.md"
 ARCHITECTURE = ROOT / "docs" / "architecture-decision.md"
 DOCS_LOCK = ".docs.lock"
 STATUS_MARKER = "M9B-GENERATION-STATUS"
@@ -40,8 +41,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Synchronize M9b1 generation-orchestration contract documentation."
     )
-    parser.add_argument("--readme", type=Path, default=README)
+    parser.add_argument(
+        "--evaluation",
+        "--readme",
+        dest="evaluation",
+        type=Path,
+        default=EVALUATION_DOC,
+        help="detailed evaluation document (legacy alias: --readme)",
+    )
     parser.add_argument("--architecture", type=Path, default=ARCHITECTURE)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=ROOT,
+        help="directory holding the shared docs lock",
+    )
     parser.add_argument("--check", action="store_true", help="fail if tracked docs are stale")
     return parser.parse_args(argv)
 
@@ -163,7 +177,7 @@ def _replace_region(text: str, marker: str, body: str, *, path: Path) -> str:
 
 def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
     return (
-        _Target(args.readme, ((STATUS_MARKER, render_readme_status),)),
+        _Target(args.evaluation, ((STATUS_MARKER, render_readme_status),)),
         _Target(
             args.architecture,
             (
@@ -185,7 +199,7 @@ def _render_target(target: _Target) -> tuple[str, str]:
 def synchronize(args: argparse.Namespace) -> tuple[Path, ...]:
     """Render and atomically publish the two tracked M9b1 document regions."""
 
-    with exclusive_lock(args.readme.parent / DOCS_LOCK):
+    with exclusive_lock(args.repo_root / DOCS_LOCK):
         rendered = [(target.path, *_render_target(target)) for target in _targets(args)]
         stale = tuple(path for path, before, after in rendered if before != after)
         if args.check:

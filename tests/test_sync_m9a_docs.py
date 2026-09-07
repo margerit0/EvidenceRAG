@@ -94,26 +94,26 @@ def _evidence() -> dict[str, Any]:
 
 
 def _docs(root: Path, *, duplicate_readme_marker: bool = False) -> tuple[Path, Path]:
-    readme = root / "README.md"
+    evaluation = root / "docs" / "evaluation.md"
     architecture = root / "docs" / "architecture-decision.md"
-    readme_marker = (
-        "<!-- BEGIN M9A-GENERATION-METRICS -->\nstale\n<!-- END M9A-GENERATION-METRICS -->"
-    )
+    marker = "<!-- BEGIN M9A-GENERATION-METRICS -->\nstale\n<!-- END M9A-GENERATION-METRICS -->"
     if duplicate_readme_marker:
-        readme_marker = f"{readme_marker}\n{readme_marker}"
-    write_text(readme, f"before\n{readme_marker}\nafter\n")
-    write_text(architecture, f"before\n{readme_marker}\nafter\n")
-    return readme, architecture
+        marker = f"{marker}\n{marker}"
+    write_text(evaluation, f"before\n{marker}\nafter\n")
+    write_text(architecture, f"before\n{marker}\nafter\n")
+    return evaluation, architecture
 
 
 def _args(runner: ModuleType, root: Path, *, check: bool = False) -> object:
     argv = [
         "--evidence",
         str(root / "evidence.json"),
-        "--readme",
-        str(root / "README.md"),
+        "--evaluation",
+        str(root / "docs" / "evaluation.md"),
         "--architecture",
         str(root / "docs" / "architecture-decision.md"),
+        "--repo-root",
+        str(root),
     ]
     if check:
         argv.append("--check")

@@ -230,30 +230,32 @@ class TestSynchronizer:
         runner = _runner()
         report = _report()
         monkeypatch.setattr(runner, "_load_report", lambda _paths, resamples, seed: report)
-        readme = tmp_path / "README.md"
+        evaluation = tmp_path / "docs" / "evaluation.md"
         architecture = tmp_path / "architecture.md"
         claude = tmp_path / "CLAUDE.md"
-        for path in (readme, architecture, claude):
+        for path in (evaluation, architecture, claude):
             write_text(path, "<!-- BEGIN M7-CHUNK-SWEEP -->\nold\n<!-- END M7-CHUNK-SWEEP -->\n")
         args = runner._parse_args(
             [
                 "--artifacts",
                 str(tmp_path / "artifacts"),
-                "--readme",
-                str(readme),
+                "--evaluation",
+                str(evaluation),
                 "--architecture",
                 str(architecture),
                 "--claude-context",
                 str(claude),
+                "--repo-root",
+                str(tmp_path),
                 "--check",
                 "--resamples",
                 "2",
             ]
         )
-        before = {path: read_text(path) for path in (readme, architecture, claude)}
+        before = {path: read_text(path) for path in (evaluation, architecture, claude)}
         with pytest.raises(SystemExit, match="stale"):
             runner.synchronize(args)
-        assert {path: read_text(path) for path in (readme, architecture, claude)} == before
+        assert {path: read_text(path) for path in (evaluation, architecture, claude)} == before
 
     def test_sync_replaces_all_targets_and_is_idempotent(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -261,29 +263,32 @@ class TestSynchronizer:
         runner = _runner()
         report = _report()
         monkeypatch.setattr(runner, "_load_report", lambda _paths, resamples, seed: report)
-        readme = tmp_path / "README.md"
+        evaluation = tmp_path / "docs" / "evaluation.md"
         architecture = tmp_path / "architecture.md"
         claude = tmp_path / "CLAUDE.md"
         marker = "<!-- BEGIN M7-CHUNK-SWEEP -->\nold\n<!-- END M7-CHUNK-SWEEP -->\n"
-        for path in (readme, architecture, claude):
-            write_text(path, marker)
+        write_text(evaluation, marker)
+        write_text(architecture, marker)
+        write_text(claude, marker)
         args = runner._parse_args(
             [
                 "--artifacts",
                 str(tmp_path / "artifacts"),
-                "--readme",
-                str(readme),
+                "--evaluation",
+                str(evaluation),
                 "--architecture",
                 str(architecture),
                 "--claude-context",
                 str(claude),
+                "--repo-root",
+                str(tmp_path),
                 "--resamples",
                 "2",
             ]
         )
         changed = runner.synchronize(args)
         assert len(changed) == 3
-        contents = [read_text(path) for path in (readme, architecture, claude)]
+        contents = [read_text(path) for path in (evaluation, architecture, claude)]
         assert all("old" not in content for content in contents)
         assert all("M7-CHUNK-SWEEP" in content for content in contents)
         assert runner.synchronize(args) == ()

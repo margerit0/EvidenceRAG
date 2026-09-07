@@ -105,26 +105,43 @@ def _read_quality(artifacts: Path) -> dict[str, Any]:
     return value
 
 
-def _docs(root: Path, *, duplicate_readme_marker: bool = False) -> tuple[Path, Path, Path]:
+def _docs(
+    root: Path,
+    *,
+    duplicate_readme_marker: bool = False,
+) -> tuple[Path, Path, Path, Path]:
     readme = root / "README.md"
+    evaluation = root / "docs" / "evaluation.md"
     architecture = root / "docs" / "architecture-decision.md"
     claude = root / "CLAUDE.md"
-    status_region = "<!-- BEGIN TIDB-EVAL-STATUS -->\nstale\n<!-- END TIDB-EVAL-STATUS -->"
+    summary_region = "<!-- BEGIN TIDB-EVAL-SUMMARY -->\nstale\n<!-- END TIDB-EVAL-SUMMARY -->"
     if duplicate_readme_marker:
-        status_region = f"{status_region}\n{status_region}"
+        summary_region = f"{summary_region}\n{summary_region}"
     write_text(
         readme,
         "\n".join(
             (
                 "before",
-                status_region,
-                "<!-- BEGIN TIDB-EVAL-EVIDENCE -->",
-                "stale",
-                "<!-- END TIDB-EVAL-EVIDENCE -->",
+                summary_region,
                 "```",
                 "<!-- BEGIN QUALITY-GATE-STATUS -->",
                 "stale",
                 "<!-- END QUALITY-GATE-STATUS -->",
+                "after",
+            )
+        ),
+    )
+    write_text(
+        evaluation,
+        "\n".join(
+            (
+                "before",
+                "<!-- BEGIN TIDB-EVAL-STATUS -->",
+                "stale",
+                "<!-- END TIDB-EVAL-STATUS -->",
+                "<!-- BEGIN TIDB-EVAL-EVIDENCE -->",
+                "stale",
+                "<!-- END TIDB-EVAL-EVIDENCE -->",
                 "after",
             )
         ),
@@ -146,24 +163,23 @@ def _docs(root: Path, *, duplicate_readme_marker: bool = False) -> tuple[Path, P
         claude,
         "<!-- BEGIN TIDB-LOCAL-ARTIFACTS -->\nstale\n<!-- END TIDB-LOCAL-ARTIFACTS -->",
     )
-    return readme, architecture, claude
+    return readme, evaluation, architecture, claude
 
 
 def _args(runner: ModuleType, root: Path, *, check: bool = False) -> object:
-    readme, architecture, claude = (
-        root / "README.md",
-        root / "docs" / "architecture-decision.md",
-        root / "CLAUDE.md",
-    )
     argv = [
         "--artifacts",
         str(root / "indexes" / "tidb"),
+        "--repo-root",
+        str(root),
         "--readme",
-        str(readme),
+        str(root / "README.md"),
+        "--evaluation",
+        str(root / "docs" / "evaluation.md"),
         "--architecture",
-        str(architecture),
+        str(root / "docs" / "architecture-decision.md"),
         "--claude-context",
-        str(claude),
+        str(root / "CLAUDE.md"),
     ]
     if check:
         argv.append("--check")
@@ -384,31 +400,56 @@ class TestSynchronization:
     def test_renders_allowlisted_aggregates_and_is_idempotent(self, tmp_path: Path) -> None:
         runner = _runner()
         _reports(tmp_path)
-        readme, architecture, claude = _docs(tmp_path)
+        readme, evaluation, architecture, claude = _docs(tmp_path)
 
-        assert runner.synchronize(_args(runner, tmp_path)) == (readme, architecture, claude)
-        first = tuple(read_text(path) for path in (readme, architecture, claude))
-        assert "3 组 direct/paraphrase、6 条 query" in first[0]
-        assert "2 个 `gold_source_key` 源聚类" in first[0]
-        assert "source-cluster bootstrap 95% CI" in first[0]
-        assert "独立单位" not in first[0]
-        assert "`ruff check` 全通过" not in first[0]
-        assert "`mypy --strict` 无告警" not in first[0]
-        assert "binary nDCG@10" in first[0]
-        assert "预声明主检验族" in first[0]
-        assert "direct → paraphrase robustness" in first[0]
-        assert "词面重叠分层" in first[0]
-        assert "same-model self-agreement" in first[0]
-        assert "100% **已判断覆盖**" in first[0]
+        assert runner.synchronize(_args(runner, tmp_path)) == (
+            readme,
+            evaluation,
+            architecture,
+            claude,
+        )
+        first = tuple(read_text(path) for path in (readme, evaluation, architecture, claude))
+        summary = (
+            first[0]
+            .split("<!-- BEGIN TIDB-EVAL-SUMMARY -->", 1)[1]
+            .split("<!-- END TIDB-EVAL-SUMMARY -->", 1)[0]
+        )
+        assert summary.startswith("\n在 **1 篇 TiDB 文档、6 条测试问题**上")
+        assert "| 检索方案 | 首条命中率 | 95% 置信区间 |" in summary
+        assert "| 关键词检索 | " in summary
+        assert "| 融合 + 模型重排 | " in summary
+        assert summary.count("\n| ") == 5
+        assert "Holm 校正 p = " in summary
+        assert "本次检验未检测到显著差异" in summary
+        assert "不是抽样偶然" not in summary
+        assert "不是生成答案的正确率" in summary
+        assert "同一模型" in summary
+        assert "<details>" in summary and "</details>" in summary
+        assert "2 个来源文档簇" in summary
+        assert "[评估文档](docs/evaluation.md)" in summary
+        assert "预声明主检验族" not in first[0]
+        assert "词面重叠分层" not in first[0]
         assert (
             "<!-- BEGIN QUALITY-GATE-STATUS -->\nstale\n<!-- END QUALITY-GATE-STATUS -->"
         ) in first[0]
         assert "`pytest` 7 passed" not in first[0]
-        assert "无上游人工 gold" in first[1]
-        assert "HTTP 延迟/QPS 已由 M8 独立认证" in first[1]
-        assert "增量重建仍待测" in first[1]
-        assert "延迟/QPS/重建仍待测" not in first[1]
-        assert "quality_report.json" in first[2]
+        assert "3 组 direct/paraphrase、6 条 query" in first[1]
+        assert "2 个 `gold_source_key` 源聚类" in first[1]
+        assert "source-cluster bootstrap 95% CI" in first[1]
+        assert "独立单位" not in first[1]
+        assert "`ruff check` 全通过" not in first[1]
+        assert "`mypy --strict` 无告警" not in first[1]
+        assert "binary nDCG@10" in first[1]
+        assert "预声明主检验族" in first[1]
+        assert "direct → paraphrase robustness" in first[1]
+        assert "词面重叠分层" in first[1]
+        assert "same-model self-agreement" in first[1]
+        assert "100% **已判断覆盖**" in first[1]
+        assert "无上游人工 gold" in first[2]
+        assert "HTTP 延迟/QPS 已由 M8 独立认证" in first[2]
+        assert "增量重建仍待测" in first[2]
+        assert "延迟/QPS/重建仍待测" not in first[2]
+        assert "quality_report.json" in first[3]
         serialized = "\n".join(first)
         for forbidden in (
             "直接问题",
@@ -420,19 +461,40 @@ class TestSynchronization:
         ):
             assert forbidden not in serialized
         assert runner.synchronize(_args(runner, tmp_path)) == ()
-        assert tuple(read_text(path) for path in (readme, architecture, claude)) == first
+        assert (
+            tuple(read_text(path) for path in (readme, evaluation, architecture, claude)) == first
+        )
         assert runner.synchronize(_args(runner, tmp_path, check=True)) == ()
+
+    @pytest.mark.parametrize("delta", [-0.2, 0.2])
+    def test_significant_summary_does_not_assume_improvement(
+        self, tmp_path: Path, delta: float
+    ) -> None:
+        runner = _runner()
+        status = runner.load_status(_reports(tmp_path))
+        contrast = runner._primary_contrast(
+            status, treatment=runner.RERANK_LABEL, comparator=runner.RRF_LABEL
+        )
+        contrast["reject"] = True
+        contrast["adjusted_p"] = 0.01
+        contrast["adjusted_p_inherits_floor"] = False
+        contrast["delta"] = {"mean": delta, "low": delta - 0.01, "high": delta + 0.01}
+        summary = runner._readme_summary(status)
+        assert "本次检验检测到差异；方向以差值为准" in summary
+        assert f"{delta:.4f}" in summary
+        assert "不是抽样偶然" not in summary
+        assert "提升" not in summary
 
     def test_check_reports_stale_docs_without_writing(self, tmp_path: Path) -> None:
         runner = _runner()
         _reports(tmp_path)
-        readme, architecture, claude = _docs(tmp_path)
-        before = tuple(read_text(path) for path in (readme, architecture, claude))
+        docs = _docs(tmp_path)
+        before = tuple(read_text(path) for path in docs)
 
         with pytest.raises(SystemExit, match="documentation is stale"):
             runner.synchronize(_args(runner, tmp_path, check=True))
 
-        assert tuple(read_text(path) for path in (readme, architecture, claude)) == before
+        assert tuple(read_text(path) for path in docs) == before
 
     def test_publication_failure_rolls_back_every_document(
         self,
@@ -441,8 +503,8 @@ class TestSynchronization:
     ) -> None:
         runner = _runner()
         _reports(tmp_path)
-        readme, architecture, claude = _docs(tmp_path)
-        before = tuple(read_text(path) for path in (readme, architecture, claude))
+        docs = _docs(tmp_path)
+        before = tuple(read_text(path) for path in docs)
         real_replace = os.replace
         calls = {"n": 0}
 
@@ -458,8 +520,9 @@ class TestSynchronization:
             runner.synchronize(_args(runner, tmp_path))
 
         monkeypatch.undo()
-        assert tuple(read_text(path) for path in (readme, architecture, claude)) == before
+        assert tuple(read_text(path) for path in docs) == before
         assert not list(tmp_path.glob("*.sync.tmp"))
+        assert not list((tmp_path / "docs").glob("*.sync.tmp"))
 
     def test_refuses_to_run_while_another_docs_sync_holds_the_shared_lock(
         self,
@@ -495,10 +558,10 @@ class TestSynchronization:
     def test_validates_every_document_before_writing_any(self, tmp_path: Path) -> None:
         runner = _runner()
         _reports(tmp_path)
-        readme, architecture, claude = _docs(tmp_path, duplicate_readme_marker=True)
-        before = tuple(read_text(path) for path in (readme, architecture, claude))
+        docs = _docs(tmp_path, duplicate_readme_marker=True)
+        before = tuple(read_text(path) for path in docs)
 
         with pytest.raises(SystemExit, match="must occur exactly once"):
             runner.synchronize(_args(runner, tmp_path))
 
-        assert tuple(read_text(path) for path in (readme, architecture, claude)) == before
+        assert tuple(read_text(path) for path in docs) == before

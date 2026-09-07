@@ -41,6 +41,7 @@ from zhrag.io_utils import (
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "indexes" / "tidb"
 README = ROOT / "README.md"
+EVALUATION_DOC = ROOT / "docs" / "evaluation.md"
 ARCHITECTURE = ROOT / "docs" / "architecture-decision.md"
 CLAUDE_CONTEXT = ROOT / "CLAUDE.md"
 
@@ -94,7 +95,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Sync tracked TiDB evaluation status from local aggregate reports."
     )
     parser.add_argument("--artifacts", type=Path, default=ARTIFACTS)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=ROOT,
+        help="directory holding the shared docs lock taken by every synchronizer",
+    )
     parser.add_argument("--readme", type=Path, default=README)
+    parser.add_argument("--evaluation", type=Path, default=EVALUATION_DOC)
     parser.add_argument("--architecture", type=Path, default=ARCHITECTURE)
     parser.add_argument("--claude-context", type=Path, default=CLAUDE_CONTEXT)
     parser.add_argument("--check", action="store_true", help="fail if tracked docs are stale")
@@ -559,7 +567,16 @@ def _system_name(label: str) -> str:
     }[label]
 
 
-def _readme_status(status: EvalStatus) -> str:
+def _plain_system_name(label: str) -> str:
+    return {
+        LEXICAL_LABEL: "关键词检索",
+        DENSE_LABEL: "语义检索",
+        RRF_LABEL: "两路结果融合",
+        RERANK_LABEL: "融合 + 模型重排",
+    }[label]
+
+
+def _evaluation_status(status: EvalStatus) -> str:
     lines = [
         "> **状态**：评估层、语料层、词法/稠密检索、MRL、RRF 与离线 rerank 深度消融均已完成；",
         "> 在线检索链路已通过真实 Milvus Lite 校验，TiDB evergreen 索引也已付费嵌入并发布：",
@@ -579,7 +596,69 @@ def _readme_status(status: EvalStatus) -> str:
     return "\n".join(lines)
 
 
-def _readme_evidence(status: EvalStatus) -> str:
+def _primary_contrast(status: EvalStatus, *, treatment: str, comparator: str) -> Mapping[str, Any]:
+    for row in status.quality["primary_contrasts"]:
+        if row["treatment"] == treatment and row["comparator"] == comparator:
+            return row
+    raise SystemExit(f"! quality report lacks the {treatment!r} − {comparator!r} contrast")
+
+
+def _readme_summary(status: EvalStatus) -> str:
+    """Render the plain-language README table from the same validated report."""
+    systems = _quality_section(status, "system_metrics")
+    contrast = _primary_contrast(status, treatment=RERANK_LABEL, comparator=RRF_LABEL)
+    adjusted = _fmt_p(
+        float(contrast["adjusted_p"]),
+        at_floor=bool(contrast["adjusted_p_inherits_floor"]),
+    )
+    lines = [
+        (
+            f"在 **{status.documents:,} 篇 TiDB 文档、{status.queries:,} 条测试问题**上，"
+            "比较以下检索方案。问题和相关性标签由同一模型生成、验证和判断，"
+            "属于合成评测，不是人工标注。"
+        ),
+        "",
+        "**首条命中率**：排在第一位的段落是否包含可完整回答问题的证据，不是生成答案的正确率。",
+        "",
+        "| 检索方案 | 首条命中率 | 95% 置信区间 |",
+        "|---|---:|---:|",
+    ]
+    for label in RUN_LABELS:
+        hit = systems[label]["overall"]["full_hit_at_1"]
+        lines.append(
+            f"| {_plain_system_name(label)} | {float(hit['mean']):.1%} | "
+            f"[{float(hit['low']):.1%}, {float(hit['high']):.1%}] |"
+        )
+    lines.extend(
+        (
+            "",
+            "<details>",
+            "<summary>统计依据与评测边界</summary>",
+            "",
+            (
+                "预声明主指标 nDCG@10 衡量前列结果的相关性和排序。"
+                f"重排相对仅融合的差值为 **{_fmt_interval(contrast['delta'], digits=4)}**"
+                f"（配对 95% CI），Holm 校正 p = {adjusted}。"
+                + (
+                    "本次检验检测到差异；方向以差值为准。"
+                    if bool(contrast["reject"])
+                    else "本次检验未检测到显著差异，不代表两种方案等价。"
+                )
+            ),
+            (
+                f"{status.verified_pairs:,} 组「直接提问 / 换种说法」先在组内取均值，"
+                f"CI 与检验按 {status.source_clusters:,} 个来源文档簇重采样。"
+                "† 表示蒙特卡洛估计触及分辨率下限，不是严格的概率上界。"
+            ),
+            "完整方法和限制见 [评估文档](docs/evaluation.md)。",
+            "",
+            "</details>",
+        )
+    )
+    return "\n".join(lines)
+
+
+def _evaluation_evidence(status: EvalStatus) -> str:
     percent = status.generating_disagreement_rate * 100.0
     systems = _quality_section(status, "system_metrics")
     design = _quality_section(status, "evaluation_design")
@@ -895,11 +974,12 @@ def _render_target(target: _Target, status: EvalStatus) -> tuple[str, str]:
 
 def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
     return (
+        _Target(args.readme, {"TIDB-EVAL-SUMMARY": _readme_summary}),
         _Target(
-            args.readme,
+            args.evaluation,
             {
-                "TIDB-EVAL-STATUS": _readme_status,
-                "TIDB-EVAL-EVIDENCE": _readme_evidence,
+                "TIDB-EVAL-STATUS": _evaluation_status,
+                "TIDB-EVAL-EVIDENCE": _evaluation_evidence,
             },
         ),
         _Target(
@@ -921,7 +1001,7 @@ def synchronize(args: argparse.Namespace) -> tuple[Path, ...]:
     # then its artifact lock. The fixed order serializes replacement of the three
     # shared tracked documents without introducing a cross-report deadlock.
     with (
-        exclusive_lock(args.readme.parent / DOCS_LOCK),
+        exclusive_lock(args.repo_root / DOCS_LOCK),
         exclusive_lock(args.artifacts / "eval" / ARTIFACT_LOCK),
     ):
         status = load_status(args.artifacts)

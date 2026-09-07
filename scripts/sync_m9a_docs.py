@@ -35,6 +35,7 @@ from zhrag.io_utils import exclusive_lock, read_json, read_text, replace_files, 
 ROOT = Path(__file__).resolve().parent.parent
 EVIDENCE = ROOT / "docs" / "evidence" / "crud_rag_table8_v3.json"
 README = ROOT / "README.md"
+EVALUATION_DOC = ROOT / "docs" / "evaluation.md"
 ARCHITECTURE = ROOT / "docs" / "architecture-decision.md"
 DOCS_LOCK = ".docs.lock"
 
@@ -142,8 +143,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Synchronize M9a generation-metric documentation from tracked evidence."
     )
     parser.add_argument("--evidence", type=Path, default=EVIDENCE)
-    parser.add_argument("--readme", type=Path, default=README)
+    parser.add_argument(
+        "--evaluation",
+        "--readme",
+        dest="evaluation",
+        type=Path,
+        default=EVALUATION_DOC,
+        help="detailed evaluation document (legacy alias: --readme)",
+    )
     parser.add_argument("--architecture", type=Path, default=ARCHITECTURE)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=ROOT,
+        help="directory holding the shared docs lock",
+    )
     parser.add_argument("--check", action="store_true", help="fail if tracked docs are stale")
     return parser.parse_args(argv)
 
@@ -432,7 +446,7 @@ def _replace_region(text: str, marker: str, body: str, *, path: Path) -> str:
 
 def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
     return (
-        _Target(args.readme, README_MARKER, render_readme),
+        _Target(args.evaluation, README_MARKER, render_readme),
         _Target(args.architecture, ARCHITECTURE_MARKER, render_architecture),
     )
 
@@ -440,7 +454,7 @@ def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
 def synchronize(args: argparse.Namespace) -> tuple[Path, ...]:
     """Validate, render and atomically publish the two tracked M9a regions."""
 
-    with exclusive_lock(args.readme.parent / DOCS_LOCK):
+    with exclusive_lock(args.repo_root / DOCS_LOCK):
         evidence = load_evidence(args.evidence)
         rendered: list[tuple[Path, str, str]] = []
         for target in _targets(args):

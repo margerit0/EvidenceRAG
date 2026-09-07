@@ -26,6 +26,7 @@ from zhrag.io_utils import exclusive_lock, read_json, read_text, replace_files, 
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "indexes" / "tidb"
 README = ROOT / "README.md"
+EVALUATION_DOC = ROOT / "docs" / "evaluation.md"
 ARCHITECTURE = ROOT / "docs" / "architecture-decision.md"
 CLAUDE_CONTEXT = ROOT / "CLAUDE.md"
 DOCS_LOCK = ".docs.lock"
@@ -46,11 +47,24 @@ def _reconfigure_streams() -> None:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--artifacts", type=Path, default=ARTIFACTS)
-    parser.add_argument("--readme", type=Path, default=README)
+    parser.add_argument(
+        "--evaluation",
+        "--readme",
+        dest="evaluation",
+        type=Path,
+        default=EVALUATION_DOC,
+        help="detailed evaluation document (legacy alias: --readme)",
+    )
     parser.add_argument("--architecture", type=Path, default=ARCHITECTURE)
     parser.add_argument("--claude-context", type=Path, default=CLAUDE_CONTEXT)
     parser.add_argument("--resamples", type=int, default=10_000)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=ROOT,
+        help="directory holding the shared docs lock",
+    )
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
     if args.resamples < 1:
@@ -253,7 +267,7 @@ def _render_target(target: _Target, report: Mapping[str, Any]) -> tuple[str, str
 
 def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
     return (
-        _Target(args.readme, {"M7-CHUNK-SWEEP": _readme}),
+        _Target(args.evaluation, {"M7-CHUNK-SWEEP": _readme}),
         _Target(args.architecture, {"M7-CHUNK-SWEEP": _architecture}),
         _Target(args.claude_context, {"M7-CHUNK-SWEEP": _claude}),
     )
@@ -262,7 +276,7 @@ def _targets(args: argparse.Namespace) -> tuple[_Target, ...]:
 def synchronize(args: argparse.Namespace) -> tuple[Path, ...]:
     paths = ChunkSweepPaths(args.artifacts, ROOT / "tidb-rag-curated")
     with (
-        exclusive_lock(args.readme.parent / DOCS_LOCK),
+        exclusive_lock(args.repo_root / DOCS_LOCK),
         exclusive_lock(paths.sweep_root / ".bundle.lock"),
         exclusive_lock(paths.eval_root / ".artifacts.lock"),
     ):

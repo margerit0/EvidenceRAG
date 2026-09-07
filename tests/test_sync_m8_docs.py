@@ -107,14 +107,23 @@ def _docs(
     root: Path,
     *,
     duplicate_readme_marker: bool = False,
-) -> tuple[Path, Path, Path]:
+) -> tuple[Path, Path, Path, Path]:
     readme = root / "README.md"
+    evaluation = root / "docs" / "evaluation.md"
     architecture = root / "docs" / "architecture-decision.md"
     claude = root / "CLAUDE.md"
-    readme_region = "<!-- BEGIN M8-SERVICE-BENCHMARK -->\nstale\n<!-- END M8-SERVICE-BENCHMARK -->"
+    readme_region = "- 服务：<!-- BEGIN M8-README-HEADLINE -->stale<!-- END M8-README-HEADLINE -->"
     if duplicate_readme_marker:
         readme_region = f"{readme_region}\n{readme_region}"
     write_text(readme, f"before\n{readme_region}\nafter\n")
+    write_text(
+        evaluation,
+        "before\n"
+        "<!-- BEGIN M8-SERVICE-BENCHMARK -->\n"
+        "stale\n"
+        "<!-- END M8-SERVICE-BENCHMARK -->\n"
+        "after\n",
+    )
     write_text(
         architecture,
         "\n".join(
@@ -141,15 +150,19 @@ def _docs(
         claude,
         "<!-- BEGIN M8-LOCAL-ARTIFACTS -->\nstale\n<!-- END M8-LOCAL-ARTIFACTS -->",
     )
-    return readme, architecture, claude
+    return readme, evaluation, architecture, claude
 
 
 def _args(runner: ModuleType, root: Path, *, check: bool = False) -> argparse.Namespace:
     argv = [
         "--artifacts",
         str(root / "artifacts"),
+        "--repo-root",
+        str(root),
         "--readme",
         str(root / "README.md"),
+        "--evaluation",
+        str(root / "docs" / "evaluation.md"),
         "--architecture",
         str(root / "docs" / "architecture-decision.md"),
         "--claude-context",
@@ -224,18 +237,36 @@ class TestSynchronization:
     def test_renders_only_aggregates_and_is_idempotent(self, tmp_path: Path) -> None:
         runner = _runner()
         _artifacts(tmp_path)
-        readme, architecture, claude = _docs(tmp_path)
+        readme, evaluation, architecture, claude = _docs(tmp_path)
 
-        assert runner.synchronize(_args(runner, tmp_path)) == (readme, architecture, claude)
-        first = tuple(read_text(path) for path in (readme, architecture, claude))
-        assert "HTTP 服务与 M8 性能基准" in first[0]
-        assert "380.0 ms" in first[0]
-        assert "3.00 QPS" in first[0]
-        assert "dense encode" in first[0]
-        assert "cache-backed" in first[0]
-        assert "不调用 chat completion" in first[0]
+        assert runner.synchronize(_args(runner, tmp_path)) == (
+            readme,
+            evaluation,
+            architecture,
+            claude,
+        )
+        first = tuple(read_text(path) for path in (readme, evaluation, architecture, claude))
+        headline = (
+            first[0]
+            .split("<!-- BEGIN M8-README-HEADLINE -->", 1)[1]
+            .split("<!-- END M8-README-HEADLINE -->", 1)[0]
+        )
+        assert "\n" not in headline
+        assert headline.startswith("本机 HTTP 基准（4 次正式请求，并发 1，查询向量走本地缓存")
+        assert "p95 380.0 ms" in headline
+        assert "吞吐 3.00 QPS" in headline
+        assert "成功 3/4" in headline
+        assert "未启用重排，不含模型调用耗时" in headline
+        assert "- 服务：<!-- BEGIN M8-README-HEADLINE -->本机" in first[0]
+        assert "dense encode" not in first[0]
+        assert "HTTP 服务与 M8 性能基准" in first[1]
+        assert "380.0 ms" in first[1]
+        assert "3.00 QPS" in first[1]
+        assert "dense encode" in first[1]
+        assert "cache-backed" in first[1]
+        assert "不调用 chat completion" in first[1]
         roadmap = (
-            first[1]
+            first[2]
             .split("<!-- BEGIN M8-ROADMAP -->", 1)[1]
             .split("<!-- END M8-ROADMAP -->", 1)[0]
             .strip()
@@ -244,25 +275,27 @@ class TestSynchronization:
         assert roadmap.count("\n") == 0
         assert roadmap.count("|") == 6
         evidence = (
-            first[1]
+            first[2]
             .split("<!-- BEGIN M8-RESUME-EVIDENCE -->", 1)[1]
             .split("<!-- END M8-RESUME-EVIDENCE -->", 1)[0]
         )
         performance = (
-            first[1]
+            first[2]
             .split("<!-- BEGIN M8-RESUME-PERFORMANCE -->", 1)[1]
             .split("<!-- END M8-RESUME-PERFORMANCE -->", 1)[0]
         )
         assert "4 次正式请求" in evidence
         assert "p95 380.0 ms / 3.00 QPS" in performance
         assert "不含 provider 墙钟" in performance
-        assert "m8_http_samples" in first[2]
+        assert "m8_http_samples" in first[3]
         serialized = "\n".join(first)
         for forbidden in ("SECRET_QUERY", "SECRET_DOC", '"query"', '"doc_id"'):
             assert forbidden not in serialized
 
         assert runner.synchronize(_args(runner, tmp_path)) == ()
-        assert tuple(read_text(path) for path in (readme, architecture, claude)) == first
+        assert (
+            tuple(read_text(path) for path in (readme, evaluation, architecture, claude)) == first
+        )
         assert runner.synchronize(_args(runner, tmp_path, check=True)) == ()
 
     def test_check_reports_stale_docs_without_writing(self, tmp_path: Path) -> None:

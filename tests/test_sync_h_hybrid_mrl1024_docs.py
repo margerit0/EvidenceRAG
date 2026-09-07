@@ -40,15 +40,15 @@ def _docs(
     *,
     duplicate_readme_marker: bool = False,
 ) -> tuple[Path, Path, Path]:
-    readme = root / "README.md"
+    evaluation = root / "docs" / "evaluation.md"
     architecture = root / "docs" / "architecture-decision.md"
     claude = root / "CLAUDE.md"
-    readme_region = (
+    evaluation_region = (
         "<!-- BEGIN H-HYBRID-MRL1024-EVIDENCE -->\nstale\n<!-- END H-HYBRID-MRL1024-EVIDENCE -->"
     )
     if duplicate_readme_marker:
-        readme_region = f"{readme_region}\n{readme_region}"
-    write_text(readme, f"before\n{readme_region}\nafter\n")
+        evaluation_region = f"{evaluation_region}\n{evaluation_region}"
+    write_text(evaluation, f"before\n{evaluation_region}\nafter\n")
     write_text(
         architecture,
         "\n".join(
@@ -69,19 +69,21 @@ def _docs(
         claude,
         "<!-- BEGIN H-HYBRID-MRL1024-ARTIFACT -->\nstale\n<!-- END H-HYBRID-MRL1024-ARTIFACT -->",
     )
-    return readme, architecture, claude
+    return evaluation, architecture, claude
 
 
 def _args(runner: ModuleType, root: Path, *, check: bool = False) -> argparse.Namespace:
     argv = [
         "--expanded",
         str(root / "expanded"),
-        "--readme",
-        str(root / "README.md"),
+        "--evaluation",
+        str(root / "docs" / "evaluation.md"),
         "--architecture",
         str(root / "docs" / "architecture-decision.md"),
         "--claude-context",
         str(root / "CLAUDE.md"),
+        "--repo-root",
+        str(root),
     ]
     if check:
         argv.append("--check")

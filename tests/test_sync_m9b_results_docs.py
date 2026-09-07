@@ -28,8 +28,9 @@ def _args(root: Path, *, run_id: str = "trial-a") -> argparse.Namespace:
         artifacts=root / "indexes" / "crud" / "generation" / "v1",
         run_id=run_id,
         canonical=False,
-        readme=root / "README.md",
+        evaluation=root / "docs" / "evaluation.md",
         architecture=root / "docs" / "architecture-decision.md",
+        repo_root=root,
         check=True,
     )
 

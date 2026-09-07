@@ -25,14 +25,14 @@ def _runner() -> ModuleType:
 
 
 def _docs(root: Path, *, duplicate_readme_marker: bool = False) -> tuple[Path, Path]:
-    readme = root / "README.md"
+    evaluation = root / "docs" / "evaluation.md"
     architecture = root / "docs" / "architecture-decision.md"
-    readme_region = (
+    evaluation_region = (
         "<!-- BEGIN M9B-GENERATION-STATUS -->\nstale\n<!-- END M9B-GENERATION-STATUS -->"
     )
     if duplicate_readme_marker:
-        readme_region = f"{readme_region}\n{readme_region}"
-    write_text(readme, f"before\n{readme_region}\nafter\n")
+        evaluation_region = f"{evaluation_region}\n{evaluation_region}"
+    write_text(evaluation, f"before\n{evaluation_region}\nafter\n")
     write_text(
         architecture,
         "\n".join(
@@ -49,15 +49,17 @@ def _docs(root: Path, *, duplicate_readme_marker: bool = False) -> tuple[Path, P
             )
         ),
     )
-    return readme, architecture
+    return evaluation, architecture
 
 
 def _args(runner: ModuleType, root: Path, *, check: bool = False) -> argparse.Namespace:
     argv = [
-        "--readme",
-        str(root / "README.md"),
+        "--evaluation",
+        str(root / "docs" / "evaluation.md"),
         "--architecture",
         str(root / "docs" / "architecture-decision.md"),
+        "--repo-root",
+        str(root),
     ]
     if check:
         argv.append("--check")
@@ -126,8 +128,9 @@ class TestSynchronization:
 
     def test_validates_all_markers_before_writing(self, tmp_path: Path) -> None:
         runner = _runner()
+        evaluation = tmp_path / "docs" / "evaluation.md"
         write_text(
-            tmp_path / "README.md",
+            evaluation,
             "<!-- BEGIN M9B-GENERATION-STATUS -->\n"
             "one\n<!-- END M9B-GENERATION-STATUS -->\n"
             "<!-- BEGIN M9B-GENERATION-STATUS -->\ntwo\n"
@@ -141,11 +144,11 @@ class TestSynchronization:
             "<!-- BEGIN M9B-GENERATION-ROADMAP -->\nstale\n"
             "<!-- END M9B-GENERATION-ROADMAP -->\n",
         )
-        before = (read_text(tmp_path / "README.md"), read_text(architecture))
+        before = (read_text(evaluation), read_text(architecture))
 
         with pytest.raises(SystemExit, match="must occur exactly once"):
             runner.synchronize(_args(runner, tmp_path))
-        assert (read_text(tmp_path / "README.md"), read_text(architecture)) == before
+        assert (read_text(evaluation), read_text(architecture)) == before
 
     def test_publication_failure_rolls_back_both_documents(
         self,
