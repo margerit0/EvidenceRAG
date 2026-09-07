@@ -81,3 +81,21 @@ def test_readme_keeps_only_summary_regions_and_a_balanced_diagram() -> None:
     assert readme.count("```mermaid\n") == 1
     assert sum(line.startswith("```") for line in readme.splitlines()) % 2 == 0
     assert "docs/README.legacy.md" not in readme
+
+
+def test_local_snapshot_has_an_explicit_ignore_rule() -> None:
+    assert "/docs/README.legacy.md" in read_text(ROOT / ".gitignore").splitlines()
+
+
+@pytest.mark.parametrize("relative_path", ["README.md", "docs/evaluation.md", "CLAUDE.md"])
+def test_public_navigation_does_not_require_the_local_snapshot(relative_path: str) -> None:
+    assert "README.legacy.md" not in read_text(ROOT / relative_path)
+
+
+def test_architecture_retains_generated_performance_contract() -> None:
+    architecture = read_text(ROOT / "docs/architecture-decision.md")
+    for marker in ("M8-RESUME-EVIDENCE", "M8-RESUME-PERFORMANCE"):
+        assert architecture.count(f"<!-- BEGIN {marker} -->") == 1
+        assert architecture.count(f"<!-- END {marker} -->") == 1
+    assert "客户端 exact RRF" in architecture
+    assert "§13" in architecture

@@ -8,7 +8,7 @@
 |---|---|
 | 项目简介、检索流程、结果摘要 | `README.md`（面向非 AI 专业开发者；`TIDB-EVAL-SUMMARY` / `M8-README-HEADLINE` / `QUALITY-GATE-STATUS` 由同步器生成） |
 | 详细实验、统计口径与复现命令 | `docs/evaluation.md`（详细评估 marker 的默认同步目标；所有同步器仍锁定仓库根 `.docs.lock`，可用 `--repo-root` 指定） |
-| 技术选型理由、路线图 M0–M12、待办清单 | `docs/architecture-decision.md`（内部规划，**§13 是待验证事项清单**） |
+| 技术选型理由、路线图 M0–M12、待办清单 | `docs/architecture-decision.md`（架构决策与验证记录，**§13 是待验证事项清单**） |
 | 某个决定为什么这么做 | `git log`（提交信息写的是理由，不是改动列表） |
 | 语料授权边界 | `DATA_LICENSE.md` |
 

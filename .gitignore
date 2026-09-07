@@ -75,3 +75,6 @@ results/qa_cache*
 
 # Local historical document snapshot
 /docs/README.legacy.md
+
+# Local agent instructions
+/AGENTS.md

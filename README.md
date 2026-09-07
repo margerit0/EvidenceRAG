@@ -1,4 +1,4 @@
-# zhrag：中文技术文档检索与问答
+# EvidenceRAG：中文技术文档检索与问答
 
 用自然语言查找 TiDB 中文技术文档，返回相关段落、来源和检索耗时。结合**关键词检索、语义检索和模型重排**，并用可复现的实验检验效果。
 
@@ -73,7 +73,7 @@ flowchart LR
 | 问答边界 | 完整段落上下文预算、结构化引用校验、拒答与故障分离；答案不自动落盘 |
 | 质量门禁 | pytest、ruff、严格类型检查；GitHub Actions 配置 Ubuntu / Windows 双系统测试 |
 
-<!-- BEGIN QUALITY-GATE-STATUS -->`pytest` 1,349 passed；ruff 和 mypy 作为独立门禁。<!-- END QUALITY-GATE-STATUS -->
+<!-- BEGIN QUALITY-GATE-STATUS -->`pytest` 1,354 passed；ruff 和 mypy 作为独立门禁。<!-- END QUALITY-GATE-STATUS -->
 
 <!-- BEGIN M8-README-HEADLINE -->本机 HTTP 基准（980 次正式请求，并发 1，查询向量走本地缓存、未启用重排，不含模型调用耗时）：p50 197.4 ms，p95 228.3 ms，吞吐 4.97 QPS，成功 980/980。<!-- END M8-README-HEADLINE -->
 
@@ -130,15 +130,6 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
 ```
 
 页面可切换“问答 / 检索”。问答会额外调用 chat API，产生费用；`--enable-generation` 不能和 `--query-cache` 一起使用。模型端点须支持 JSON mode 与 `max_completion_tokens`，不支持时直接报错，不会自动改成无输出上限请求。生成阶段的指定 HTTP 错误（含 401）和网络瞬态故障默认阶梯重试，可能长时间等待并重复计费；用 `--generation-retries 0` 关闭，详见[重试策略](docs/answering.md#生成重试)。
-
-**已完成小规模真实端到端冒烟，但尚未建立答案准确率基准。** 验收中观察到生成失败和引用支持不完整：引用校验只能证明编号来自本次证据，不能代替事实核验。当前端点跑通的显式配置和验收限制见[问答说明](docs/answering.md#真实冒烟记录)；生成 I/O 超时不等于整条检索加生成的总时限。
-
-## 后续计划
-
-- 校准真实模型的事实性、引用支持度与拒答行为，独立报告问答质量。
-- 完成 TiDB Cloud 第二后端的真实实例验证。
-- 引入人工校准或独立模型复核，补充未参与调参的评测集。
-- 发布可访问的在线演示，并单独测量包含模型调用的端到端延迟。
 
 ## 文档与许可
 

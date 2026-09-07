@@ -1,6 +1,6 @@
-# 中文企业级 RAG 系统 —— 最终技术方案
+# zhrag 架构决策与验证记录
 
-> 定稿日期 2026-08-17。以下所有版本号、价格、限制均为该日实测值，会漂移。标注 ⚠️ 的是研究阶段未能闭环、需要你自己动手验证的点。
+> 初版规划日期为 2026-08-17，本文随后持续更新。历史调研中的版本、价格和供应商限制并非全部经过本项目实测；重新部署时应核对当前官方文档。当前实现以代码、认证报告和 §13 的验证状态为准，未完成项不代表已交付能力。
 
 > **数字勘误说明**：本报告综合时使用的分块统计来自早期原型（固定 1.15 字符/token）。
 > 生产实现按 Qwen3 tokenizer 实测标定（中文 1.57 / 英文 4.49），已全部更正为
@@ -17,7 +17,7 @@
 
 > **M9a 状态（2026-08-31）**：生成指标合同、RAGQuestEval answer-scoring 语义、aggregate-only Table 8 证据和独立同步器已完成；本阶段没有生成真实答案，也没有付费调用。M9b 才会在本地 gitignored 目录中运行 QG/QA/生成实验。
 
-**自研薄检索层（Protocol + YAML config）+ Milvus 三级部署（Lite on Windows → Standalone in WSL2 → Zilliz Cloud Free 公网）+ Qwen3-Embedding-8B（客户端拼 instruct 前缀、MRL 降至 1024 维）+ One Hub 上的 Qwen3-Reranker-8B（离线消融支持 top-50 / top-100，当前证据选 top-50）+ 客户端 char-bigram BM25 稀疏向量做词法臂 + 服务端 RRF 融合，评估侧以已建成的 R@1/MRR@10/nDCG@10 为主指标、M9a 的独立生成指标合同为辅，全部跑在 GitHub Actions 双 OS CI 上。**
+**当前在线路径：窄 Protocol + 显式组合根；Milvus Lite；Qwen3-Embedding-8B dense-4096 + 客户端 char-bigram BM25 稀疏向量；客户端 exact RRF；Qwen3-Reranker-8B 请求 top-100 分数、应用前 top-50。可选 `/api/ask` 在检索后生成带引用的单轮答案。MRL 降维为独立离线实验，Standalone/Zilliz 公网部署和 TiDB Cloud 真机验证仍属于后续工作。检索评估与生成验证分开报告，默认 CI 使用合成数据且不调用付费模型。**
 
 ---
 
@@ -26,18 +26,18 @@
 | 层次 | 选型 | 理由 | 备选（及改选条件） |
 |---|---|---|---|
 | **向量数据库** | **Milvus**：本地 `milvus-lite 3.2.0`（纯 Python，支持 Windows）→ WSL2 Ubuntu-24.04 Standalone → Zilliz Cloud Free（5 GB / 5 collections / $0） | 4096 维无压力（上限 32,768）；`hybrid_search` + `RRFRanker` 服务端融合；collection alias 支持原子换索引；同一份 pymilvus 代码跑三种部署 | **Qdrant v1.19.0**（原生 `qdrant-x86_64-pc-windows-msvc.zip`，无需 Docker/WSL2）。改选条件：你决定公网 demo 自己托管 VPS / HF Space，或彻底拒绝 Docker。**pgvector 已被排除**，见 §3 |
-| **检索框架** | **自研薄层**：`Retriever` / `Fusion` / `Reranker` / `Chunker` 四个 Protocol + registry + pydantic-settings YAML | `langchain-community` 已于 2026-05-22 正式 sunset，检索半壁江山被弃；llama-index-core 近 12 周提交量同比 -70%、8 周无发版。你现有 `BM25.search(query, k) -> list[tuple[str, float]]` **本身就是 Retriever Protocol** | **Haystack 3.0**（YAML 原生序列化 + `MultiRetriever` RRF）。改选条件：消融维度超过 6 个，且确实需要框架级配置编排。可另加 LangChain/LlamaIndex 各 ~50 行 adapter 作为**消融表的一行**（用于框架适配对照） |
+| **检索框架** | **自研薄层**：窄 Protocol、frozen settings 与显式组合根 | 当前检索步骤固定，依赖注入足以隔离编码器、存储和重排器，便于单独测试 | 只有出现真实的编排需求时才引入框架；新增适配层需验证是否改变检索或评估合同 |
 | **embedding** | **Qwen/Qwen3-Embedding-8B** @ One Hub relay；本地保留 4096 维缓存，部署候选为 MRL 1024 维 | 已实测 4096→1024 的 R@1 仅 −0.50pp、Holm p=0.684，存储降 75%；中转站行为与 SiliconFlow 不能混用 | Qwen3-Embedding-4B。改选条件：有可用 endpoint 后，在相同语料与 query 上做配对检验，而不是引用 C-MTEB 的跨模型点估计 |
 | **rerank** | **Qwen/Qwen3-Reranker-8B** @ One Hub relay，传 `instruction`，部署窗口候选 **top-50** | 已在冻结的 dense-4096 hybrid 上完成 top-50/100 分层消融：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp（p=1.32e−09）；top-100 未显著优于 top-50 | 4B 对照取消：当前中转站不提供。若换 provider，必须新建独立 fingerprint/cache，不能与现有 8B 分数混用 |
-| **LLM（生成）** | Qwen 系（你已有 key） | 与 embedding/rerank 同族，叙事一致 | — |
+| **LLM（生成）** | 由 `LLM_*` 配置注入 OpenAI-compatible chat；真实冒烟模型为 `gpt-5.6-sol` | 严格校验返回模型、答案结构和引用编号，默认不启用生成；已观察到供应商错误和引用支持不完整 | 更换模型需单独验证；生成质量和含模型调用的延迟不能引用检索基准代替 |
 | **LLM（评判）** | 当前 TiDB pooled qrels：与 QG 相同的 `gpt-5.6-sol`、`reasoning_effort=high`；未来生成侧对比实验仍要求独立 judge | 本轮可用配置只有同一请求模型，因此报告明确写 **self-agreement / synthetic labels**，不冒充独立复核；若要提升标签可信度，应在冻结 pool 上补不同模型复判或人工校准 | DeepSeek-V3 类或 Kimi 等非生成模型；切换后必须新建 provenance/cache，不与现有判断混用 |
 | **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,832，p50 371，p90 734，欠长块 5.0%，代码块破损 0；M7 已完成 256/400/800 source-level known-item sweep | 400 保留为 canonical reference；M7 两个相对 400 的主终点比较经 Holm 均未显著，不能声称 400 全局最优、等价或无损 |
-| **检索管线** | dense(4096/1024, HNSW, COSINE) + sparse(char-bigram BM25, **IP**) 双字段 → 服务端 `hybrid_search` + `RRFRanker` → 客户端 Qwen3-Reranker-8B 重排 top-50 | 三段式，每段可单独消融；top-50 由 top-100 未检出额外收益的实测决定 | **WeightedRanker 是必测项而非备选**：离线实测等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），加权 0.3/0.7 才显著（16 胜 4 负，p=0.047）。反过来 `RRFRanker` 的 **k 几乎不影响结果**（60→10 只动 0.1pp），不值得占消融表一列。Qdrant 的 dbsf 仍可作对照 |
+| **检索管线** | dense-4096（COSINE）+ sparse（char-bigram BM25，**IP**）两臂检索 → 客户端 exact RRF → 客户端 Qwen3-Reranker-8B 重排 top-50（请求窗口 top-100） | 三段式，每段可单独消融；top-50 由 top-100 未检出额外收益的实测决定 | **WeightedRanker 是必测项而非备选**：离线实测等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），加权 0.3/0.7 才显著（16 胜 4 负，p=0.047）。反过来 `RRFRanker` 的 **k 几乎不影响结果**（60→10 只动 0.1pp），不值得占消融表一列。Qdrant 的 dbsf 仍可作对照 |
 | **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | Milvus 内置 `chinese` analyzer 就是 jieba，且默认 `mode="search"` = `cut_for_search`——正是你实测最差的 73.4%，比 char bigram 的 75.9% 低 2.5 分。**开服务端分词器会让系统变差**。另外可绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的坑 | 无（这是本项目最有说服力的设计决策之一） |
-| **服务层** | FastAPI + httpx（异步）+ tenacity（429 指数退避） | 三个依赖，全部薄，不侵入检索层 | — |
+| **服务层** | FastAPI + 线程池中的同步 provider 调用；urllib transport 与独立生成重试策略 | 共享有限并发 admission，固定错误分类，检索和生成耗时分开报告 | 超时不是整个请求的严格墙钟上限，长重试不构成在线可用性保证 |
 | **前端** | FastAPI 挂一个单文件静态 HTML（检索框 + 结果卡片 + 命中 chunk 高亮 + 各阶段耗时条） | 界面优先展示**阶段耗时**和**检索证据**，便于检查系统行为 | Gradio / Streamlit（若你想 5 分钟部署到 HF Space）。改选条件：你决定公网 demo 放 HF Space 而非 Zilliz |
 | **评估** | 检索侧：**已建成**（R@k / MRR / nDCG / ALL-gold / bootstrap CI / paired bootstrap）。生成侧：**M9a 已冻结独立指标合同**（逐样本 BLEU/ROUGE-L、可选真实 BERTScore、RAGQuestEval 评分语义），真实生成实验留给 M9b | 不安装或移植无授权的 CRUD_RAG 代码；Table 8 只保留 aggregate-only 来源证据 | RAGAS 只作为「我知道这个框架」的一行说明。**不要当主力**：最后一次 commit 2026-02-24，559 open issues，而竞品当天都在发版 |
-| **可观测性** | **provider-free retrieval trace contract**：默认 no-op sink，测试用 in-memory sink；可选 sink 只接收脱敏 span lifecycle、profile fingerprint、候选/输出计数与八阶段耗时 | 不把 Phoenix/OTEL 运行时或外部 UI 当作已验证交付；HTTP 服务当前只有检索阶段，生成状态固定为 `not_evaluated` | Phoenix / OpenTelemetry 可作为后续 exporter，但必须单独验证部署、许可与数据边界 |
+| **可观测性** | **provider-free retrieval trace contract**：默认 no-op sink，测试用 in-memory sink；可选 sink 只接收脱敏 span lifecycle、profile fingerprint、候选/输出计数与八阶段耗时 | 不把 Phoenix/OTEL 运行时或外部 UI 当作已验证交付；HTTP 检索 trace 不覆盖生成，生成状态固定为 `not_evaluated` | Phoenix / OpenTelemetry 可作为后续 exporter，但必须单独验证部署、许可与数据边界 |
 | **工程化/CI** | GitHub Actions：`ubuntu-latest`（全量快子集）+ `windows-latest`（**故意不设 PYTHONUTF8/PYTHONIOENCODING**）；ruff（含 PLW1514 禁裸 `open()`）+ mypy + pytest | Linux runner 是 UTF-8，会掩盖你本机 cp936 的裸 `open()` 崩溃；双系统 CI 验证不同默认编码下的行为 | — |
 
 ---
@@ -67,7 +67,7 @@ pgvector README 的 FAQ 只给三条出路：half-precision（≤4000，还是�
 
 Milvus 内置 `chinese` analyzer 等价于 `{"tokenizer": "jieba", "filter": ["cnalphanumonly"]}`，而简写 `{"tokenizer": "jieba"}` 的默认是 `mode="search"`，即 jieba 的 `cut_for_search`——你实测 **73.4% R@1**，比 char bigram 的 **75.9%** 低 2.5 分。**开这个开关会让系统变差。**
 
-正确做法：进程内算 char-bigram BM25 权重 → 作为 `SPARSE_FLOAT_VECTOR` 写入 → `SPARSE_INVERTED_INDEX` + `metric_type="IP"`。数据库只负责 ANN + 服务端融合。
+正确做法：进程内算 char-bigram BM25 权重 → 作为 `SPARSE_FLOAT_VECTOR` 写入 → `SPARSE_INVERTED_INDEX` + `metric_type="IP"`。数据库负责两臂检索，默认在线路径在客户端执行 exact RRF。
 
 三个副产品：
 1. 绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的限制，否则 Lite 的分数与 Standalone/Zilliz 对不上，会**悄悄污染你上报的指标**；
@@ -491,7 +491,7 @@ zhrag/
 
 | 不做 | 一句话理由 |
 |---|---|
-| **不用 LangChain / LlamaIndex 做地基** | `langchain-community` 已于 2026-05-22 sunset（"effective immediately"），llama-index-core 8 周无发版、提交量同比 -70%——建在被弃的那一半上 |
+| **不用 LangChain / LlamaIndex 做地基** | 当前固定检索流程使用窄 Protocol 即可表达，优先减少运行时依赖和评估中的隐式行为 |
 | **不上 DSPy** | prompt optimizer 是消融矩阵里的**不受控混杂因素**：分高的配置可能只是被优化得更狠。要用就单独放到生成阶段实验、检索侧冻结 |
 | **不上 GraphRAG / Self-RAG / CRAG** | 每一个都能单独吃掉 5 周，而且和「检索评估」这条主线正交。README 提一句「已知但本项目未覆盖，见 Roadmap」即可 |
 | **不做微调（embedding / reranker / LLM）** | 需要标注数据与 GPU 时长，且会让「我的评估集有效吗」这条主线被稀释 |
@@ -511,13 +511,13 @@ zhrag/
 
 ### 实现与实验摘要
 
-**① 主导中文 RAG 评估框架设计与语料重建。** 发现 CRUD-RAG 官方 500 篇子集已饱和——40 行纯标准库字符 bigram BM25 即达 **R@1 98.0%、MRR@10 0.990**，任何检索配置均近满分、消融表无区分度；定位根因为语料规模不足与问句-证据表层重叠。从原始数据去重扩展至 **5,681 篇**干扰语料后 R@1 降至 **75.9%**、MRR@10 **0.857**，释放 **22 个百分点**可优化空间，并将主指标由已饱和的 R@5 改为 **R@1 / MRR@10 / nDCG@10**；全部指标附 95% bootstrap 置信区间，配置间比较对连续指标用**配对 bootstrap**、对二元指标用**精确 McNemar 检验**，全表经 **Holm-Bonferroni** 多重比较校正，并同时报逐查询**胜/负/平**计数。
+**① 中文 RAG 评估框架与语料重建。** 发现 CRUD-RAG 官方 500 篇子集已饱和——40 行纯标准库字符 bigram BM25 即达 **R@1 98.0%、MRR@10 0.990**，任何检索配置均近满分、消融表无区分度；定位根因为语料规模不足与问句-证据表层重叠。从原始数据去重扩展至 **5,681 篇**干扰语料后 R@1 降至 **75.9%**、MRR@10 **0.857**，释放 **22 个百分点**可优化空间，并将主指标由已饱和的 R@5 改为 **R@1 / MRR@10 / nDCG@10**；全部指标附 95% bootstrap 置信区间，配置间比较对连续指标用**配对 bootstrap**、对二元指标用**精确 McNemar 检验**，全表经 **Holm-Bonferroni** 多重比较校正，并同时报逐查询**胜/负/平**计数。
 
-**② 中文词法检索方案实测选型。** 对比 jieba 精确模式（R@1 **74.8%**）、jieba 搜索模式（**73.4%**）与字符 bigram（**75.9%**）；jieba+bigram 并集在 1doc 上达 76.4% 但汇总的 ALL-gold@10 反而略低（85.3% vs 85.4%）、索引构建耗时 **3.1 倍**，最终选定字符 bigram。进一步实测**向量数据库内置 jieba analyzer 默认即为搜索模式**，遂将词法臂移出数据库，以客户端预计算 BM25 权重作为 SPARSE_FLOAT_VECTOR（`metric_type=IP`）喂入，数据库仅承担 ANN 与服务端 RRF 融合。
+**② 中文词法检索方案实测选型。** 对比 jieba 精确模式（R@1 **74.8%**）、jieba 搜索模式（**73.4%**）与字符 bigram（**75.9%**）；jieba+bigram 并集在 1doc 上达 76.4% 但汇总的 ALL-gold@10 反而略低（85.3% vs 85.4%）、索引构建耗时 **3.1 倍**，最终选定字符 bigram。进一步实测**向量数据库内置 jieba analyzer 默认即为搜索模式**，遂将词法臂移出数据库，以客户端预计算 BM25 权重作为 SPARSE_FLOAT_VECTOR（`metric_type=IP`）喂入，数据库承担两臂检索，当前在线路径在客户端执行 exact RRF。
 
 **③ 面向技术文档的两阶段分块策略。** 针对 500 篇 TiDB 中文文档（**3,309** 个代码块 / **5,262** 行表格），纯标题切分导致 **63.5%** 分块 <100 tokens、最大块 **16,111** tokens；改为「标题切分 → 掩码代码块与表格 → 按 target=400 合并小块 / 拆分大块」，得 **1,832** 块，p50 **371** / p90 **734**，欠长块降至 **5.0%**，代码块破损 **0** 例；并给出 256/400/800 的分块尺寸-召回曲线。
 
-**④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B 构建 dense + 字符 bigram BM25 双臂检索与 RRF 融合，在 5,681 篇语料 / 800 条单证据查询上 **R@1 由 BM25 基线 75.9% 提升至 79.9%（+4.00pp，65 胜 33 负，McNemar 精确检验 p = 1.6e-03）**；在全部 2,394 条查询上对冻结 hybrid 的 top-100 候选统一调用 Qwen3-Reranker-8B，离线消融显示 top-50 已使单证据 `hit@1` **+6.06pp**（95% CI [+3.34,+8.78]，Holm p=0.0003）、三证据 `ALL@10` **+7.15pp**（[+4.98,+9.32]，p=1.32e-09），而 top-100 无显著额外收益，因此部署候选选 top-50；<!-- BEGIN M8-RESUME-PERFORMANCE -->当前认证的 cache-backed HTTP profile `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`（并发 1，不含 provider 墙钟）端到端 **p95 228.3 ms / 4.97 QPS**。<!-- END M8-RESUME-PERFORMANCE -->首次公开 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**：4096→1024 维存储由 **93.1 MB 降至 23.3 MB（−75%）**，R@1 **78.0%→77.5%（−0.50pp，配对 bootstrap p=0.684，Holm 校正后不显著）**；降至 128 维（−97% 存储）仍无显著损失，**64 维起显著劣化（−4.25pp，Holm p=0.001†；蒙特卡洛地板标记）**——官方技术报告未发布此数据。
+**④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B 构建 dense + 字符 bigram BM25 双臂检索与 RRF 融合，在 5,681 篇语料 / 800 条单证据查询上 **R@1 由 BM25 基线 75.9% 提升至 79.9%（+4.00pp，65 胜 33 负，McNemar 精确检验 p = 1.6e-03）**；在全部 2,394 条查询上对冻结 hybrid 的 top-100 候选统一调用 Qwen3-Reranker-8B，离线消融显示 top-50 已使单证据 `hit@1` **+6.06pp**（95% CI [+3.34,+8.78]，Holm p=0.0003）、三证据 `ALL@10` **+7.15pp**（[+4.98,+9.32]，p=1.32e-09），而 top-100 无显著额外收益，因此部署候选选 top-50；<!-- BEGIN M8-RESUME-PERFORMANCE -->当前认证的 cache-backed HTTP profile `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`（并发 1，不含 provider 墙钟）端到端 **p95 228.3 ms / 4.97 QPS**。<!-- END M8-RESUME-PERFORMANCE -->本项目记录 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**：4096→1024 维存储由 **93.1 MB 降至 23.3 MB（−75%）**，R@1 **78.0%→77.5%（−0.50pp，配对 bootstrap p=0.684，Holm 校正后不显著）**；降至 128 维（−97% 存储）仍无显著损失，**64 维起显著劣化（−4.25pp，Holm p=0.001†；蒙特卡洛地板标记）**——官方技术报告未发布此数据。
 
 **⑤ 用配对检验推翻自己的点估计，并据此改路线。** 8B 稠密检索相对 40 行纯标准库 BM25 名义领先 2.1pp，配对检验后判定**不显著**（95% CI **[−0.88, +5.12]pp**，McNemar 精确 p = **0.199**）；进一步用 R@1 列联表（both 538 / 仅 BM25 69 / 仅 dense 86 / 都不中 107，φ = 0.455，**并集 oracle 上限 86.6%**）判定两臂**互补而非冗余**，据此把主线从「换更强的单臂」改为「融合」，离线 RRF 兑现 **75.9% → 79.9%（p = 1.6e-03）**。同一批实验还显示**等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），只有加权 0.3/0.7 显著（16 胜 4 负，p=0.047）**——赢在少破坏，不在多修好。
 
@@ -570,7 +570,7 @@ zhrag/
 
 ---
 
-## 13. 需要你自己确认的事（清单）
+## 13. 验证事项清单
 
 **🔴 阻塞级（做别的之前先做）**
 
