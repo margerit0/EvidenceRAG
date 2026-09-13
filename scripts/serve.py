@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from zhrag.agent import AgentSettings, DocumentAgent
 from zhrag.answering import Answerer, AnswerSettings
 from zhrag.embedding_contract import validate_embedding_cache
 from zhrag.ingest import IngestState, read_state
@@ -27,6 +28,7 @@ from zhrag.io_utils import read_jsonl
 from zhrag.lexical import SparseIndex, read_sparse_index
 from zhrag.retrieval.online import OnlineRetriever, OnlineSettings, PassageReranker
 from zhrag.service.app import ServiceInfo, create_app
+from zhrag.service.observability import profile_fingerprint
 from zhrag.store import MilvusConfig, MilvusStore
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -129,6 +131,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--generation-timeout", type=float, default=60.0)
     parser.add_argument(
+        "--enable-agent",
+        action="store_true",
+        help="enable paid bounded document investigation; requires LLM_* configuration",
+    )
+    parser.add_argument("--agent-max-steps", type=int, default=10)
+    parser.add_argument("--agent-max-searches", type=int, default=3)
+    parser.add_argument("--agent-max-seconds", type=float, default=180.0)
+    parser.add_argument(
         "--generation-retries",
         type=int,
         default=15,
@@ -165,6 +175,67 @@ def _build_answerer(args: argparse.Namespace) -> Answerer | None:
             max_passages=args.context_passages,
             max_prompt_tokens=args.context_tokens,
         ),
+    )
+
+
+def _agent_settings(args: argparse.Namespace) -> AgentSettings:
+    return AgentSettings(
+        max_steps=args.agent_max_steps,
+        max_searches=args.agent_max_searches,
+        max_seconds=args.agent_max_seconds,
+        max_prompt_tokens=args.context_tokens,
+        max_reads=args.context_passages,
+    )
+
+
+def _build_agent(
+    args: argparse.Namespace,
+    retriever: OnlineRetriever,
+    *,
+    index_identity: str,
+) -> DocumentAgent | None:
+    if not args.enable_agent:
+        return None
+    if args.query_cache is not None:
+        raise ValueError("agent is incompatible with query-cache")
+    from zhrag.providers.answering import ChatAnswerGenerator  # noqa: PLC0415
+    from zhrag.providers.chat import ChatConfig  # noqa: PLC0415
+    from zhrag.providers.embedding import load_env  # noqa: PLC0415
+
+    settings = retriever.settings
+    identity = profile_fingerprint(
+        profile_name=settings.profile_name,
+        embedding_profile=settings.embedding_profile,
+        rerank_profile=settings.rerank_profile,
+        rerank_enabled=settings.rerank_enabled,
+        output_limit=settings.output_limit,
+        retrieval_settings={
+            name: getattr(settings, name)
+            for name in (
+                "dense_dimensions",
+                "arm_depth",
+                "fusion_depth",
+                "rrf_k",
+                "rerank_request_depth",
+                "rerank_apply_depth",
+                "output_limit",
+            )
+        },
+        published_index_identity=index_identity,
+    )
+    return DocumentAgent(
+        retriever,
+        ChatAnswerGenerator(
+            ChatConfig.from_env(load_env(args.env)),
+            max_output_tokens=args.generation_max_tokens,
+            timeout_seconds=min(args.generation_timeout, args.agent_max_seconds),
+            reasoning_effort=args.generation_reasoning_effort,
+            # A model decision is one provider attempt; do not inherit the legacy
+            # answering endpoint's potentially long retry ladder.
+            max_retries=0,
+        ),
+        retrieval_identity=identity,
+        settings=_agent_settings(args),
     )
 
 
@@ -376,6 +447,10 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("query-fixture requires --query-cache")
         if args.enable_generation and args.query_cache is not None:
             raise ValueError("generation is incompatible with query-cache")
+        if args.enable_agent and args.query_cache is not None:
+            raise ValueError("agent is incompatible with query-cache")
+        if args.enable_agent:
+            _agent_settings(args)
         if not math.isfinite(args.generation_timeout) or not 0 < args.generation_timeout <= 300:
             raise ValueError("generation-timeout must be in (0, 300]")
         if not 0 <= args.generation_retries <= 15:
@@ -403,6 +478,11 @@ def main(argv: list[str] | None = None) -> int:
                 info=info,
                 max_concurrency=args.max_concurrency,
                 answerer=_build_answerer(args),
+                agent=_build_agent(
+                    args,
+                    retriever,
+                    index_identity=f"{state.collection_name}:{state.sparse_fingerprint}",
+                ),
                 published_index_identity=(f"{state.collection_name}:{state.sparse_fingerprint}"),
             )
             import uvicorn  # noqa: PLC0415 - optional service dependency

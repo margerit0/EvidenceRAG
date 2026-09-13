@@ -6,6 +6,11 @@
 
 [检索流程](#检索流程) · [实测效果](#实测效果) · [关键取舍](#关键取舍) · [核心工程](#核心工程) · [快速开始](#快速开始) · [详细评估](docs/evaluation.md)
 
+**实验性文档调查**：在现有检索之上增加受限工具动作、补充搜索、追问、执行预算和调查记录。
+可显式启用 `/api/investigate`；实现与离线控制逻辑已验证，真实模型任务效果仍待评测。
+运行方式和单轮 RAG / 固定流程 / Agent 对照入口见[文档调查说明](docs/agent.md)，
+阶段进度见[迭代计划](docs/agent-iteration.md)。
+
 ## 检索流程
 
 技术文档中，命令和参数名需要精确匹配，同一个问题又可能有不同说法。系统分别按关键词和含义查找，再合并候选，用重排模型判断哪些段落更相关。
@@ -168,7 +173,7 @@ TiDB 文档没有上游人工标注。980 条问题由模型按主题分层抽�
 
 </details>
 
-<!-- BEGIN QUALITY-GATE-STATUS -->`pytest` 1,354 passed；ruff 和 mypy 作为独立门禁。<!-- END QUALITY-GATE-STATUS -->
+<!-- BEGIN QUALITY-GATE-STATUS -->`pytest` 1,429 passed；ruff 和 mypy 作为独立门禁。<!-- END QUALITY-GATE-STATUS -->
 
 <!-- BEGIN M8-README-HEADLINE -->本机 HTTP 基准（980 次正式请求，并发 1，查询向量走本地缓存、未启用重排，不含模型调用耗时）：p50 197.4 ms，p95 228.3 ms，吞吐 4.97 QPS，成功 980/980。<!-- END M8-README-HEADLINE -->
 

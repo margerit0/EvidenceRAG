@@ -121,6 +121,7 @@
         <div class="mode-switch" role="group" aria-label="工作模式">
           <button id="ask-mode" type="button" data-mode="ask" aria-pressed="false">问答</button>
           <button id="search-mode" type="button" data-mode="search" aria-pressed="true">检索</button>
+          <button id="agent-mode" type="button" data-mode="agent" aria-pressed="false">文档调查</button>
         </div>
       </div>
       <form id="search-form">
@@ -128,6 +129,7 @@
         <input id="query" name="query" maxlength="2000" autocomplete="off" required
                placeholder="例如：如何使用 BR 做全量备份？">
         <button id="submit" type="submit">检索文档</button>
+        <button id="stop" type="button" hidden>停止调查</button>
       </form>
       <div id="status" role="status" aria-live="polite"></div>
     </div>
@@ -135,6 +137,12 @@
     <section id="answer-section" hidden>
       <h2>回答</h2>
       <div id="answer" class="results"></div>
+    </section>
+
+    <section id="investigation" hidden>
+      <h2>调查过程</h2>
+      <p id="agent-usage" class="profile"></p>
+      <ol id="agent-events"></ol>
     </section>
 
     <section id="diagnostics" hidden>
@@ -166,6 +174,10 @@
     const answer = document.querySelector("#answer");
     const askMode = document.querySelector("#ask-mode");
     const searchMode = document.querySelector("#search-mode");
+    const agentMode = document.querySelector("#agent-mode");
+    const stopButton = document.querySelector("#stop");
+    const investigation = document.querySelector("#investigation");
+    const agentEvents = document.querySelector("#agent-events");
 
     const stageLabels = {
       dense_encode_seconds: "Dense encode",
@@ -186,7 +198,7 @@
       invalid_answer: "回答格式无效，以下为检索到的证据。"
     };
     const knownAnswerStatuses = new Set(Object.keys(answerMessages));
-    const fallbackCapabilities = { generation_enabled: false, output_limit: 10, generation_profile: null };
+    const fallbackCapabilities = { generation_enabled: false, agent_enabled: false, output_limit: 10, generation_profile: null };
     let capabilities = {...fallbackCapabilities};
     let mode = "search";
     let requestNumber = 0;
@@ -224,6 +236,8 @@
       diagnostics.hidden = true;
       resultSection.hidden = true;
       answerSection.hidden = true;
+      investigation.hidden = true;
+      agentEvents.replaceChildren();
       timings.replaceChildren();
       profile.replaceChildren();
       results.replaceChildren();
@@ -233,15 +247,18 @@
     function updateModeButtons() {
       askMode.setAttribute("aria-pressed", String(mode === "ask"));
       searchMode.setAttribute("aria-pressed", String(mode === "search"));
+      agentMode.setAttribute("aria-pressed", String(mode === "agent"));
+      agentMode.disabled = !capabilitiesReady || !capabilities.agent_enabled;
       askMode.disabled = !capabilitiesReady || !capabilities.generation_enabled;
       searchMode.disabled = !capabilitiesReady;
       submit.disabled = !capabilitiesReady;
-      submit.textContent = mode === "ask" ? "生成回答" : "检索文档";
+      submit.textContent = mode === "agent" ? "开始调查" : mode === "ask" ? "生成回答" : "检索文档";
     }
 
     function setMode(nextMode, clear = true) {
       if (nextMode === "ask" && !capabilities.generation_enabled) nextMode = "search";
-      mode = nextMode === "ask" ? "ask" : "search";
+      if (nextMode === "agent" && !capabilities.agent_enabled) nextMode = "search";
+      mode = ["ask", "agent"].includes(nextMode) ? nextMode : "search";
       requestNumber += 1;
       if (activeController) activeController.abort();
       activeController = null;
@@ -254,6 +271,7 @@
       const outputLimit = Number.isInteger(data && data.output_limit) ? data.output_limit : 10;
       return {
         generation_enabled: data && data.generation_enabled === true,
+        agent_enabled: data && data.agent_enabled === true,
         output_limit: Math.max(1, Math.min(2000, outputLimit)),
         generation_profile: typeof (data && data.generation_profile) === "string"
           ? data.generation_profile : null
@@ -269,7 +287,8 @@
         capabilities = {...fallbackCapabilities};
       }
       capabilitiesReady = true;
-      document.querySelector("#service-mode").textContent = capabilities.generation_enabled
+      document.querySelector("#service-mode").textContent = capabilities.agent_enabled
+        ? "文档调查已启用 · 可搜索、读取证据与追问" : capabilities.generation_enabled
         ? "问答服务已启用" : "检索服务 · 未启用答案生成";
       setMode(capabilities.generation_enabled ? "ask" : "search", false);
     }
@@ -439,6 +458,37 @@
       try { return await response.json(); } catch (_) { return null; }
     }
 
+    function showInvestigation(data) {
+      if (data.status === "answered") showAnswer(data);
+      else {
+        answerSection.hidden = false;
+        answer.replaceChildren(element("p", "empty", safeText(data.message)));
+        if (data.clarification) answer.append(element("p", "passage", safeText(data.clarification)));
+      }
+      resultHeading.textContent = "已读取的完整证据";
+      showSources(Array.isArray(data.sources) ? data.sources : []);
+      const actionNames = {decide: "选择下一步", search_docs: "搜索文档", read_passage: "读取证据", finish: "结束"};
+      const outcomeNames = {
+        ok: "完成", answered: "已生成带引用的答案", clarification_needed: "等待补充信息",
+        insufficient_evidence: "证据不足", budget_exhausted: "预算已用完", cancelled: "已停止",
+        duplicate_query: "跳过重复搜索", search_limit: "搜索次数已达上限",
+        read_limit: "读取次数已达上限", already_read: "证据已读取", unknown_evidence: "证据编号不存在",
+        tool_failed: "工具调用失败", no_new_candidates: "没有新增候选", context_limit: "完整证据超出预算",
+        invalid_action: "动作无效", invalid_answer: "引用或答案格式无效",
+        generation_failed: "模型调用失败", generation_timeout: "模型调用超时", retrieval_failed: "文档检索失败"
+      };
+      agentEvents.replaceChildren();
+      for (const event of Array.isArray(data.events) ? data.events : []) {
+        const ids = Array.isArray(event.evidence_ids) && event.evidence_ids.length
+          ? ` · 证据 ${event.evidence_ids.join(", ")}` : "";
+        agentEvents.append(element("li", "", `${Number(event.elapsed_seconds).toFixed(1)}s · ${actionNames[event.action] || event.action}：${outcomeNames[event.outcome] || event.outcome}${ids}`));
+      }
+      const usage = data.usage || {};
+      document.querySelector("#agent-usage").textContent = `总耗时 ${Number(data.total_seconds).toFixed(1)}s · 模型 ${usage.model_calls || 0} 次 · 搜索 ${usage.search_calls || 0} 次 · 读取 ${usage.read_calls || 0} 次`;
+      investigation.hidden = false;
+      setStatus(safeText(data.message), data.status === "answered" ? "" : "warning");
+    }
+
     function isStructuredAnswer(data) {
       return data && typeof data === "object" && knownAnswerStatuses.has(data.status);
     }
@@ -454,17 +504,23 @@
       submit.disabled = true;
       askMode.disabled = true;
       searchMode.disabled = true;
-      setStatus(requestMode === "ask" ? "正在生成回答……" : "正在检索……");
+      agentMode.disabled = true;
+      stopButton.hidden = requestMode !== "agent";
+      setStatus(requestMode === "agent" ? "正在调查，完成后显示执行记录……" : requestMode === "ask" ? "正在生成回答……" : "正在检索……");
       try {
         // The search mode continues to use the original fetch("/api/search") contract.
-        const response = await fetch(requestMode === "ask" ? "/api/ask" : "/api/search", {
+        const response = await fetch(requestMode === "agent" ? "/api/investigate" : requestMode === "ask" ? "/api/ask" : "/api/search", {
           method: "POST",
           headers: {"Content-Type": "application/json", "Accept": "application/json"},
-          body: JSON.stringify({query: query.value, top_k: capabilities.output_limit}),
+          body: JSON.stringify(requestMode === "agent" ? {query: query.value} : {query: query.value, top_k: capabilities.output_limit}),
           signal: activeController.signal
         });
         const data = await readJson(response);
         if (thisRequest !== requestNumber) return;
+        if (requestMode === "agent" && data && Array.isArray(data.events)) {
+          showInvestigation(data);
+          return;
+        }
         if (requestMode === "ask" && isStructuredAnswer(data)) {
           showAskData(data);
           if (!response.ok && data.status === "generation_unavailable") {
@@ -489,12 +545,18 @@
           submit.disabled = false;
           updateModeButtons();
           activeController = null;
+          stopButton.hidden = true;
         }
       }
     });
 
     askMode.addEventListener("click", () => setMode("ask"));
     searchMode.addEventListener("click", () => setMode("search"));
+    agentMode.addEventListener("click", () => setMode("agent"));
+    stopButton.addEventListener("click", () => {
+      if (activeController) activeController.abort();
+      setStatus("已请求停止，当前工具调用结束后不再执行后续步骤。", "warning");
+    });
     updateModeButtons();
     loadCapabilities();
   </script>

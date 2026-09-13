@@ -12,6 +12,7 @@ from typing import Any, cast
 
 import pytest
 
+from test_service import FakeRetriever
 from zhrag.ingest import IngestState, write_state
 from zhrag.io_utils import write_json, write_jsonl, write_text
 from zhrag.lexical import build_sparse_index, write_sparse_index
@@ -31,6 +32,30 @@ def load_script() -> ModuleType:
 
 
 serve = load_script()
+
+
+def test_agent_composition_is_explicit_and_uses_no_chat_retries(tmp_path: Path) -> None:
+    fake = FakeRetriever()
+    assert serve._build_agent(serve._parse_args([]), fake, index_identity="test") is None
+    env = tmp_path / ".env"
+    write_text(
+        env, "LLM_API_KEY=synthetic\nLLM_BASE_URL=https://example.invalid\nLLM_MODEL_NAME=model\n"
+    )
+    args = serve._parse_args(["--enable-agent", "--env", str(env)])
+    agent = serve._build_agent(args, fake, index_identity="test")
+    assert agent.generator.max_retries == 0
+    assert agent.settings.max_steps == 10
+    assert agent.retriever is fake
+
+
+def test_agent_cache_conflict_fails_before_artifact_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(_path: Path) -> None:
+        raise AssertionError("must not load")
+
+    monkeypatch.setattr(serve, "_load_published_artifacts", fail)
+    assert serve.main(["--enable-agent", "--query-cache", "cache.jsonl", "--no-rerank"]) == 1
 
 
 class FakeStore:

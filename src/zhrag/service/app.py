@@ -14,7 +14,7 @@ import math
 import threading
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
 from urllib.parse import urlsplit
@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+from zhrag.agent import AGENT_MESSAGES, DocumentAgent
 from zhrag.answering import PUBLIC_MESSAGES, Answerer, AnswerOutcome, AnswerStatus
 from zhrag.retrieval.online import OnlineRetrievalResult, OnlineRetriever, StageTimings
 from zhrag.service.observability import TraceRecorder, TraceSink, profile_fingerprint
@@ -133,6 +134,14 @@ class CapabilitiesResponse(BaseModel):
     generation_enabled: bool
     output_limit: int
     generation_profile: str | None
+    agent_enabled: bool = False
+    agent_profile: str | None = None
+
+
+class InvestigateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    query: Annotated[str, Field(min_length=1, max_length=QUERY_MAX_LENGTH)]
 
 
 class AnswerBlockResponse(BaseModel):
@@ -358,6 +367,7 @@ def create_app(  # noqa: PLR0915
     max_concurrency: int = 1,
     search_runner: SearchRunner | None = None,
     answerer: Answerer | None = None,
+    agent: DocumentAgent | None = None,
     trace_sink: TraceSink | None = None,
     published_index_identity: str | None = None,
 ) -> FastAPI:
@@ -381,6 +391,8 @@ def create_app(  # noqa: PLR0915
     ):
         raise ValueError("service info does not match retriever settings")
     output_limit = settings.output_limit
+    if agent is not None and agent.retriever is not retriever:
+        raise ValueError("agent must share the service retriever and admission gate")
     resolved_static = static_dir or Path(__file__).resolve().parent / "static"
     index_path = resolved_static / "index.html"
     runner = search_runner
@@ -412,6 +424,7 @@ def create_app(  # noqa: PLR0915
     app.state.admission = _AdmissionGate(max_concurrency)
     # Keep shielded work alive when its HTTP caller disconnects.
     pending_asks: set[asyncio.Task[AskResponse | JSONResponse]] = set()
+    pending_investigations: set[asyncio.Task[JSONResponse]] = set()
 
     @app.get("/api/capabilities", response_model=CapabilitiesResponse)
     async def capabilities(response: Response) -> CapabilitiesResponse:
@@ -420,6 +433,8 @@ def create_app(  # noqa: PLR0915
             generation_enabled=answerer is not None,
             output_limit=output_limit,
             generation_profile=answerer.profile_fingerprint if answerer else None,
+            agent_enabled=agent is not None,
+            agent_profile=agent.profile_fingerprint if agent else None,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -575,5 +590,76 @@ def create_app(  # noqa: PLR0915
         pending_asks.add(work)
         work.add_done_callback(pending_asks.discard)
         return await asyncio.shield(work)
+
+    async def run_investigation(
+        payload: InvestigateRequest,
+        active_agent: DocumentAgent,
+        stop: threading.Event,
+    ) -> JSONResponse:
+        try:
+            outcome = await run_in_threadpool(
+                active_agent.run, payload.query, cancelled=stop.is_set
+            )
+            content = {
+                "status": outcome.status,
+                "message": AGENT_MESSAGES[outcome.status],
+                "blocks": [asdict(block) for block in outcome.blocks],
+                "sources": [
+                    AnswerSourceResponse(
+                        citation_id=row.citation_id,
+                        rank=row.ranked.rank,
+                        title=row.title,
+                        text=row.ranked.passage.text,
+                        source_url=_safe_source_url(row.ranked.passage.metadata.get("source_url")),
+                    ).model_dump()
+                    for row in outcome.evidence
+                ],
+                "clarification": outcome.clarification,
+                "events": [asdict(event) for event in outcome.events],
+                "usage": {
+                    "model_calls": outcome.model_calls,
+                    "search_calls": outcome.search_calls,
+                    "read_calls": outcome.read_calls,
+                    "prompt_estimated_tokens": outcome.prompt_estimated_tokens,
+                },
+                "total_seconds": outcome.total_seconds,
+                "agent_profile": outcome.profile_fingerprint,
+            }
+            failed = outcome.status in {
+                "invalid_action",
+                "invalid_answer",
+                "generation_failed",
+                "generation_timeout",
+                "retrieval_failed",
+            }
+            return JSONResponse(
+                content=content,
+                status_code=503 if failed else 200,
+                headers=_no_store_headers(),
+            )
+        except (Exception, SystemExit):
+            return _error(503, "agent_failed", "Document investigation failed.")
+        finally:
+            app.state.admission.release()
+
+    @app.post("/api/investigate", response_model=None)
+    async def investigate(payload: InvestigateRequest, request: Request) -> JSONResponse:
+        if agent is None:
+            return _error(503, "agent_unavailable", "Document investigation is not enabled.")
+        if not app.state.admission.try_acquire():
+            return _error(429, "service_busy", "The service is at its concurrency limit.")
+        stop = threading.Event()
+        work = asyncio.create_task(run_investigation(payload, agent, stop))
+        pending_investigations.add(work)
+        work.add_done_callback(pending_investigations.discard)
+        try:
+            while not work.done():
+                await asyncio.wait({work}, timeout=0.1)
+                if await request.is_disconnected():
+                    stop.set()
+            return await asyncio.shield(work)
+        except asyncio.CancelledError:
+            stop.set()
+            raise
 
     return app
