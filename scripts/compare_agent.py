@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import ntpath
 import re
 import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from zhrag.agent import AgentSettings
 from zhrag.eval.agent_comparison import COMPARISON_CONTRACT, run_method
+from zhrag.eval.agent_review import fingerprint, pending_review
 from zhrag.eval.agent_tasks import METHODS, task_summary, validate_tasks
 from zhrag.io_utils import append_jsonl, read_jsonl, write_json
 
@@ -38,6 +41,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-id", help="fresh local run slug, required with --run")
     parser.add_argument("--methods", nargs="+", choices=METHODS, default=list(METHODS))
     parser.add_argument("--env", type=Path, default=ROOT / ".env")
+    parser.add_argument("--max-steps", type=int, default=10)
+    parser.add_argument("--max-searches", type=int, default=3)
+    parser.add_argument("--max-reads", type=int, default=6)
+    parser.add_argument("--max-seconds", type=float, default=180.0)
+    parser.add_argument("--generation-timeout", type=float, default=60.0)
+    parser.add_argument("--generation-max-tokens", type=int, default=4096)
     args = parser.parse_args(argv)
     try:
         return _execute(args)
@@ -46,13 +55,25 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
-def _execute(args: argparse.Namespace) -> int:
+def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
+    args: argparse.Namespace,
+) -> int:
     # Sibling script import supports direct `python scripts/compare_agent.py`.
     # Neither local-path validation nor planning imports providers or reads .env.
     from agent_tasks import _local_path  # noqa: PLC0415
 
     if not 1 <= args.limit <= 100:
         raise ValueError("limit must be between 1 and 100")
+    budgets = AgentSettings(
+        max_steps=args.max_steps,
+        max_searches=args.max_searches,
+        max_reads=args.max_reads,
+        max_seconds=args.max_seconds,
+    )
+    if not math.isfinite(args.generation_timeout) or not 0 < args.generation_timeout <= 300:
+        raise ValueError("invalid generation timeout")
+    if not 1 <= args.generation_max_tokens <= 8192:
+        raise ValueError("invalid generation output cap")
     if len(set(args.methods)) != len(args.methods):
         raise ValueError("duplicate comparison method")
     if args.allow_drafts and args.split != "dev":
@@ -75,6 +96,13 @@ def _execute(args: argparse.Namespace) -> int:
         "human_review_required": True,
         "provider_calls_enabled": args.run,
         "order": "task-order-with-cyclic-method-rotation-v1",
+        "agent_budgets": asdict(budgets),
+        "generation": {
+            "max_output_tokens": args.generation_max_tokens,
+            "timeout_seconds": min(args.generation_timeout, args.max_seconds),
+            "max_retries": 0,
+            "reasoning_effort": "low",
+        },
     }
     if not args.run:
         print(json.dumps(manifest, ensure_ascii=False, indent=2))
@@ -98,7 +126,17 @@ def _execute(args: argparse.Namespace) -> int:
             "--generation-reasoning-effort",
             "low",
             "--generation-max-tokens",
-            "4096",
+            str(args.generation_max_tokens),
+            "--generation-timeout",
+            str(args.generation_timeout),
+            "--agent-max-steps",
+            str(args.max_steps),
+            "--agent-max-searches",
+            str(args.max_searches),
+            "--agent-max-seconds",
+            str(args.max_seconds),
+            "--context-passages",
+            str(args.max_reads),
         ]
     )
     state, index = serve._load_published_artifacts(service_args.artifacts)
@@ -123,31 +161,31 @@ def _execute(args: argparse.Namespace) -> int:
         # mkdir is exclusive: two concurrent invocations cannot publish into one run.
         target.mkdir(parents=True, exist_ok=False)
         write_json(target / "manifest.json", manifest)
+        trial_rows: list[dict[str, object]] = []
+        method_profiles: dict[str, str] = {}
         for ordinal, task in enumerate(selected):
             rotation = ordinal % len(args.methods)
             methods = args.methods[rotation:] + args.methods[:rotation]
             for method in methods:
                 trial = run_method(agent, task.question, method)
+                profile = str(trial["profile_fingerprint"])
+                if method in method_profiles and method_profiles[method] != profile:
+                    raise ValueError("method profile changed during the run")
+                method_profiles[method] = profile
+                row: dict[str, object] = {
+                    "task": asdict(task),
+                    "result": trial,
+                    "review": pending_review(),
+                }
                 append_jsonl(
                     target / "trials.jsonl",
-                    [
-                        {
-                            "task": asdict(task),
-                            "result": trial,
-                            "review": {
-                                "reviewed": False,
-                                "reviewer": "",
-                                "task_success": None,
-                                "supported_claims": None,
-                                "total_claims": None,
-                                "appropriate_clarification_or_refusal": None,
-                                "notes": "",
-                            },
-                        }
-                    ],
+                    [row],
                 )
+                trial_rows.append(row)
                 print(f"completed trial {ordinal + 1}/{len(selected)}: {method}")
         manifest["complete"] = True
+        manifest["method_profiles"] = method_profiles
+        manifest["trials_sha256"] = fingerprint(trial_rows)
         write_json(target / "manifest.json", manifest)
     finally:
         store.close()

@@ -94,6 +94,32 @@ Agent chat 固定不重试，避免继承单轮问答历史上的长重试阶梯
 不能重复。场景模板的临时主题分组需在审核时根据真实证据重新确认。
 最终测试集冻结前不得用它调整提示词或参数。
 
+对已完成的本地试次，先准备独立审核文件：
+
+```powershell
+.venv/Scripts/python.exe scripts/review_agent.py --run-dir indexes/agent_eval/runs/<run-id> --prepare
+```
+
+审核者阅读 `review-packet.txt`，只在 `reviews.jsonl` 填写标签；原始 `trials.jsonl` 不修改。
+审核完成且任务本身 `reviewed=true` 后，使用：
+
+```powershell
+.venv/Scripts/python.exe scripts/review_agent.py --run-dir indexes/agent_eval/runs/<run-id> --report
+.venv/Scripts/python.exe scripts/review_agent.py --run-dir indexes/agent_eval/runs/<run-id> --check
+```
+
+`quality_report.json` 是仅含聚合数据的报告：任务成功率按全部任务计算，回答内的陈述支持度
+单独计算；每个方法对使用来源组聚类 bootstrap CI，方法差异使用配对、双侧检验和 Holm 校正。
+报告发布前会校验任务对是否完整、试次原文指纹、方法 profile、每条审核记录和任务审核状态。
+故障试次、拒答试次和缺证据试次都必须保留并审核，不能通过删除分母改善结果。
+
+`criteria_met` 对应任务的每条验收条件，必须逐项填布尔值；`task_success` 需同时满足全部条件、
+动作符合 `expected_status`、答案陈述全部受到所引证据支持，以及适用时的恰当追问/拒答。
+不一致的标签会被拒绝。只填写 reviewed 或只看 HTTP 成功不能通过审核。
+统计推断至少需要两个来源组；来源组很少、试次单次执行时仍需谨慎解读，不作强结论。
+报告里的引用支持比例只针对已回答内容，拒答不计为“完全支持”。
+审核材料只隐藏显式方法标签，答案风格仍可能暴露方法；哈希验证完整性，不能认证审核者身份。
+
 ## 三种方法的对照入口
 
 | 方法 | 流程 |
@@ -124,7 +150,27 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/c
 任务顺序固定，各任务的方法执行顺序循环轮换，以减少方法与供应商时间段完全重合的影响。
 这不消除模型随机性或供应商漂移；严格比较还需要重复试验与人工审阅。
 
-`manifest.json` 保存任务集/选中任务指纹和完成状态；`trials.jsonl` 逐条保存结果及空审核字段。
+`manifest.json` 保存任务集/选中任务指纹、实际方法 profile、完整试次摘要和完成状态；
+`trials.jsonl` 逐条保存不可修改的结果，历史空审核字段仍作为固定占位。
+实际审核写入独立的 `reviews.jsonl`，逐条绑定 task+result 指纹。
 `complete=true` 只代表选中调用流程结束，允许其中有失败试次，**不代表质量合格**。
 人工检查任务成功、关键陈述支持度、追问/拒答是否合适，再汇总配对指标。
-当前未实现语义自动打分、真实账单成本汇总或统计结果发布，不会把 HTTP/生成成功当成准确率。
+当前提供统计报告发布与重算检查，但未实现语义自动打分或真实账单成本汇总，
+不会把 HTTP/生成成功当成准确率。
+
+本轮比较产物合同升级为 v2，新增完整试次摘要及实际方法 profile。
+审核器拒绝原 v1 运行产物，不通过人工补哈希或原地改名把旧实验升级成新合同。
+已有旧产物保留本地；需要审核时使用新 run-id 重跑。
+
+冒烟可用 `--methods document_agent --limit 1 --max-steps 6 --max-searches 1 --max-reads 3`
+限制工作量；`--max-seconds`、`--generation-timeout`、`--generation-max-tokens` 分别设置
+调用边界时长检查、单次 chat I/O 超时与输出上限。实际检索仍采用现有 embedding/rerank
+重试策略，因此这些参数不是按金额或严格墙钟终止的费用上限。
+
+## 当前真实运行记录
+
+2026-09-14 对一个开发任务进行了有限调用的真实冒烟，模型在首次 chat 调用即失败，
+没有进入检索。使用受控网络权限复测未恢复；两次最小连通性诊断确认 HTTP 403，
+移除进程代理环境变量后结果相同。尚不能定位具体拦截层，不能据此评价调查策略质量。
+完整状态、边界和本地产物位置记录于 [迭代计划](agent-iteration.md#当前工作位置)。
+本轮没有生成可用于质量结论的真实答案，也没有填写人工审核标签。

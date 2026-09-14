@@ -10,6 +10,7 @@
 | 详细实验、统计口径与复现命令 | `docs/evaluation.md`（详细评估 marker 的默认同步目标；所有同步器仍锁定仓库根 `.docs.lock`，可用 `--repo-root` 指定） |
 | 技术选型理由、路线图 M0–M12、待办清单 | `docs/architecture-decision.md`（架构决策与验证记录，**§13 是待验证事项清单**） |
 | Agent 迭代计划、当前分支、跨会话进度 | `docs/agent-iteration.md`（先核对 Git 状态与验证记录；在独立分支继续开发） |
+| Agent 运行、审核与质量报告合同 | `docs/agent.md`（试次与审核产物均在 gitignored 目录） |
 | 某个决定为什么这么做 | `git log`（提交信息写的是理由，不是改动列表） |
 | 语料授权边界 | `DATA_LICENSE.md` |
 

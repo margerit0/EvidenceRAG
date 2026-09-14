@@ -173,7 +173,7 @@ TiDB 文档没有上游人工标注。980 条问题由模型按主题分层抽�
 
 </details>
 
-<!-- BEGIN QUALITY-GATE-STATUS -->`pytest` 1,429 passed；ruff 和 mypy 作为独立门禁。<!-- END QUALITY-GATE-STATUS -->
+<!-- BEGIN QUALITY-GATE-STATUS -->`pytest` 1,476 passed；ruff 和 mypy 作为独立门禁。<!-- END QUALITY-GATE-STATUS -->
 
 <!-- BEGIN M8-README-HEADLINE -->本机 HTTP 基准（980 次正式请求，并发 1，查询向量走本地缓存、未启用重排，不含模型调用耗时）：p50 197.4 ms，p95 228.3 ms，吞吐 4.97 QPS，成功 980/980。<!-- END M8-README-HEADLINE -->
 

@@ -58,6 +58,10 @@ def test_dry_run_never_imports_service_or_providers(
         ["--allow-drafts", "--methods", "single_rag", "single_rag"],
         ["--allow-drafts", "--run"],
         ["--allow-drafts", "--run", "--run-id", "con"],
+        ["--allow-drafts", "--max-steps", "0"],
+        ["--allow-drafts", "--max-seconds", "nan"],
+        ["--allow-drafts", "--generation-timeout", "0"],
+        ["--allow-drafts", "--generation-max-tokens", "99999"],
     ],
 )
 def test_invalid_plan_fails_before_service_composition(

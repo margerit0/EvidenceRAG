@@ -22,7 +22,7 @@ documentation search queries. Return ONLY {"queries":["query"]}, with between
 fixed plan: you cannot observe retrieval results or revise the queries. No HTML,
 URLs, outside factual assertions, tool execution or internal reasoning.
 """
-COMPARISON_CONTRACT = "document-investigation-comparison-v1"
+COMPARISON_CONTRACT = "document-investigation-comparison-v2"
 
 
 def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
