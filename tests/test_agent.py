@@ -234,6 +234,24 @@ def test_tool_failure_is_an_observation_and_can_trigger_different_search() -> No
     assert "secret" not in repr(outcome)
 
 
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        ABSTAIN,
+        {
+            "action": "answer",
+            "answer": {
+                "answerable": False,
+                "blocks": [],
+            },
+        },
+    ],
+)
+def test_both_refusal_forms_preserve_retrieval_failure(refusal: object) -> None:
+    agent, _ = make_agent(SEARCH, refusal, fake=FakeRetriever(error=RuntimeError("synthetic")))
+    assert agent.run("q").status == "retrieval_failed"
+
+
 def test_time_budget_checked_after_model_before_tool_dispatch() -> None:
     now = [0.0]
     agent, generator = make_agent(SEARCH)

@@ -108,6 +108,7 @@ def _profile_fingerprint(
     reasoning_effort: str | None,
     max_response_bytes: int,
     max_retries: int,
+    transport_contract: str = "urllib-default-v1",
 ) -> str:
     canonical = json.dumps(
         {
@@ -122,6 +123,7 @@ def _profile_fingerprint(
             "retry_step_seconds": RETRY_STEP_SECONDS,
             "retry_statuses": sorted(GENERATION_RETRY_STATUS),
             "retry_after_cap_seconds": MAX_RETRY_AFTER,
+            "transport_contract": transport_contract,
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -142,8 +144,11 @@ class ChatAnswerGenerator:
     max_response_bytes: int = MAX_RESPONSE_BYTES
     max_retries: int = DEFAULT_MAX_RETRIES
     sleep: Callable[[float], None] = time.sleep
+    transport_contract: str = "urllib-default-v1"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.transport_contract, str) or not self.transport_contract.strip():
+            raise ValueError("transport_contract must be nonempty")
         if type(self.max_retries) is not int or not 0 <= self.max_retries <= DEFAULT_MAX_RETRIES:
             raise ValueError("max_retries must be an integer between 0 and 15")
         if (
@@ -183,6 +188,7 @@ class ChatAnswerGenerator:
             reasoning_effort=self.reasoning_effort,
             max_response_bytes=self.max_response_bytes,
             max_retries=self.max_retries,
+            transport_contract=self.transport_contract,
         )
 
     def _transport(self) -> Transport:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ from test_service import FakeRetriever
 from zhrag.ingest import IngestState, write_state
 from zhrag.io_utils import write_json, write_jsonl, write_text
 from zhrag.lexical import build_sparse_index, write_sparse_index
+from zhrag.providers.direct import DIRECT_CONTRACT, DirectTransport
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "serve.py"
@@ -46,6 +48,48 @@ def test_agent_composition_is_explicit_and_uses_no_chat_retries(tmp_path: Path) 
     assert agent.generator.max_retries == 0
     assert agent.settings.max_steps == 10
     assert agent.retriever is fake
+    # Model calls never consult environment or system proxies; the contract is fingerprinted.
+    assert isinstance(agent.generator.transport, DirectTransport)
+    assert agent.generator.transport.timeout_seconds == 60.0
+    assert agent.generator.transport_contract == DIRECT_CONTRACT
+    assert DIRECT_CONTRACT != "urllib-default-v1"
+
+
+def test_agent_retries_are_explicit_bounded_and_fingerprinted(tmp_path: Path) -> None:
+    fake = FakeRetriever()
+    env = tmp_path / ".env"
+    write_text(
+        env, "LLM_API_KEY=synthetic\nLLM_BASE_URL=https://example.invalid\nLLM_MODEL_NAME=model\n"
+    )
+    base = ["--enable-agent", "--env", str(env)]
+    default = serve._build_agent(serve._parse_args(base), fake, index_identity="test")
+    ladder = serve._build_agent(
+        serve._parse_args([*base, "--agent-generation-retries", "5"]), fake, index_identity="test"
+    )
+    assert ladder.generator.max_retries == 5
+    assert ladder.profile_fingerprint != default.profile_fingerprint
+    for value in ("-1", "6"):
+        with pytest.raises(ValueError, match="agent-generation-retries"):
+            serve._build_agent(
+                serve._parse_args([*base, "--agent-generation-retries", value]),
+                fake,
+                index_identity="test",
+            )
+
+
+def test_direct_loopback_extends_no_proxy_without_dropping_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # os.environ is case-insensitive on Windows, so both spellings may share one key.
+    monkeypatch.setenv("no_proxy", "internal.example, localhost")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    serve._direct_loopback()
+    for name in ("no_proxy", "NO_PROXY"):
+        entries = os.environ[name].split(",")
+        assert len(entries) == len(set(entries))
+        assert entries[0] == "internal.example" and " " not in os.environ[name]
+        assert {"localhost", "127.0.0.1", "::1"} <= set(entries)
+    assert os.environ["HTTPS_PROXY"] == "http://127.0.0.1:9"  # not our decision to unset
 
 
 def test_agent_cache_conflict_fails_before_artifact_loading(
@@ -305,6 +349,7 @@ class TestAnswerComposition:
         assert answerer.generator.max_output_tokens == 2048
         assert answerer.generator.reasoning_effort is None
         assert answerer.generator.max_retries == expected_retries
+        assert answerer.generator.transport_contract == DIRECT_CONTRACT
 
     def test_generation_and_query_cache_fail_before_loading_artifacts(
         self,

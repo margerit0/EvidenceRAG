@@ -62,6 +62,8 @@ def test_dry_run_never_imports_service_or_providers(
         ["--allow-drafts", "--max-seconds", "nan"],
         ["--allow-drafts", "--generation-timeout", "0"],
         ["--allow-drafts", "--generation-max-tokens", "99999"],
+        ["--allow-drafts", "--generation-retries", "-1"],
+        ["--allow-drafts", "--generation-retries", "6"],
     ],
 )
 def test_invalid_plan_fails_before_service_composition(
@@ -91,14 +93,24 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
     compare, _, path = cli
     agent, _ = make_agent(ABSTAIN)
     closed: list[bool] = []
+    service_argv: list[list[str]] = []
+    loopback: list[bool] = []
     store = SimpleNamespace(close=lambda: closed.append(True))
     state = SimpleNamespace(collection_name="synthetic", sparse_fingerprint="a" * 64)
+
+    def parse_args(argv: list[str]) -> SimpleNamespace:
+        service_argv.append(list(argv))
+        return SimpleNamespace(artifacts=path.parent, uri="synthetic", alias="test")
+
+    def milvus_store(_config: object) -> SimpleNamespace:
+        assert loopback == [True], "loopback NO_PROXY must be set before Milvus connects"
+        return store
+
     service = SimpleNamespace(
-        _parse_args=lambda _argv: SimpleNamespace(
-            artifacts=path.parent, uri="synthetic", alias="test"
-        ),
+        _direct_loopback=lambda: loopback.append(True),
+        _parse_args=parse_args,
         _load_published_artifacts=lambda _path: (state, None),
-        MilvusStore=lambda _config: store,
+        MilvusStore=milvus_store,
         MilvusConfig=lambda **_kwargs: None,
         DENSE_WIDTH=2,
         _build_retriever=lambda *_args, **_kwargs: (agent.retriever, None),
@@ -116,11 +128,15 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
         "1",
         "--methods",
         "document_agent",
+        "--generation-retries",
+        "2",
     ]
     assert compare.main(args) == 0
     run = compare.ROOT / "indexes/agent_eval/runs/synthetic-run"
     manifest = read_json(run / "manifest.json")
     assert manifest["complete"] is True and manifest["human_review_required"] is True
+    assert manifest["generation"]["max_retries"] == 2
+    assert service_argv[0][service_argv[0].index("--agent-generation-retries") + 1] == "2"
     trials = list(read_jsonl(run / "trials.jsonl"))
     assert len(trials) == 1 and trials[0]["review"]["task_success"] is None
     assert not trials[0]["review"]["reviewed"] and closed == [True]

@@ -316,6 +316,16 @@ class TestLinearRetries:
         second = generator(Recorder(body()), max_retries=15)
         assert first.profile_fingerprint != second.profile_fingerprint
 
+    def test_transport_contract_changes_fingerprint_and_must_be_named(self) -> None:
+        default = generator(Recorder(body()))
+        assert default.transport_contract == "urllib-default-v1"
+        direct = generator(Recorder(body()), transport_contract="http-client-direct-no-redirect-v2")
+        assert direct.profile_fingerprint != default.profile_fingerprint
+        assert direct.generate("system", "user") == '{"answerable":true}'
+        for value in ("", "  ", None):
+            with pytest.raises(ValueError, match="transport_contract"):
+                generator(Recorder(body()), transport_contract=value)
+
 
 class TestBoundedDefaultTransport:
     def test_default_transport_passes_timeout_and_rejects_oversized_body(

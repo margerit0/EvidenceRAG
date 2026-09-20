@@ -9,11 +9,12 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import random
 import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
-from itertools import combinations
+from itertools import combinations, product
 from typing import Any
 
 from zhrag.agent import AGENT_MESSAGES
@@ -22,13 +23,12 @@ from zhrag.eval.agent_tasks import METHODS, AgentTask, task_summary, validate_ta
 from zhrag.eval.metrics import (
     bootstrap_p_floor,
     clustered_bootstrap_ci,
-    clustered_paired_bootstrap_test,
     holm_bonferroni,
     holm_floor_flags,
 )
 
 REVIEW_CONTRACT = "document-investigation-review-v1"
-REPORT_CONTRACT = "document-investigation-quality-v1"
+REPORT_CONTRACT = "document-investigation-quality-v2"
 PRIMARY_METRIC = "task_success"
 STATUSES = frozenset(AGENT_MESSAGES) | {"context_limit"}
 TERMINAL_CONTENT = frozenset({"answered", "clarification_needed", "insufficient_evidence"})
@@ -331,6 +331,60 @@ def validate_reviews(run: CertifiedRun, rows: Sequence[object]) -> tuple[Reviewe
     return tuple(reviewed[trial.sha256] for trial in run.trials)
 
 
+def paired_group_permutation(
+    baseline: Sequence[float],
+    treatment: Sequence[float],
+    groups: Sequence[str],
+    *,
+    resamples: int,
+    seed: int,
+) -> dict[str, object]:
+    """Two-sided within-group label swaps under a paired exchangeability null.
+
+    Swap every task in a source group together. Zero-sum groups do not change the
+    statistic. Small effective group counts are enumerated, so Monte Carlo trial
+    count can never create fictitious precision for two independent groups.
+    """
+    if not baseline or len(baseline) != len(treatment) or len(baseline) != len(groups):
+        raise ValueError("paired score/group lengths must agree")
+    if type(resamples) is not int or resamples < 1 or type(seed) is not int:
+        raise ValueError("invalid permutation settings")
+    if any(value not in (0.0, 1.0) for value in (*baseline, *treatment)):
+        raise ValueError("task success must be binary")
+    sums: dict[str, int] = {}
+    for left, right, group in zip(baseline, treatment, groups, strict=True):
+        sums[group] = sums.get(group, 0) + int(right) - int(left)
+    nonzero = [value for value in sums.values() if value]
+    observed = abs(sum(nonzero))
+    count = len(nonzero)
+    exact = count <= 16
+    if exact:
+        total = 2**count
+        extreme = sum(
+            abs(sum(sign * value for sign, value in zip(signs, nonzero, strict=True))) >= observed
+            for signs in product((-1, 1), repeat=count)
+        )
+        pvalue = extreme / total
+        resolution = min(1.0, 2 / total)  # two-sided symmetry; exact, not a Monte Carlo floor
+    else:
+        rng = random.Random(seed)
+        total = resamples
+        extreme = sum(
+            abs(sum(value if rng.getrandbits(1) else -value for value in nonzero)) >= observed
+            for _ in range(resamples)
+        )
+        pvalue = (extreme + 1) / (resamples + 1)
+        resolution = bootstrap_p_floor(resamples)
+    return {
+        "p_value": pvalue,
+        "exact": exact,
+        "effective_groups": count,
+        "permutations": total,
+        "p_resolution": resolution,
+        "raw_at_monte_carlo_floor": not exact and extreme == 0,
+    }
+
+
 def quality_report(
     run: CertifiedRun,
     raw_reviews: Sequence[object],
@@ -387,19 +441,21 @@ def quality_report(
         }
     comparisons: dict[str, dict[str, object]] = {}
     pvalues: dict[str, float] = {}
+    raw_floors: dict[str, bool] = {}
     for baseline, treatment in combinations(run.methods, 2):
         key = f"{treatment}-minus-{baseline}"
         differences = [
             right - left for left, right in zip(scores[baseline], scores[treatment], strict=True)
         ]
-        pvalues[key] = clustered_paired_bootstrap_test(
+        permutation = paired_group_permutation(
             scores[baseline],
             scores[treatment],
             groups,
-            alternative="two-sided",
             resamples=resamples,
             seed=seed,
         )
+        pvalues[key] = float(permutation["p_value"])  # type: ignore[arg-type]
+        raw_floors[key] = bool(permutation["raw_at_monte_carlo_floor"])
         comparisons[key] = {
             "baseline": baseline,
             "treatment": treatment,
@@ -407,15 +463,10 @@ def quality_report(
                 clustered_bootstrap_ci(differences, groups, resamples=resamples, seed=seed)
             ),
             "p_value": pvalues[key],
+            "permutation": permutation,
         }
     adjusted = holm_bonferroni(pvalues) if pvalues else {}
-    floors = (
-        holm_floor_flags(
-            pvalues, {key: value == bootstrap_p_floor(resamples) for key, value in pvalues.items()}
-        )
-        if pvalues
-        else {}
-    )
+    floors = holm_floor_flags(pvalues, raw_floors) if pvalues else {}
     for key, comparison in comparisons.items():
         comparison.update(
             p_holm=adjusted[key][0],
@@ -440,10 +491,14 @@ def quality_report(
             "seed": seed,
             "unit": "source_group",
             "point_estimate": "task_weighted_mean",
-            "test": "two-sided-centred-paired-cluster-bootstrap",
+            # Labels avoid the "group-" prefix so private source ids cannot collide with them.
+            "test": "two-sided-label-permutation-within-source-groups",
+            "null_assumption": "method-labels-exchangeable-within-whole-source-groups",
+            "ci_method": "percentile-bootstrap-over-source-groups",
+            "ci_small_group_caution": len(set(groups)) < 20,
             "family": "all-method-pairs-task-success",
             "correction": "Holm",
-            "p_resolution": bootstrap_p_floor(resamples),
+            "p_resolution": "per-comparison-exact-or-monte-carlo",
         },
         "methods": methods,
         "comparisons": comparisons,

@@ -10,6 +10,7 @@ from zhrag.eval.agent_comparison import COMPARISON_CONTRACT
 from zhrag.eval.agent_review import (
     certify_run,
     fingerprint,
+    paired_group_permutation,
     pending_review,
     quality_report,
     review_template,
@@ -277,3 +278,28 @@ def test_one_source_group_is_not_independent_inference() -> None:
     manifest, rows = bundle(count=2)
     with pytest.raises(ValueError, match="two source groups"):
         quality_report(certify_run(manifest, rows), reviews_for(manifest, rows), resamples=100)
+
+
+def test_two_groups_cannot_create_significance_by_increasing_resamples() -> None:
+    for repeats in (100, 100_000):
+        test = paired_group_permutation(
+            [0.0] * 4, [1.0] * 4, ["a", "a", "b", "b"], resamples=repeats, seed=0
+        )
+        assert test["exact"] is True and test["p_value"] == 0.5
+        assert test["permutations"] == 4 and not test["raw_at_monte_carlo_floor"]
+
+
+def test_group_label_swaps_preserve_pairing_and_zero_groups() -> None:
+    test = paired_group_permutation(
+        [0.0, 1.0, 0.0], [1.0, 0.0, 1.0], ["a", "a", "b"], resamples=100, seed=0
+    )
+    assert test["effective_groups"] == 1 and test["p_value"] == 1
+    assert paired_group_permutation([0.0], [0.0], ["a"], resamples=100, seed=0)["p_value"] == 1
+
+
+def test_many_groups_use_reproducible_monte_carlo_and_finite_resolution() -> None:
+    groups = [f"g-{i}" for i in range(18)]
+    kwargs = dict(resamples=200, seed=7)
+    test = paired_group_permutation([0.0] * 18, [1.0] * 18, groups, **kwargs)
+    assert test == paired_group_permutation([0.0] * 18, [1.0] * 18, groups, **kwargs)
+    assert test["exact"] is False and test["p_value"] >= 1 / 201

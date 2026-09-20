@@ -54,7 +54,7 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/s
 | `budget_exhausted` / `cancelled` | 200 | 预算用完或调查停止；不返回未完成答案 |
 | `invalid_action` / `invalid_answer` | 503 | 动作或答案校验失败 |
 | `generation_failed` / `generation_timeout` | 503 | 模型故障 |
-| `retrieval_failed` | 503 | 所有已尝试检索均失败后无法继续；不冒充无答案 |
+| `retrieval_failed` | 503 | 所有已尝试检索均失败后无法继续；不冒充无答案。无论模型以 `abstain` 还是 `answerable:false` 结束，均返回此状态 |
 | `agent_unavailable` | 503 | 未启用调查，不调用依赖 |
 | `service_busy` | 429 | 达到与原接口共用的并发上限 |
 | `invalid_request` | 422 | 输入不符合合同 |
@@ -66,11 +66,19 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/s
 `--context-passages` 与 `--context-tokens` 配置读取数量及每轮输入估算 token 上限。
 模型每次输出受 `--generation-max-tokens` 约束；累计估算输入上限由 `AgentSettings` 配置。
 
-Agent chat 固定不重试，避免继承单轮问答历史上的长重试阶梯；检索依赖的重试语义保持原样。
+Agent chat 默认不重试（`--agent-generation-retries 0`），避免继承单轮问答历史上的长重试阶梯；
+可显式设为 0–5 次，失败后按 5、10、15、20、25 秒线性等待，只重试既有的瞬态状态码（含 429/5xx/401）
+与超时/连接重置，403 不重试。重试次数与传输合同一起进入方法配置指纹。检索依赖的重试语义保持原样。
 180 秒默认总时长在依赖调用前后检查，**不是可强杀阻塞请求的严格墙钟 deadline**。
 取消会在当前依赖调用返回后的边界停止后续操作；并发名额在工作实际结束时释放。
 取消不保证供应商停止执行或计费。使用的 token 估算器不是任意模型的精确 tokenizer，
 `usage` 中的计数也不能直接换算成供应商账单。
+
+服务组合根中 chat、embedding、rerank 均使用 `zhrag.providers.direct.DirectTransport`：
+直连目标主机 443 端口、不读取环境变量或系统代理、不跟随重定向、保留 TLS 证书校验，
+成功响应限制 256 KB（chat）/ 2 MB（embedding、rerank）；非 2xx 响应始终以其 HTTP 状态抛出，
+只保留 16 KB 错误正文用于诊断。Milvus 回环连接另在 `no_proxy`/`NO_PROXY` 中加入 loopback。
+远程端点必须是 HTTPS，仅本机地址允许 HTTP。
 
 调查结果默认不落盘。原 M11 运维 trace 仍保持检索合同，没有新增外部 tracing 平台。
 
@@ -109,7 +117,11 @@ Agent chat 固定不重试，避免继承单轮问答历史上的长重试阶梯
 ```
 
 `quality_report.json` 是仅含聚合数据的报告：任务成功率按全部任务计算，回答内的陈述支持度
-单独计算；每个方法对使用来源组聚类 bootstrap CI，方法差异使用配对、双侧检验和 Holm 校正。
+单独计算；每个方法对的差异使用来源组 bootstrap 百分位 CI，配对 p 值使用**整来源组交换方法标签的
+双侧置换检验**：非零差值组数 ≤16 时精确枚举全部 2^k 种符号组合，否则用带种子的 Monte Carlo，
+再做 Holm 校正。只有两个独立来源组时精确 p 值最小为 0.5，不会因增加重采样次数变得显著；
+来源组少于 20 个时报告标记 `ci_small_group_caution`，bootstrap CI 不是小样本显著性的补救。
+报告合同为 `document-investigation-quality-v2`。
 报告发布前会校验任务对是否完整、试次原文指纹、方法 profile、每条审核记录和任务审核状态。
 故障试次、拒答试次和缺证据试次都必须保留并审核，不能通过删除分母改善结果。
 
@@ -163,9 +175,9 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/c
 已有旧产物保留本地；需要审核时使用新 run-id 重跑。
 
 冒烟可用 `--methods document_agent --limit 1 --max-steps 6 --max-searches 1 --max-reads 3`
-限制工作量；`--max-seconds`、`--generation-timeout`、`--generation-max-tokens` 分别设置
-调用边界时长检查、单次 chat I/O 超时与输出上限。实际检索仍采用现有 embedding/rerank
-重试策略，因此这些参数不是按金额或严格墙钟终止的费用上限。
+限制工作量；`--max-seconds`、`--generation-timeout`、`--generation-max-tokens`、`--generation-retries`
+分别设置调用边界时长检查、单次 chat I/O 超时、输出上限与 chat 重试次数（0–5，默认 0）。
+实际检索仍采用现有 embedding/rerank 重试策略，因此这些参数不是按金额或严格墙钟终止的费用上限。
 
 ## 当前真实运行记录
 
@@ -174,3 +186,23 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/c
 移除进程代理环境变量后结果相同。尚不能定位具体拦截层，不能据此评价调查策略质量。
 完整状态、边界和本地产物位置记录于 [迭代计划](agent-iteration.md#当前工作位置)。
 本轮没有生成可用于质量结论的真实答案，也没有填写人工审核标签。
+
+同日后续最小连通性诊断已恢复：明确直连目标 HTTPS 443、不使用环境或系统代理，
+首次请求约 4.27 秒返回 HTTP 200 和 `{"ok":true}`，模型标识与结束状态校验通过。
+诊断已配置 5/10/15/20/25 秒的五次重试，但首次成功即停止，实际没有重试。
+该结果不能替代完整 Agent 任务冒烟，也不能证明先前 403 的具体原因已确定。
+
+2026-09-21 使用直连传输完成了一个开发任务（`draft-01-simple`，未审核草稿）的完整冒烟，
+运行目录 `indexes/agent_eval/runs/dev-agent-smoke-20260921-direct-5`。进程故意导出了指向
+死端口的 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`，chat、embedding、rerank 全部请求仍成功，
+证明服务组合根不再经过代理。结果：`answered`，4 次模型决策、1 次搜索、2 次读取，
+4 段回答分别引用 2 条已读取证据，总耗时约 317 秒；估算输入 6,925 token。
+供应商 usage 汇总 4 次成功 chat：prompt 7,532 / completion 1,518 token，另有 2 次 504 请求的
+费用未知。同一冒烟中两次 chat 返回 Cloudflare **HTTP 504（约 61 秒后返回、约 850 KB HTML）**，
+均在等待 5 秒后的首次重试成功，实际验证了阶梯的第一级。先前 4 次同日尝试分别因
+150 秒预算不足、45 秒超时、以及旧直连实现把超大 504 错误页当作"响应超限"（不可重试）而失败；
+后者已修复为先按状态抛出、只保留 16 KB 错误正文，传输合同升为 v2。
+诊断文件仅含状态码、字节数、耗时、usage 与动作名，不含提示词、答案或密钥。
+
+这一条记录只证明直连、重试与完整调查路径在当时可用；单个未审核草稿任务不能作为
+Agent 质量结论，答案是否正确仍待 `review-packet.txt` 人工审核。

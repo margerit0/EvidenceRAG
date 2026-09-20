@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -138,6 +139,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--agent-max-steps", type=int, default=10)
     parser.add_argument("--agent-max-searches", type=int, default=3)
     parser.add_argument("--agent-max-seconds", type=float, default=180.0)
+    parser.add_argument("--agent-generation-retries", type=int, default=0)
     parser.add_argument(
         "--generation-retries",
         type=int,
@@ -161,6 +163,7 @@ def _build_answerer(args: argparse.Namespace) -> Answerer | None:
         raise ValueError("generation is incompatible with query-cache")
     from zhrag.providers.answering import ChatAnswerGenerator  # noqa: PLC0415
     from zhrag.providers.chat import ChatConfig  # noqa: PLC0415
+    from zhrag.providers.direct import DIRECT_CONTRACT, DirectTransport  # noqa: PLC0415
     from zhrag.providers.embedding import load_env  # noqa: PLC0415
 
     return Answerer(
@@ -170,6 +173,8 @@ def _build_answerer(args: argparse.Namespace) -> Answerer | None:
             timeout_seconds=args.generation_timeout,
             reasoning_effort=args.generation_reasoning_effort,
             max_retries=args.generation_retries,
+            transport=DirectTransport(args.generation_timeout, 256 * 1024),
+            transport_contract=DIRECT_CONTRACT,
         ),
         settings=AnswerSettings(
             max_passages=args.context_passages,
@@ -179,6 +184,8 @@ def _build_answerer(args: argparse.Namespace) -> Answerer | None:
 
 
 def _agent_settings(args: argparse.Namespace) -> AgentSettings:
+    if not 0 <= args.agent_generation_retries <= 5:
+        raise ValueError("agent-generation-retries must be in [0, 5]")
     return AgentSettings(
         max_steps=args.agent_max_steps,
         max_searches=args.agent_max_searches,
@@ -198,8 +205,11 @@ def _build_agent(
         return None
     if args.query_cache is not None:
         raise ValueError("agent is incompatible with query-cache")
+    # Validate the whole agent budget before credentials are read.
+    agent_settings = _agent_settings(args)
     from zhrag.providers.answering import ChatAnswerGenerator  # noqa: PLC0415
     from zhrag.providers.chat import ChatConfig  # noqa: PLC0415
+    from zhrag.providers.direct import DIRECT_CONTRACT, DirectTransport  # noqa: PLC0415
     from zhrag.providers.embedding import load_env  # noqa: PLC0415
 
     settings = retriever.settings
@@ -221,7 +231,7 @@ def _build_agent(
                 "output_limit",
             )
         },
-        published_index_identity=index_identity,
+        published_index_identity=f"{index_identity}:{DIRECT_CONTRACT}",
     )
     return DocumentAgent(
         retriever,
@@ -230,12 +240,15 @@ def _build_agent(
             max_output_tokens=args.generation_max_tokens,
             timeout_seconds=min(args.generation_timeout, args.agent_max_seconds),
             reasoning_effort=args.generation_reasoning_effort,
-            # A model decision is one provider attempt; do not inherit the legacy
-            # answering endpoint's potentially long retry ladder.
-            max_retries=0,
+            # Defaults to one attempt; optional retries are explicit and fingerprinted.
+            max_retries=args.agent_generation_retries,
+            transport=DirectTransport(
+                min(args.generation_timeout, args.agent_max_seconds), 256 * 1024
+            ),
+            transport_contract=DIRECT_CONTRACT,
         ),
         retrieval_identity=identity,
-        settings=_agent_settings(args),
+        settings=agent_settings,
     )
 
 
@@ -371,6 +384,7 @@ def _build_retriever(
     # Provider imports stay below the artifact and Milvus validation boundary so
     # clean module import remains side-effect-free and a broken local publication
     # fails before credentials are read.
+    from zhrag.providers.direct import DirectTransport  # noqa: PLC0415
     from zhrag.retrieval.adapters import (  # noqa: PLC0415 - provider boundary
         SparseQueryAdapter,
     )
@@ -397,7 +411,11 @@ def _build_retriever(
             raise ValueError(".env is missing")
         env = load_env(args.env)
         embedding = DenseQueryAdapter(
-            EmbeddingClient(EmbeddingConfig.from_env(env), log=lambda _message: None),
+            EmbeddingClient(
+                EmbeddingConfig.from_env(env),
+                transport=DirectTransport(60),
+                log=lambda _message: None,
+            ),
             prompt=QUERY_PROMPT,
             dimensions=DENSE_WIDTH,
         )
@@ -406,6 +424,7 @@ def _build_retriever(
     if args.no_rerank:
         reranker = _IdentityReranker()
     else:
+        from zhrag.providers.http import JsonClient  # noqa: PLC0415
         from zhrag.providers.rerank import (  # noqa: PLC0415 - composition boundary
             RerankClient,
             RerankConfig,
@@ -414,8 +433,17 @@ def _build_retriever(
             RerankAdapter,
         )
 
+        rerank_config = RerankConfig.from_env(env)
         reranker = RerankAdapter(
-            RerankClient.create(RerankConfig.from_env(env)),
+            RerankClient(
+                rerank_config,
+                JsonClient(
+                    url=rerank_config.endpoint,
+                    key=rerank_config.api_key,
+                    transport=DirectTransport(60),
+                    log=lambda _message: None,
+                ),
+            ),
             instruction=RERANK_INSTRUCTION,
         )
     retriever = OnlineRetriever(
@@ -431,6 +459,13 @@ def _build_retriever(
         rerank_profile=settings.rerank_profile,
         rerank_enabled=settings.rerank_enabled,
     )
+
+
+def _direct_loopback() -> None:
+    """Milvus uses gRPC; keep its local connection out of proxy discovery too."""
+    for name in ("no_proxy", "NO_PROXY"):
+        values = [part.strip() for part in os.environ.get(name, "").split(",") if part.strip()]
+        os.environ[name] = ",".join(dict.fromkeys([*values, "127.0.0.1", "localhost", "::1"]))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -459,6 +494,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("generation-max-tokens must be in [1, 8192]")
         AnswerSettings(max_passages=args.context_passages, max_prompt_tokens=args.context_tokens)
         state, index = _load_published_artifacts(args.artifacts)
+        _direct_loopback()
         store = MilvusStore(
             MilvusConfig(
                 uri=args.uri,

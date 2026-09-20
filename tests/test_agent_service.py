@@ -56,6 +56,18 @@ def test_http_failure_preserves_evidence_and_releases_admission() -> None:
     assert client.post("/api/search", json={"query": "q"}).status_code == 200
 
 
+def test_http_retrieval_failure_is_503_even_when_model_declines_via_answer() -> None:
+    retriever = FakeRetriever(error=RuntimeError("private-retrieval-error"))
+    declined = {"action": "answer", "answer": {"answerable": False, "blocks": []}}
+    app = create_app(
+        cast(Any, retriever),
+        agent=DocumentAgent(retriever, ScriptedGenerator(SEARCH, declined), "test-index"),
+    )
+    response = TestClient(app).post("/api/investigate", json={"query": "q"})
+    assert response.status_code == 503 and response.json()["status"] == "retrieval_failed"
+    assert "private-retrieval" not in response.text
+
+
 def test_request_cancellation_keeps_gate_until_worker_stops_and_prevents_next_call() -> None:
     async def scenario() -> None:
         entered, release = threading.Event(), threading.Event()
