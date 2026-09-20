@@ -205,4 +205,6 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/c
 诊断文件仅含状态码、字节数、耗时、usage 与动作名，不含提示词、答案或密钥。
 
 这一条记录只证明直连、重试与完整调查路径在当时可用；单个未审核草稿任务不能作为
-Agent 质量结论，答案是否正确仍待 `review-packet.txt` 人工审核。
+Agent 质量结论。该运行的 `reviews.jsonl` 已由模型审核者（Claude）填写：12 条陈述全部被所引
+段落支持，证据已按 SHA-256 与本地文档快照逐行核对。这是模型判官标签而非人工审核，
+任务本身仍是草稿，报告按合同不会发布。

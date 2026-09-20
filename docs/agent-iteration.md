@@ -8,11 +8,12 @@
 
 ## 新会话从这里继续（2026-09-21 交接）
 
-本会话的验证与修复已提交；工作区应为干净状态。本节优先于下文历史进度。
+本会话的验证与修复已提交为 `33b4a99`；此后仅 `docs/agent-iteration.md` 与 `docs/agent.md`
+有一次审核记录更新，可能仍未提交（只含文档，直接提交即可）。本节优先于下文历史进度。
 不要 reset、clean、重新创建分支或重做已提交功能。
 
 - 工作目录：`D:\rag`，分支：`feat/document-investigation-agent`。
-- HEAD：本会话提交（直连传输、可选重试、故障状态、置换检验、文档），父提交 `608515a`；
+- HEAD：`33b4a99`（直连传输、可选重试、故障状态、置换检验、文档），父提交 `608515a`；
   main 保持 `0668fa9`；没有合并或推送。
 - 提交前全套门禁：**pytest 1498 passed**、ruff check、ruff format --check、mypy 均通过；
   README 测试数量已由 `scripts/sync_quality_gate_docs.py` 重出并 `--check` 通过。
@@ -46,8 +47,11 @@
 下一会话按这个顺序继续：
 
 1. 阅读 `CLAUDE.md` 和本文，核对 `git status --short --branch` / `git log -3 --oneline`。
-2. 人工审核 `dev-agent-smoke-20260921-direct-5/review-packet.txt`：核对 4 段陈述是否被所引段落支持，
-   填写 `reviews.jsonl`；这仍是未审核草稿任务，不构成质量结论。
+2. `dev-agent-smoke-20260921-direct-5/reviews.jsonl` 已由**模型审核者**（Claude）填写：
+   12 条陈述全部被所引段落支持，`task_success=true`；证据段落已按 SHA-256 与本地
+   `tidb-rag-curated` 快照（commit `26f202b`）逐行核对，仅 markdown 链接被切块器去除。
+   这属于模型判官标签，不计入人工审核数量；任务本身仍是 `reviewed=false` 的草稿、验收条件为空，
+   `--report` 按合同拒绝发布。需要人工确认时，改写 reviewer 字段并复核。
 3. 扩充并审核任务集（目标 50–100 条）；大规模付费对照试验仍未授权，须先确认预算。
    基于本次观测：单次 chat 决策 20–60 秒、偶发 61 秒 504，建议正式运行 `--max-seconds ≥ 600`、
    `--generation-timeout 90`、`--generation-retries ≥ 2`；这些是经验值，不是合同。
@@ -275,3 +279,6 @@ Agent 不兼容限定查询的 `--query-cache` 模式。
   两次 504 各在等待 5 秒后重试成功；全程导出死代理端口证明不经代理。
 - 全套门禁 1498 passed，README 测试数由同步器重出；已为该运行准备审核材料，未填写标签。
 - 用户要求后复跑全部门禁并在本功能分支提交一次；没有修改系统代理或凭据，未合并或推送。
+- 用户要求由模型完成该运行的审核：按 SHA-256 定位本地源文档核对两条证据，拆出 12 条陈述逐条比对，
+  全部受支持，`task_success=true` 写入 `reviews.jsonl`，reviewer 明确标注为模型审核者。
+  草稿任务 `reviewed=false` 且验收条件为空，`--report` 按合同拒绝；这不是人工审核结果。
