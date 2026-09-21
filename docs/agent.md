@@ -98,6 +98,26 @@ Agent chat 默认不重试（`--agent-generation-retries 0`），避免继承单
 `reviewer`、`snapshot`，完成后才将 `reviewed` 设为 true。
 现有模板只是场景起点，不是已经核对答案的标注集。
 
+### 语料落地的草稿装配（v2）
+
+`indexes/agent_eval/v2/` 下是第二版任务集：按主题分组、逐条绑定本地文档快照的**未审核草稿**。
+起草规范在 `indexes/agent_eval/v2/drafts/AUTHORING_PROMPT.md`，每个主题一个 JSON 草稿文件，
+每条草稿除任务字段外还带 `evidence_quotes`（逐字引文）与 `author_notes`（起草理由、干扰项、
+unanswerable 的检索关键词）。装配命令完全离线：
+
+```powershell
+.venv/Scripts/python.exe scripts/assemble_agent_tasks.py --snapshot "pingcap/docs-cn@26f202b"
+.venv/Scripts/python.exe scripts/assemble_agent_tasks.py --snapshot "pingcap/docs-cn@26f202b" --write --split backup-restore=dev --split slow-query-tuning=test ...
+```
+
+装配器只证明三件机械事实：每段引文（去掉链接、强调、HTML 版本标记与 Hugo shortcode 后）
+在所引本地文档中逐字存在；每个 `reference_sources` 都在已发布索引的 450 篇文档内；
+每个来源组只落在一个 split。任何一条不通过就不写出任何文件。写出的 `tasks.jsonl` 全部
+`reviewed=false`、`reviewer` 为空；引文与起草说明单独写入 `draft_evidence.jsonl` 供审核者核对。
+**引文逐字存在不等于验收条件正确、问题分类恰当或 unanswerable 确实无答案**；这些仍需人工审核，
+审核时把 `reviewer` 改为真实审核者并逐条复核后才能把 `reviewed` 设为 true。
+起草者是模型时，该任务集在人工审核前不能计入人工审核数量。
+
 `source_group` 应覆盖可能共享证据的问题，同组只能位于一个 split；同问题或同任务 ID
 不能重复。场景模板的临时主题分组需在审核时根据真实证据重新确认。
 最终测试集冻结前不得用它调整提示词或参数。

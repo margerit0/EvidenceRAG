@@ -6,10 +6,58 @@
 `git status --short --branch` 和 `git log -5 --oneline`；代码、测试和真实运行记录优先于文档描述。
 不要在 main 上开发；尚未验证的能力不能写成已完成的项目成果。
 
-## 新会话从这里继续（2026-09-21 交接）
+## 新会话从这里继续（2026-09-21 第二次交接）
+
+本节优先于下文历史进度。不要 reset、clean、重新创建分支或重做已提交功能。
+
+- 工作目录：`D:\rag`，分支：`feat/document-investigation-agent`；main 保持 `0668fa9`；没有合并或推送。
+- 本会话新增并提交：语料落地任务草稿装配器（`src/zhrag/eval/agent_task_drafts.py`、
+  `scripts/assemble_agent_tasks.py`、`tests/test_agent_task_drafts.py`）与 `docs/agent.md` 的说明。
+- 提交前全套门禁：**pytest 1510 passed**、ruff check、ruff format --check、mypy 均通过；
+  README 测试数量已由 `scripts/sync_quality_gate_docs.py` 重出并 `--check` 通过。
+- **本机 C 盘只剩约 38 MB**：pytest 全量运行时曾因写不下临时输出而出现 4 个假失败，
+  单独重跑全部通过；日志请写到 D 盘 gitignored 位置（`.pytest_tmp` 在 pytest 启动时会被清空）。
+  未删除任何系统文件，清盘由用户决定。
+
+本会话完成的任务集扩充（全部位于 `indexes/agent_eval/v2/`，已忽略，不入库）：
+
+| 项目 | 结果 |
+| --- | --- |
+| 起草方式 | 10 个模型起草 agent，各领一个主题与限定文档清单，按 `drafts/AUTHORING_PROMPT.md` 起草；语料仅为本地 `tidb-rag-curated` 快照（pingcap/docs-cn@26f202b）中已入索引的 450 篇 |
+| 规模 | **79 条未审核草稿**：simple 30 / multi_document 20 / clarification 19 / unanswerable 10；10 个来源组，dev 48（6 组）/ test 31（4 组） |
+| 机械核验 | 346 段引文全部在所引文档中逐字存在（装配器规范化后）；所有 `reference_sources` 均在索引内；没有文档被两个来源组同时引用 |
+| 装配修正 | 首轮 13 处失配中 12 处为规范化缺口（链接方括号残留、`<span>` 版本标记、`+` 列表、Hugo `{{< copyable >}}`），已扩展规范化器并加测试；1 处（`mem-04` 第 3 段引文）为起草者省略句子，已按文档逐字补全并在 `author_notes` 标注 |
+| split 分配 | backup-restore 放 dev（此前冒烟已用过该主题）；test = slow-query-tuning、transactions-locks、ai-vector-search、dev-guide-sql |
+| 状态 | `reviewed=false`、`reviewer` 为空、`snapshot="pingcap/docs-cn@26f202b"`；`compare_agent.py --tasks indexes/agent_eval/v2/tasks.jsonl --allow-drafts --split dev` 可离线预览；test split 按合同拒绝草稿 |
+
+起草 agent 在 `author_notes` 里留下的审核提示（人工审核时优先看）：
+
+- 语料缺 `system-variables.md`、`temporary-tables.md`、`upgrade-tidb-using-tiup.md` 等被大量链接的文档，
+  多条 unanswerable 以此为基础；审核者需确认这些确实不该由 Agent 凭先验知识补答。
+- 语料自身不一致处已被刻意避开或标注：事务大小限制（两篇文档数值冲突）、`--ratelimit` 口径、
+  `min-blob-size` 单位写法、`max-down-time` 拼写、`noatime` 是否必选。
+- 若干问题故意含干扰信息（错误版本归因、超出 GC 窗口的时间），用于区分"附和用户"与"依据文档纠正"。
+- `imp-06` 的引文是 HTML 表格片段，须对照源码而非渲染表。
+- `txn-07` 的 clarification 只依赖单篇文档；若审核者要求跨文档可替换。
+
+v1 的 24 条模板草稿保持原样，`dev-agent-smoke-20260921-direct-5` 的任务集指纹仍有效。
+
+下一会话按这个顺序继续：
+
+1. 阅读 `CLAUDE.md` 和本文，核对 `git status --short --branch` / `git log -3 --oneline`。
+2. **人工审核 v2 任务集**：逐条阅读 `tasks.jsonl` + `draft_evidence.jsonl`，复核分类、验收条件与
+   unanswerable 的无答案判断，改写 `reviewer`、把 `reviewed` 设为 true。这一步只能由人完成；
+   模型起草不计入人工审核数量。审核后测试集冻结，禁止用它调参。
+3. 大规模付费对照试验仍未授权，须先确认预算。参考经验值：`--max-seconds ≥ 600`、
+   `--generation-timeout 90`、`--generation-retries ≥ 2`；单次 chat 决策 20–60 秒、偶发 61 秒 504。
+   79 任务 × 3 方法 ≈ 237 试次，按上次冒烟每试次 4–6 次 chat 估算调用量，费用需以供应商账单为准。
+4. 若要先做小规模开发集冒烟（如 `--split dev --limit 3 --run`），仍需用户明确批准。
+5. 页面视觉验收仍为独立待办。
+
+## 2026-09-21 第一次交接（已由上节取代，保留为历史）
 
 本会话的验证与修复已提交为 `33b4a99`；此后仅 `docs/agent-iteration.md` 与 `docs/agent.md`
-有一次审核记录更新，可能仍未提交（只含文档，直接提交即可）。本节优先于下文历史进度。
+有一次审核记录更新，可能仍未提交（只含文档，直接提交即可）。
 不要 reset、clean、重新创建分支或重做已提交功能。
 
 - 工作目录：`D:\rag`，分支：`feat/document-investigation-agent`。
@@ -129,6 +177,7 @@
 - [x] 建立任务格式、审核状态、开发集/测试集与来源分组约束。
 - [x] 提供本地任务草稿初始化及校验入口；任务正文、证据和模型产物留在 gitignored 目录。
 - [ ] 起步目标为 50–100 个经人工审阅的任务；草稿不计入人工审核数量。
+      2026-09-21：v2 已有 79 条语料落地、引文逐字核验的模型起草草稿，0 条人工审核。
 - [x] 草稿覆盖简单文档问答、跨章节整合、信息不足、无答案；诊断任务待真实工具接入后补充。
 - [x] 实现同任务对照单轮 RAG、固定拆解检索流程和自适应 Agent 的运行入口与合成测试。
 - [x] 记录调用次数、估算输入 token 和耗时，预留任务成功/支持度/追问拒答的人工审核字段。
@@ -282,3 +331,14 @@ Agent 不兼容限定查询的 `--query-cache` 模式。
 - 用户要求由模型完成该运行的审核：按 SHA-256 定位本地源文档核对两条证据，拆出 12 条陈述逐条比对，
   全部受支持，`task_success=true` 写入 `reviews.jsonl`，reviewer 明确标注为模型审核者。
   草稿任务 `reviewed=false` 且验收条件为空，`--report` 按合同拒绝；这不是人工审核结果。
+
+### 2026-09-21（第二会话）
+
+- 按交接顺序继续：v1 的 24 条模板草稿与语料无关，无法支撑验收条件；改为在 `indexes/agent_eval/v2/`
+  建语料落地的任务集，v1 保持不动以保留既有冒烟的任务集指纹。
+- 10 个起草 agent 并行起草 79 条，附逐字引文与起草说明；新增离线装配器核验引文逐字存在、
+  来源在索引内、来源组不跨 split，任何失配即拒绝写出。
+- 首轮 13 处失配：12 处为 markdown/HTML/Hugo 装饰造成的规范化缺口，扩展规范化器并加回归；
+  1 处为引文省略句子，按文档补全并标注。
+- 全套门禁 1510 passed；README 测试数由同步器重出。没有调用付费接口，没有填写任何人工审核标签。
+- 发现本机 C 盘接近满盘导致 pytest 假失败与 shell 输出截断；未做清理，记入交接。
