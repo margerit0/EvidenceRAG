@@ -467,8 +467,9 @@
       }
       resultHeading.textContent = "已读取的完整证据";
       showSources(Array.isArray(data.sources) ? data.sources : []);
-      const actionNames = {decide: "选择下一步", search_docs: "搜索文档", read_passage: "读取证据", finish: "结束"};
+      const actionNames = {plan: "确定调查要求", assess: "检查信息是否齐全", decide: "选择下一步", search_docs: "搜索文档", read_passage: "读取证据", finish: "结束"};
       const outcomeNames = {
+        created: "已记录要求", checked: "已检查", coverage_incomplete: "继续补充证据", clarification_required: "需要确认关键信息",
         ok: "完成", answered: "已生成带引用的答案", clarification_needed: "等待补充信息",
         insufficient_evidence: "证据不足", budget_exhausted: "预算已用完", cancelled: "已停止",
         duplicate_query: "跳过重复搜索", search_limit: "搜索次数已达上限",

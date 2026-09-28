@@ -62,6 +62,10 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/s
 ## 执行预算
 
 默认最多 10 次模型决策、3 次搜索、6 次读取；相同查询和已读取证据不重复调用。
+实验性 `--agent-plan-investigation` 默认关闭。开启后，首次调用固定必答项及用户事实，
+后续每次动作须提交覆盖证据和关键环境依赖；声明的关键未知依赖触发追问，缺少覆盖的
+答案会被拦截。规划调用共享原预算，不自动开启答案复核。原文定位与引用检查不等于
+语义认证，详见[规划合同与审计边界](agent-investigation-plan.md)。
 `document-investigation-v3` 保持严格答案合同，并在终止事件的 `validation_error` 字段
 提供固定错误码（正常事件为 null），区分字段缺失/多余、类型错误、未读引用、重复或内联
 引用、大小限制等。不会记录未知字段名、被拒绝正文或思考内容；公共失败状态仍为

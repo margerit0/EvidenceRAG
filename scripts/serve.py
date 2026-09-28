@@ -151,6 +151,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="experimentally review answer drafts within the existing agent budgets",
     )
     parser.add_argument(
+        "--agent-plan-investigation",
+        action="store_true",
+        help="experimentally gate actions on explicit requirements and missing environment facts",
+    )
+    parser.add_argument(
         "--generation-retries",
         type=int,
         default=15,
@@ -211,6 +216,7 @@ def _agent_settings(args: argparse.Namespace) -> AgentSettings:
         max_prompt_tokens=args.context_tokens,
         max_reads=args.context_passages,
         review_answers=args.agent_review_answers,
+        plan_investigation=args.agent_plan_investigation,
     )
 
 

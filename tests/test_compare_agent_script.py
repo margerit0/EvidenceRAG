@@ -66,6 +66,7 @@ def test_dry_run_never_imports_service_or_providers(
     assert plan["generation"]["reasoning_effort"] == reasoning_effort
     assert plan["generation"]["max_retries"] == retries
     assert plan["agent_budgets"]["review_answers"] is False
+    assert plan["agent_budgets"]["plan_investigation"] is False
 
 
 def test_review_plan_is_explicit_without_provider_imports(
@@ -77,6 +78,18 @@ def test_review_plan_is_explicit_without_provider_imports(
     monkeypatch.setitem(sys.modules, "serve", None)
     assert compare.main(["--tasks", str(path), "--allow-drafts", "--agent-review-answers"]) == 0
     assert json.loads(capsys.readouterr().out)["agent_budgets"]["review_answers"] is True
+
+
+def test_investigation_plan_is_explicit_and_offline(
+    cli: tuple[ModuleType, ModuleType, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    compare, _, path = cli
+    monkeypatch.setitem(sys.modules, "serve", None)
+    assert compare.main(["--tasks", str(path), "--allow-drafts", "--agent-plan-investigation"]) == 0
+    budgets = json.loads(capsys.readouterr().out)["agent_budgets"]
+    assert budgets["plan_investigation"] is True and budgets["review_answers"] is False
 
 
 def test_invalid_reasoning_effort_rejected_before_service_composition(
@@ -179,6 +192,7 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
         "--generation-reasoning-effort",
         "high",
         "--agent-review-answers",
+        "--agent-plan-investigation",
     ]
     if no_output_cap:
         args.append("--generation-no-token-limit")
@@ -195,6 +209,8 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
     else:
         assert service_argv[0][service_argv[0].index("--generation-max-tokens") + 1] == "4096"
     assert manifest["agent_budgets"]["review_answers"] is True
+    assert manifest["agent_budgets"]["plan_investigation"] is True
+    assert "--agent-plan-investigation" in service_argv[0]
     assert "--agent-review-answers" in service_argv[0]
     assert service_argv[0][service_argv[0].index("--agent-generation-retries") + 1] == str(retries)
     assert service_argv[0][service_argv[0].index("--generation-reasoning-effort") + 1] == "high"

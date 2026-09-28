@@ -62,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         help="retries after the first chat attempt (0-9); at most 10 total attempts",
     )
     parser.add_argument("--agent-review-answers", action="store_true")
+    parser.add_argument("--agent-plan-investigation", action="store_true")
     parser.add_argument(
         "--generation-reasoning-effort",
         choices=("minimal", "low", "medium", "high"),
@@ -90,6 +91,7 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
         max_reads=args.max_reads,
         max_seconds=args.max_seconds,
         review_answers=getattr(args, "agent_review_answers", False),
+        plan_investigation=getattr(args, "agent_plan_investigation", False),
     )
     if not math.isfinite(args.generation_timeout) or not 0 < args.generation_timeout <= 300:
         raise ValueError("invalid generation timeout")
@@ -169,6 +171,8 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
         service_options.extend(["--generation-max-tokens", str(args.generation_max_tokens)])
     if budgets.review_answers:
         service_options.append("--agent-review-answers")
+    if budgets.plan_investigation:
+        service_options.append("--agent-plan-investigation")
     service_args = serve._parse_args(service_options)
     state, index = serve._load_published_artifacts(service_args.artifacts)
     serve._direct_loopback()

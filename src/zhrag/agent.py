@@ -16,6 +16,18 @@ from dataclasses import asdict, dataclass, field
 from typing import Literal, Protocol
 
 from zhrag.agent_answer_review import REVIEW_CONTRACT, REVIEW_PROMPT, parse_review, review_prompt
+from zhrag.agent_planning import (
+    PLAN_PROMPT,
+    PLANNED_ACTION_PROMPT,
+    PLANNING_CONTRACT,
+    PLANNING_DIAGNOSTICS_CONTRACT,
+    DecisionAssessment,
+    InvestigationPlan,
+    PlanningValidationError,
+    answer_gate,
+    parse_assessment,
+    parse_plan,
+)
 from zhrag.answering import (
     ANSWER_CONTRACT,
     AnswerBlock,
@@ -121,10 +133,13 @@ class AgentSettings:
     max_prompt_bytes: int = 128_000
     max_seconds: float = 180.0
     review_answers: bool = False
+    plan_investigation: bool = False
 
     def __post_init__(self) -> None:
         if type(self.review_answers) is not bool:
             raise ValueError("review_answers must be boolean")
+        if type(self.plan_investigation) is not bool:
+            raise ValueError("plan_investigation must be boolean")
         bounds = {
             "max_steps": 20,
             "max_searches": 5,
@@ -158,6 +173,16 @@ class AgentEvent:
     elapsed_seconds: float
     evidence_ids: tuple[int, ...] = ()
     validation_error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PlanningEvent(AgentEvent):
+    """Opt-in request data for local audits, not server telemetry or internal reasoning."""
+
+    plan: InvestigationPlan | None = None
+    assessment: DecisionAssessment | None = None
+    proposed_action: str | None = None
+    error_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +268,9 @@ class _Run:
     pending_answer: tuple[AnswerBlock, ...] | None = None
     review_attempts: int = 0
     review_feedback: dict[str, object] | None = None
+    plan: InvestigationPlan | None = None
+    assessment: DecisionAssessment | None = None
+    planning_feedback: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -265,6 +293,8 @@ class DocumentAgent:
         # Off means the original profile and prompts, not a relabeled baseline.
         if not self.settings.review_answers:
             del settings["review_answers"]
+        if not self.settings.plan_investigation:
+            del settings["plan_investigation"]
         profile: dict[str, object] = {
             "contract": AGENT_CONTRACT,
             "answer_contract": ANSWER_CONTRACT,
@@ -281,11 +311,19 @@ class DocumentAgent:
                 "system": REVIEW_PROMPT,
                 "max_reviews": 2,
             }
+        if self.settings.plan_investigation:
+            profile["investigation_planning"] = {
+                "contract": PLANNING_CONTRACT,
+                "diagnostics_contract": PLANNING_DIAGNOSTICS_CONTRACT,
+                "plan_prompt": PLAN_PROMPT,
+                "action_prompt": PLANNED_ACTION_PROMPT,
+            }
         return hashlib.sha256(_json(profile).encode("utf-8")).hexdigest()
 
     @property
     def _system_prompt(self) -> str:
-        return SYSTEM_PROMPT + REVIEW_GUIDANCE if self.settings.review_answers else SYSTEM_PROMPT
+        prompt = PLANNED_ACTION_PROMPT if self.settings.plan_investigation else SYSTEM_PROMPT
+        return prompt + REVIEW_GUIDANCE if self.settings.review_answers else prompt
 
     def _elapsed(self, state: _Run) -> float:
         elapsed = self.clock() - state.started
@@ -305,7 +343,14 @@ class DocumentAgent:
                 {"id": key, "title": row.title, "text": row.ranked.passage.text}
                 for key, row in state.evidence.items()
             ],
-            "observations": [asdict(event) for event in state.events],
+            "observations": [
+                {
+                    key: value
+                    for key, value in asdict(event).items()
+                    if key not in {"plan", "assessment", "error_code"}
+                }
+                for event in state.events
+            ],
             "remaining": {
                 "decisions": self.settings.max_steps - state.model_calls,
                 "searches": self.settings.max_searches - state.search_calls,
@@ -314,7 +359,33 @@ class DocumentAgent:
         }
         if state.review_feedback is not None:
             payload["answer_review"] = state.review_feedback
+        if state.plan is not None:
+            payload["plan"] = asdict(state.plan)
+            payload["last_assessment"] = asdict(state.assessment) if state.assessment else None
+            payload["planning_feedback"] = state.planning_feedback
         return _json(payload)
+
+    def _planning_event(
+        self,
+        state: _Run,
+        outcome: str,
+        *,
+        initial: bool = False,
+        proposed_action: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        state.events.append(
+            PlanningEvent(
+                step=state.model_calls,
+                action="plan" if initial else "assess",
+                outcome=outcome,
+                elapsed_seconds=self._elapsed(state),
+                plan=state.plan if initial and error_code is None else None,
+                assessment=state.assessment if not initial and error_code is None else None,
+                proposed_action=proposed_action,
+                error_code=error_code,
+            )
+        )
 
     def _fits(self, prompt: str, system: str | None = None) -> bool:
         text = (self._system_prompt if system is None else system) + "\n" + prompt
@@ -457,7 +528,10 @@ class DocumentAgent:
                 return self._outcome(state, exc.code)
             except (Exception, SystemExit):
                 return self._outcome(state, "generation_failed")
-            self._event(state, "review_answer" if reviewing else "decide", "ok")
+            stage = "review_answer" if reviewing else "decide"
+            if self.settings.plan_investigation and state.plan is None:
+                stage = "plan"
+            self._event(state, stage, "ok")
             stopped = self._stop(state, cancelled)
             if stopped:
                 return self._outcome(state, stopped)
@@ -471,14 +545,47 @@ class DocumentAgent:
             return REVIEW_PROMPT, review_prompt(
                 state.question, state.pending_answer, tuple(state.evidence.values())
             )
+        if self.settings.plan_investigation and state.plan is None:
+            return PLAN_PROMPT, _json({"question": state.question})
         return self._system_prompt, self._prompt(state)
 
     def _handle_reply(self, state: _Run, raw: str, *, reviewing: bool) -> AgentOutcome | None:
         if reviewing:
             return self._review_reply(state, raw)
+        if self.settings.plan_investigation:
+            return self._planned_reply(state, raw)
         try:
             action = parse_action(raw)
         except ValueError:
+            return self._outcome(state, "invalid_action")
+        return self._dispatch(state, action)
+
+    def _planned_reply(self, state: _Run, raw: str) -> AgentOutcome | None:
+        if state.plan is None:
+            try:
+                state.plan = parse_plan(raw, state.question)
+            except PlanningValidationError as exc:
+                self._planning_event(state, "invalid_plan", initial=True, error_code=exc.reason)
+                return self._outcome(state, "invalid_action")
+            self._planning_event(state, "created", initial=True)
+            return None
+        try:
+            assessment, proposed = parse_assessment(raw, state.plan, tuple(state.evidence.values()))
+            action = parse_action(_json(proposed))
+        except (ValueError, TypeError, RecursionError) as exc:
+            reason = exc.reason if isinstance(exc, PlanningValidationError) else "action_schema"
+            self._planning_event(state, "invalid_assessment", error_code=reason)
+            return self._outcome(state, "invalid_action")
+        state.assessment = assessment
+        state.planning_feedback = None
+        self._planning_event(state, "checked", proposed_action=str(action["action"]))
+        if assessment.clarification:
+            self._event(state, "assess", "clarification_required")
+            return self._outcome(
+                state, "clarification_needed", clarification=assessment.clarification
+            )
+        if action["action"] == "clarify":
+            self._event(state, "assess", "undeclared_clarification")
             return self._outcome(state, "invalid_action")
         return self._dispatch(state, action)
 
@@ -539,6 +646,12 @@ class DocumentAgent:
                 return self._outcome(
                     state, "invalid_answer", validation_error=AnswerValidationReason.JSON_VALUE
                 )
+            if blocks and state.assessment is not None:
+                issue = answer_gate(state.assessment, blocks)
+                if issue is not None:
+                    state.planning_feedback = issue
+                    self._event(state, "assess", issue)
+                    return None
             if blocks and self.settings.review_answers:
                 state.pending_answer = blocks
                 self._event(state, "answer", "drafted")
