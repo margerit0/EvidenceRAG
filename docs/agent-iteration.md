@@ -1,12 +1,125 @@
 # 文档调查 Agent 迭代计划与会话交接
 
-更新日期：2026-09-28。工作分支：`feat/document-investigation-agent`。
+更新日期：2026-09-29。Agent 阶段分支：`feat/document-investigation-agent`；
+收尾后前端工作分支：`feat/frontend-design`。
 
 本文件是本轮迭代的进度与决策入口。跨会话先读 `CLAUDE.md`、本文件，再运行
 `git status --short --branch` 和 `git log -5 --oneline`；代码、测试和真实运行记录优先于文档描述。
 不要在 main 上开发；尚未验证的能力不能写成已完成的项目成果。
 
-## 新会话从这里继续（2026-09-28）
+## 新窗口快速交接：前端设计阶段（2026-09-29，当前优先级）
+
+用户已决定先做前端页面设计，并授权按以下顺序收尾：在 Agent 分支保留并提交交接文档，
+通过离线门禁和提交内容检查后将该阶段合并到 main，再从 main 创建并切换到
+`feat/frontend-design`。实际分支与提交以 `git status` / `git log` 为准。
+
+### 前端任务与保留边界
+
+- 前端优先复用 `src/zhrag/service/static/index.html`，接口合同参考
+  `src/zhrag/service/app.py` 与 `docs/agent.md`。使用原创合成数据和模拟接口开展页面、
+  状态展示及交互验收；具体视觉设计在前端分支推进。
+- 真实 chat、embedding、rerank、付费诊断和真实模型试次继续暂停，不读取凭证。
+  不修改提示词、不扩大 dev、不使用冻结 test，也不重做已完成的 v2 任务审核。
+- Agent、规划、答案复核和供应商流式保持默认关闭。完整调查尚无真实验收通过记录；
+  页面应准确区分输出答案、传输成功与独立验收，不把模拟演示写成模型效果证明。
+- 下节离线审核/报告正式化、失败回放及其验收标准全部保留为待办，本轮未实施。
+  旧任务、试次、评分及本地素材保留；缺失记录标为不可回放，禁止联网补齐。
+- 只提交通用代码、原创合成测试和文档。密钥、真实任务、语料、响应、引文及派生产物
+  继续留在 Git 忽略目录。前端改动仍执行必要离线测试与代码门禁。
+
+### 阶段收尾验证
+
+收尾基于 Agent 代码提交 `8feb052`，代码未改动。本轮重新执行全套离线门禁：
+1725 passed，ruff check / format --check / mypy 均通过；现有页面内联 JavaScript
+通过 `node --check`。pytest 有一条现有 Starlette/httpx 弃用警告，无失败或跳过。
+本轮 JUnit 位于 `.research_tmp/frontend-baseline-20260929/pytest-full.xml`，不提交。
+
+两项旧报告只读复核 `report_glm53_stream_agent.py --check` 与
+`report_glm53_stream_plan_v2.py --check` 均通过，原结果和评分保留。对 main 之后
+13 个提交及本轮文档差异做了提交路径与常见密钥模式扫描，并检查合成测试素材；
+未发现新增私有产物路径或密钥模式。`git diff --check` 通过。
+
+本轮只更新交接文档、执行离线检查并完成分支收尾；前端页面尚未修改或视觉验收。
+下节关于 `main=0668fa9` 和未提交交接修改的描述保留为本次收尾前的历史状态。
+
+## 新窗口快速交接：离线工程阶段（2026-09-29，优先于以下历史计划）
+
+用户决定暂时跳过真实 chat / 付费试次，先开展不依赖供应商的工程工作。当前代码提交
+为 `8feb052`，分支 `feat/document-investigation-agent`；main 仍为 `0668fa9`。
+本节为该提交之后新增的交接修改，当前 Git status / log / diff 优先。保留未提交修改。
+
+### 开始顺序与边界
+
+先读 `AGENTS.md`、`CLAUDE.md` 和本节，再检查 `git status --short --branch`、
+`git log -5 --oneline`、`git diff`。随后按工作需要读 `docs/agent.md`、
+`docs/agent-investigation-plan.md`。本阶段不运行真实 chat、embedding、rerank 或付费
+链路诊断；“跳过测试”指跳过真实模型试次，代码改动仍做必要离线测试及提交门禁。
+不继续改提示词，不扩大 dev，不使用冻结 test。v2 的 79 条任务审核已完成，
+AGENTS.md 中“剩余五组”是过期提示，不重做任务审核。
+
+现有环境文件和结果全部保留。未来恢复验证时仍用 `.research_tmp/glm-agent.env` 的
+GLM 5.3 / high / 无输出 token 上限；本阶段无需读取凭证，禁止打印或提交密钥。
+真实任务、语料、响应、引文和派生产物继续留在 Git 忽略目录。
+
+### 已完成与未验证的事实
+
+- 已实现默认关闭的 `--generation-stream`，覆盖结束标记、模型匹配、协议错误、断流
+  重试、取消和预算；无需重新实现流式。最终门禁 1725 passed，ruff / mypy 通过。
+- 规划与答案复核开关仍独立、默认关闭；初始规划提示词为 v2，严格解析器未放宽。
+- 首次完整流式尝试：三次 504 后第四次收齐正文，facts 多出空 description，终态
+  `invalid_action`，313.3 秒。原始最终正文已保存，可离线复现该字段错误。
+- 修订字段提示后的同题试次：七次 504，第八次超时，600.5 秒时预算停止，终态
+  `budget_exhausted`；没有有效正文，因此不能判断提示词修复效果。
+- 两次均未进入检索，无证据和答案；0/0 不代表支持度通过。原另外两条 dev 未启动。
+  当前没有证据证明流式稳定解决 504，也没有完整调查通过记录。
+
+### 下一轮执行计划（优先完成前两项）
+
+1. **正式化离线审核与报告工具。** 先盘点并复用 `scripts/review_agent.py`、
+   `src/zhrag/eval/agent_review.py` 和本地临时报告器，抽取通用的运行/源码指纹认证、
+   逐条审核、证据核验及报告生成逻辑。保持现有多来源组统计合同；单来源组提供明确的
+   描述性报告，不伪造 CI/p 值，也不为报告凑数增加任务。只迁移通用代码，不把含真实
+   任务描述、审核正文或语料的临时脚本整体移入仓库。验收：既有结果可完全离线重算，
+   缺失文件或指纹不符时明确失败，旧文件与旧评分不变。
+2. **建立离线失败回放入口。** 用已保存的最终响应回放解析/校验错误，用原创合成 SSE
+   回放协议与预算路径；复用现有流式测试。清楚标注“最终响应回放”和“合成协议回放”，
+   不声称从仅含数字的事件日志还原了真实 SSE。缺失正文、请求状态或证据时标为不可
+   回放，禁止补写、联网回退或调用模型。旧记录不改写，新回放结果使用独立目录和标识。
+   验收：额外字段等已记录失败可复现，缺档/摘要漂移可检测，整个入口在禁网下可运行。
+3. **完善诊断与状态展示。** 明确区分模型决策次数和 HTTP 尝试次数，以及传输成功、
+   规划通过、覆盖门禁、最终答案和独立验收。先审查已有事件字段再补缺项，兼容读取
+   历史记录，不改写旧合同或伪装历史数据。不展示模型内部思考或凭证。
+4. **整理恢复验证清单和项目文档。** 记录已验证能力与待验证项、入口和准确命令。
+   供应恢复后再准备新计划，从原跨文档题完整调查开始；通过审核后再验证原另外两条
+   dev。当前窗口不得因为准备清单而自行恢复付费步骤。
+
+### 本地素材与只读复核入口
+
+最新两组资料：`indexes/agent_eval/v2/glm53-stream-agent/` 与
+`indexes/agent_eval/v2/glm53-stream-plan-v2/`，均有 `pair_plan.json`、
+`executed_sources.json`、`protected_files.json`、`review_decisions.json`、
+`REPORT.md`、`HANDOFF.md` 和 JUnit。对应 run-id：
+`v2-glm53-stream-20260928-off`、`v2-glm53-stream-plan-v2-20260928-off`；
+试次和独立标签在 `indexes/agent_eval/runs/<run-id>/`，传输记录在
+`indexes/agent_eval/diagnostics/` 下去掉 `-off` 的同名目录。
+
+首阶段最终正文为 `diagnostics/v2-glm53-stream-20260928/response-1-4.json`
+（相对 `indexes/agent_eval/`）；仅保存模型最终内容，不含内部思考正文。
+`stream_events.jsonl` 只有事件类型、耗时和字符数等，不是原始 SSE。
+
+可先运行以下完全离线检查作为迁移基线，保留旧入口和产物：
+
+```powershell
+.venv/Scripts/python.exe indexes/agent_eval/v2/review/report_glm53_stream_agent.py --check
+.venv/Scripts/python.exe indexes/agent_eval/v2/review/report_glm53_stream_plan_v2.py --check
+```
+
+证据重建逻辑参考 `indexes/agent_eval/v2/review/inspect_smoke.py` 与
+`report_glm53_review_pair.py` 的 `verify_evidence`；规划事件审计参考同目录
+`audit_investigation_plan_run.py`。前述文件均为本地素材，不应整目录提交。
+项目 I/O 继续走 `zhrag.io_utils`，输出同时设置 stdout/stderr UTF-8；不设置 PYTHONUTF8。
+
+## 历史会话记录（2026-09-28）
 
 ### 实际 Agent 流式接入（本窗口最新）
 
