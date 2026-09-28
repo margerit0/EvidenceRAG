@@ -64,10 +64,12 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/s
 默认最多 10 次模型决策、3 次搜索、6 次读取；相同查询和已读取证据不重复调用。
 通过 `--agent-max-steps`、`--agent-max-searches`、`--agent-max-seconds` 配置主要预算，
 `--context-passages` 与 `--context-tokens` 配置读取数量及每轮输入估算 token 上限。
-模型每次输出受 `--generation-max-tokens` 约束；累计估算输入上限由 `AgentSettings` 配置。
+模型每次输出可用 `--generation-max-tokens` 约束，或用 `--generation-no-token-limit`
+省略请求上限；累计估算输入上限由 `AgentSettings` 配置。
 
 Agent chat 默认不重试（`--agent-generation-retries 0`），避免继承单轮问答历史上的长重试阶梯；
-可显式设为 0–5 次，失败后按 5、10、15、20、25 秒线性等待，只重试既有的瞬态状态码（含 429/5xx/401）
+可显式设为 0–9 次，最多十次总尝试；失败后按 5、10、…、45 秒线性等待，
+并尊重有上限的 Retry-After，只重试既有的瞬态状态码（含 429/5xx/401）
 与超时、连接中断、临时 DNS 解析失败；会检查 `URLError.reason`，包括远端提前断开、
 不完整响应、连接拒绝/重置和临时网络不可达。证书/其他 TLS 错误、永久 DNS 失败、
 权限/配置错误和 403 不重试。成功立即停止，最多首次请求加配置的重试次数。
@@ -226,13 +228,15 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/c
 
 冒烟可用 `--methods document_agent --limit 1 --max-steps 6 --max-searches 1 --max-reads 3`
 限制工作量；`--max-seconds`、`--generation-timeout`、`--generation-max-tokens`、`--generation-retries`
-分别设置调用边界时长检查、单次 chat I/O 超时、输出上限与 chat 重试次数（0–5，默认 0）。
+分别设置调用边界时长检查、单次 chat I/O 超时、输出上限与 chat 重试次数（0–9，默认 0）。
+服务入口对应 `--agent-generation-retries`；显式设为 `9` 表示每次 chat 最多十次总尝试
+（首次 + 9 次重试），成功立即停止。重试数进入生成器和 Agent 指纹，默认仍只尝试一次。
 用户明确不希望使用 4096 输出上限时，服务和对照 CLI 可传
 `--generation-no-token-limit`，不发送 `max_completion_tokens` 或 `max_tokens`。
 该选项与 `--generation-max-tokens` 互斥，计划及生成器指纹记录
 `max_output_tokens: null`，本轮后续诊断使用此设置。省略请求参数仍可能受到供应商默认
 输出额度和模型最大输出长度限制，不能称为无限输出；时间、响应字节和结构校验仍适用。
-`--max-seconds` 的有效范围是 `(0, 600]`；本轮使用 `600`、chat 超时 `90` 秒和 `5` 次重试。
+`--max-seconds` 的有效范围是 `(0, 600]`；GLM 六试次使用 `600`、chat 超时 `90` 秒和 `9` 次重试。
 实际检索仍采用现有 embedding/rerank 重试策略，因此这些参数不是按金额或严格墙钟终止的费用上限。
 
 ## 2026-09-28 开发校准与回归入口
@@ -243,8 +247,9 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/c
 未通过以 `invalid_answer` 结束。复核调用占用原有步数、时间和累计输入 token 预算。
 `clarify` 和无答案返回不额外复核；同一生成器配置下，开关关闭保持原有 Agent profile。模型复核通过
 不代表人工审核或事实性认证，质量仍需独立试次审核。
-该实验已完成离线验证及一次六试次配对运行；供应商故障导致没有成功的复核响应，
-暂未验证语义效果。开关继续默认关闭，详细失败记录与下一步见迭代交接文首。
+该实验已完成离线验证与独立配对运行。最新 GLM 六试次中 off/on 均未通过完整验收，
+出现格式/引用校验失败、复核响应迟到和跨文档遗漏；开关继续默认关闭。
+详细报告、审核限制和后续诊断方向见[迭代交接文首](agent-iteration.md)。
 
 `indexes/agent_eval/v2/calibrated-20260928/` 是独立的 dev 验收校准版本；原审核产物与
 旧试次保留。复核依据是同一语料快照中明确允许的场景，不按某个方法的输出修改金标准。

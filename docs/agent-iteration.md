@@ -8,6 +8,120 @@
 
 ## 新会话从这里继续（2026-09-28）
 
+### 新窗口快速交接与模型推荐（GLM 六试次）
+
+本窗口从 `4533dd0` 继续，只在 `feat/document-investigation-agent` 工作，保留上一窗口
+未提交的交接内容。服务 `--agent-generation-retries` 和对照 `--generation-retries` 已支持
+显式 `9`：每次 chat 最多十次总尝试（首次 + 9 次重试），成功立即停止；默认仍为 `0`。
+配置继续进入生成器与 Agent 指纹。新增回归覆盖首次、第五次、第十次成功及十次耗尽，
+也覆盖两入口的范围校验、离线计划和参数传递。完整 pytest 1593 passed，ruff check /
+format / mypy 通过；README 测试数字由 JUnit 同步。
+
+使用 Git 忽略的 `.research_tmp/glm-agent.env`，模型 `z-ai/glm-5.3`、reasoning `high`、
+`--generation-no-token-limit`，逐次检查请求未发送 max_tokens/max_completion_tokens。
+三条任务来自原 `calibrated-20260928/smoke/tasks.jsonl`，保持步数 10、搜索 3、读取 6、
+调用边界 600 秒、单次 I/O 90 秒。v2 的 79 条任务审核已完成，本轮不重做任务审核，
+只独立审核新六试次最终输出。任务、旧结果与原环境文件均有保护指纹。
+
+新计划与执行快照位于 `indexes/agent_eval/v2/answer-review-glm53-pair/`，run-id 为
+`v2-glm53-review-pair-20260928-{off,on}`，按题交错运行，六试次与独立模型审核均已完成。
+以下块由 `indexes/agent_eval/v2/review/report_glm53_review_pair.py` 从全部试次和审核记录重算。
+
+<!-- BEGIN AGENT-GLM53-PAIR -->
+GLM 配对实验 `v2-glm53-review-pair-20260928`：`z-ai/glm-5.3` / `high`，无显式输出 token 上限，最多十次总尝试（首次 + 9 次重试）。
+三条固定 dev、三个来源组，review off/on 共六试次；逐条独立 Codex 模型审核，人工审核 0。
+全套门禁：1593 passed，ruff check / format / mypy 通过。
+
+| 配置 | 状态 | 验收通过 | 引用支持陈述 | 平均模型调用 | 平均耗时 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| review off | answered 1、invalid_answer 2 | 0/3 | 17/18 | 4.3 | 254.4s |
+| review on | budget_exhausted 1、invalid_answer 2 | 0/3 | 0/0 | 5.0 | 285.1s |
+
+配对成功率差（on − off）：0.000，95% CI [0.000, 0.000]；整组置换 p=1.000，Holm p=1.000。
+配对耗时增量（含全部失败）：均值 30.7s，95% CI [-454.7, 528.8]。
+返回证据 12 项（7 个唯一片段、5 篇文档）均与本地语料快照重建文本精确一致。
+成功请求：`{'chat': 28, 'embedding': 7, 'rerank': 7}`；HTTP 错误：`{'504': 9}`；其他请求异常：`{'TimeoutError': 1}`。
+复核 HTTP 成功响应 2 次；发生重试的请求 4 个，恢复成功 4 个；chat 实际最多尝试 5 次。HTTP 成功不等于复核或任务验收通过。
+答案复核接受草稿 0 次，复核语义事件为 `{'revise': 1}`；4 条答案在复核前的格式/引用检查阶段失败。
+成功 chat usage：prompt 67,992 / completion 9,584；供应商完整账单、失败调用及 embedding/rerank 金额未知。
+257 个已有任务、运行、诊断和环境文件通过保护指纹检查；旧结果及冻结 test 未改写。
+每题每配置一次，三个已用于开发的来源组；区间和配对检验只描述本轮，不能证明泛化收益。无答案时陈述为 0/0，不代表引用可靠性满分。
+本轮配对成功标签全部相同，成功率差的 bootstrap 区间退化为 [0, 0]；这不是等效性证明，也不表示真实总体差异已精确确定。
+本轮到此六试次为止，复核开关继续默认关闭；未扩大 dev，未使用冻结 test。
+<!-- END AGENT-GLM53-PAIR -->
+
+检查入口为 `report_glm53_review_pair.py --check`；它重新认证配对清单、源代码快照、
+原文重建、逐条标签/陈述审核、重试序列、统计报告和文档。执行入口为
+`run_glm53_review_pair.py`，默认只校验离线计划；已有 run-id 拒绝再次执行。
+本轮只完成这组六试次，不扩大 dev，不使用冻结 test。人工审核仍为 0。
+
+**逐条审核结论与后续交接：** 两种配置均未通过任何一条完整验收。四处 `invalid_answer`
+发生在答案格式/引用校验阶段；现有日志未保存被拒绝正文或细分校验原因，不能臆测具体
+字段缺陷。简单题 on 首次复核要求补救，第二次复核四次 504 后第五次返回 HTTP 成功，
+但总耗时 624.3 秒已超过调用边界预算，未发布迟到答案，也没有 `accepted` 事件。
+两条追问题均未发布实际追问，不能把已读模式文档算作追问成功。
+
+跨文档 off 是唯一发布答案的试次：机制解释和导入期间快照的数据不一致风险仍遗漏。
+跳过预检的条件未再次被写成唯一允许条件，但备份时机的表述把所引场景说明扩大成
+强制限制，缺少实际引用支持；另一个参考文档虽有相关警告，本次没有读取/引用，不能
+替当前引用补支持。on 在草稿格式/引用校验时已失败，无法证明复核修正了这些缺陷。
+独立审核者为 Codex 模型，非人工，审核可见配置标签；不称为盲评。
+
+GLM 的单条诊断成功没有转化为本轮完整 Agent 验收通过。当前继续保留指定配置和所有
+失败，复核默认关闭。下一轮应先离线补充 `invalid_answer` 的隐私安全细分诊断与合成
+回归，区分字段合同、引用边界、动作选择和语义遗漏；本轮不追加付费诊断或扩量。
+详细逐条记录见各 run 的 `reviews.jsonl` / `claim_audit.jsonl`，本地汇总与复现入口见
+`indexes/agent_eval/v2/answer-review-glm53-pair/HANDOFF.md`。当前提交以 Git log 为准。
+
+### 上一窗口快速交接与模型推荐（保留原文）
+
+用户准备换窗口继续任务。本节优先于后面的历史交接。建议下一阶段以
+**`z-ai/glm-5.3` 为主，`deepseek-v4.1-flash` 为备选**；Grok 先留作链路诊断。
+理由是 GLM 在同一简单题复核中首次约 37.7 秒返回完整、合格 JSON；DeepSeek 无显式
+输出上限时经过四次 504 后第五次成功；Grok 流式收到中间数据后停流，未收到最终答案。
+这是基于当前中转服务和少量诊断的开发选型，不是完整 Agent 质量或性价比排名。
+GLM 的成功记录仍带历史 4096 上限，新阶段必须使用无显式上限的独立配置重新验证。
+
+当前代码提交 **`4533dd0`**，分支 **`feat/document-investigation-agent`**，main 为
+`0668fa9`，没有推送或合并。`2275144` 实现有预算答案复核及暂时性网络重试，
+`4533dd0` 增加不发送输出 token 上限的选项。最后全套门禁 1584 passed、ruff check /
+format / mypy 通过；本次仅补交接与本地环境文件，不新增付费调用。实际工作区以 Git 为准，
+保留可能尚未提交的本节交接修改。
+
+**已完成的工作不要重做：** v2 共 79 条任务已完成模型审核并写出（dev 48 / 冻结 test 31），
+人工审核仍为 0。AGENTS.md 中“五组未审”是旧提示，正式状态看本文件与本地审核交接。
+默认关闭的答案复核已实现；复核最多两次、只允许一次补救，共享既有预算。
+两轮 Grok 六试次、GLM/DeepSeek 单条复核、Grok 单次流式诊断均保留，不能覆盖或改分。
+目前还没有 GLM 的完整调查 + 复核 off/on 配对实验，不能宣称整体效果已验证。
+
+**新窗口配置：** 已准备 Git 忽略的 `.research_tmp/glm-agent.env`，合并原 `.env` 的
+embedding/rerank 配置与用户提供的新 LLM key/base URL，仅将模型名指定为 `z-ai/glm-5.3`。
+原 `.env` 仍保持原配置；`.research_tmp/deepseek-review.env` 只含先前提供的 LLM 配置，
+不能直接替代完整检索环境文件。不要打印、提交或要求用户重复粘贴密钥。
+生成参数明确使用 `--generation-reasoning-effort high --generation-no-token-limit`，
+后者省略 max_completion_tokens/max_tokens，但供应商默认限制仍可能存在。
+
+**后续具体任务：** 为 GLM 准备同期三条 dev × review off/on 的六试次实验，复用
+`indexes/agent_eval/v2/calibrated-20260928/smoke/tasks.jsonl`。保持原任务、索引、步数 10、
+搜索 3、读取 6、调用边界时长 600 秒、单次 I/O 90 秒，使用新的模型/输出配置和新 run-id。
+用户此前要求后续重试最多十次总尝试（首次 + 9 次重试）、成功即停；注意当前 Agent
+CLI 的 retries 校验仍只允许 0–5，不能直接传 9。先补齐服务/对照入口的显式 9 次重试支持、
+指纹与测试，再形成真实一致的离线计划；不要把“十次尝试”写成“十次重试”。
+旧本地运行器硬编码 Grok、4096 或旧 ID，不能直接加 --run 复用。
+
+执行后逐条独立模型审核最终输出，重建并核对引用证据，保留失败并重算配对报告及耗时。
+跨文档题重点核对机制解释遗漏、把充分条件升级为必要条件、导入期间快照的不一致风险；
+简单题与必要追问也须通过。审核意见仍明确标为模型审核，不计入人工审核。
+本轮目标限定这组六试次，不自动扩大为十二条分层样本、全量 dev 或冻结 test。
+本次窗口交接没有启动这组六试次，后续按新窗口的实际用户指令执行。
+
+产物入口：`indexes/agent_eval/v2/answer-review-glm53/`、`answer-review-deepseek-no-cap/`、
+`answer-review-grok-stream/` 和 `output-limit/`；各自保留 plan、execution、report 及校验入口。
+旧实验执行源码已按计划 hash 归档；继续改代码前保留新增实验的执行快照，不重写旧计划。
+Python 文件读写使用 `zhrag.io_utils`，stdout/stderr 均设 UTF-8，不设 PYTHONUTF8。
+
+### 最近完成的运行记录
+
 本轮最后追加的授权是一次 Grok 流式、无输出 token 上限复核；已执行且未重试。
 Grok 流式连接可用，但没有收到完整最终 JSON。DeepSeek 无显式上限的独立诊断在
 四次 504 后第五次成功；其最终内容与思考已分离，本次供应商报告的 completion_tokens

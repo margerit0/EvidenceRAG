@@ -63,7 +63,8 @@ def test_agent_composition_is_explicit_and_uses_no_chat_retries(tmp_path: Path) 
     assert reviewed.profile_fingerprint != agent.profile_fingerprint
 
 
-def test_agent_retries_are_explicit_bounded_and_fingerprinted(tmp_path: Path) -> None:
+@pytest.mark.parametrize("retries", [5, 9])
+def test_agent_retries_are_explicit_bounded_and_fingerprinted(tmp_path: Path, retries: int) -> None:
     fake = FakeRetriever()
     env = tmp_path / ".env"
     write_text(
@@ -72,11 +73,14 @@ def test_agent_retries_are_explicit_bounded_and_fingerprinted(tmp_path: Path) ->
     base = ["--enable-agent", "--env", str(env)]
     default = serve._build_agent(serve._parse_args(base), fake, index_identity="test")
     ladder = serve._build_agent(
-        serve._parse_args([*base, "--agent-generation-retries", "5"]), fake, index_identity="test"
+        serve._parse_args([*base, "--agent-generation-retries", str(retries)]),
+        fake,
+        index_identity="test",
     )
-    assert ladder.generator.max_retries == 5
+    assert ladder.generator.max_retries == retries
+    assert ladder.generator.profile_fingerprint != default.generator.profile_fingerprint
     assert ladder.profile_fingerprint != default.profile_fingerprint
-    for value in ("-1", "6"):
+    for value in ("-1", "10"):
         with pytest.raises(ValueError, match="agent-generation-retries"):
             serve._build_agent(
                 serve._parse_args([*base, "--agent-generation-retries", value]),

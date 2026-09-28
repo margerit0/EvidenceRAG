@@ -37,11 +37,13 @@ def cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, Mo
 
 
 @pytest.mark.parametrize("reasoning_effort", ["low", "high"])
+@pytest.mark.parametrize("retries", [0, 9])
 def test_dry_run_never_imports_service_or_providers(
     cli: tuple[ModuleType, ModuleType, Path],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     reasoning_effort: str,
+    retries: int,
 ) -> None:
     compare, _, path = cli
     monkeypatch.setitem(sys.modules, "serve", None)
@@ -53,6 +55,7 @@ def test_dry_run_never_imports_service_or_providers(
                 "--allow-drafts",
                 "--generation-reasoning-effort",
                 reasoning_effort,
+                *(["--generation-retries", str(retries)] if retries else []),
             ]
         )
         == 0
@@ -61,6 +64,7 @@ def test_dry_run_never_imports_service_or_providers(
     assert plan["provider_calls_enabled"] is False and plan["trial_count"] == 9
     assert plan["selection"]["reviewed_count"] == 0
     assert plan["generation"]["reasoning_effort"] == reasoning_effort
+    assert plan["generation"]["max_retries"] == retries
     assert plan["agent_budgets"]["review_answers"] is False
 
 
@@ -101,7 +105,7 @@ def test_invalid_reasoning_effort_rejected_before_service_composition(
         ["--allow-drafts", "--generation-timeout", "0"],
         ["--allow-drafts", "--generation-max-tokens", "99999"],
         ["--allow-drafts", "--generation-retries", "-1"],
-        ["--allow-drafts", "--generation-retries", "6"],
+        ["--allow-drafts", "--generation-retries", "10"],
     ],
 )
 def test_invalid_plan_fails_before_service_composition(
@@ -125,10 +129,12 @@ def test_task_initializer_never_overwrites_review_work(
 
 
 @pytest.mark.parametrize("no_output_cap", [False, True])
+@pytest.mark.parametrize("retries", [2, 9])
 def test_private_trials_written_with_pending_review_and_no_overwrite(
     cli: tuple[ModuleType, ModuleType, Path],
     monkeypatch: pytest.MonkeyPatch,
     no_output_cap: bool,
+    retries: int,
 ) -> None:
     compare, _, path = cli
     agent, _ = make_agent(ABSTAIN)
@@ -169,7 +175,7 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
         "--methods",
         "document_agent",
         "--generation-retries",
-        "2",
+        str(retries),
         "--generation-reasoning-effort",
         "high",
         "--agent-review-answers",
@@ -180,7 +186,7 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
     run = compare.ROOT / "indexes/agent_eval/runs/synthetic-run"
     manifest = read_json(run / "manifest.json")
     assert manifest["complete"] is True and manifest["human_review_required"] is True
-    assert manifest["generation"]["max_retries"] == 2
+    assert manifest["generation"]["max_retries"] == retries
     assert manifest["generation"]["reasoning_effort"] == "high"
     assert manifest["generation"]["max_output_tokens"] == (None if no_output_cap else 4096)
     if no_output_cap:
@@ -190,7 +196,7 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
         assert service_argv[0][service_argv[0].index("--generation-max-tokens") + 1] == "4096"
     assert manifest["agent_budgets"]["review_answers"] is True
     assert "--agent-review-answers" in service_argv[0]
-    assert service_argv[0][service_argv[0].index("--agent-generation-retries") + 1] == "2"
+    assert service_argv[0][service_argv[0].index("--agent-generation-retries") + 1] == str(retries)
     assert service_argv[0][service_argv[0].index("--generation-reasoning-effort") + 1] == "high"
     trials = list(read_jsonl(run / "trials.jsonl"))
     assert len(trials) == 1 and trials[0]["review"]["task_success"] is None

@@ -55,7 +55,12 @@ def main(argv: list[str] | None = None) -> int:
         const=None,
         help="omit the request output-token cap; provider defaults and model limits still apply",
     )
-    parser.add_argument("--generation-retries", type=int, default=0)
+    parser.add_argument(
+        "--generation-retries",
+        type=int,
+        default=0,
+        help="retries after the first chat attempt (0-9); at most 10 total attempts",
+    )
     parser.add_argument("--agent-review-answers", action="store_true")
     parser.add_argument(
         "--generation-reasoning-effort",
@@ -90,8 +95,8 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
         raise ValueError("invalid generation timeout")
     if args.generation_max_tokens is not None and not 1 <= args.generation_max_tokens <= 8192:
         raise ValueError("invalid generation output cap")
-    if not 0 <= args.generation_retries <= 5:
-        raise ValueError("generation-retries must be in [0, 5]")
+    if not 0 <= args.generation_retries <= 9:
+        raise ValueError("generation-retries must be in [0, 9] (at most 10 total attempts)")
     reasoning_effort = getattr(args, "generation_reasoning_effort", "low")
     if reasoning_effort not in {"minimal", "low", "medium", "high"}:
         raise ValueError("invalid generation reasoning effort")

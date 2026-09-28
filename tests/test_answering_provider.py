@@ -160,6 +160,40 @@ def http_error(status: int, retry_after: str | None = None) -> urllib.error.HTTP
 
 
 class TestLinearRetries:
+    @pytest.mark.parametrize("succeed_at", [1, 5, 10, None])
+    def test_nine_retries_stop_on_success_or_ten_total_attempts(
+        self, succeed_at: int | None
+    ) -> None:
+        requests: list[urllib.request.Request] = []
+        sleeps: list[float] = []
+
+        def transport(request: urllib.request.Request) -> bytes:
+            requests.append(request)
+            if len(requests) == succeed_at:
+                return body()
+            raise http_error(504)
+
+        answerer = ChatAnswerGenerator(
+            ChatConfig("secret", "https://relay.example", "model"),
+            max_retries=9,
+            max_output_tokens=None,
+            reasoning_effort="high",
+            transport=transport,
+            sleep=sleeps.append,
+        )
+        if succeed_at is None:
+            with pytest.raises(GenerationError, match="generation_failed"):
+                answerer.generate("system", "user")
+        else:
+            assert answerer.generate("system", "user") == '{"answerable":true}'
+        attempts = succeed_at or 10
+        assert len(requests) == attempts
+        assert sleeps == [5.0 * number for number in range(1, attempts)]
+        assert all(request is requests[0] for request in requests)
+        payload = json.loads(requests[0].data or b"{}")
+        assert payload["reasoning_effort"] == "high"
+        assert "max_completion_tokens" not in payload and "max_tokens" not in payload
+
     @pytest.mark.parametrize(
         "error",
         [

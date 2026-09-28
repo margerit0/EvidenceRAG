@@ -139,7 +139,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--agent-max-steps", type=int, default=10)
     parser.add_argument("--agent-max-searches", type=int, default=3)
     parser.add_argument("--agent-max-seconds", type=float, default=180.0)
-    parser.add_argument("--agent-generation-retries", type=int, default=0)
+    parser.add_argument(
+        "--agent-generation-retries",
+        type=int,
+        default=0,
+        help="retries after the first Agent chat attempt (0-9); at most 10 total attempts",
+    )
     parser.add_argument(
         "--agent-review-answers",
         action="store_true",
@@ -197,8 +202,8 @@ def _build_answerer(args: argparse.Namespace) -> Answerer | None:
 
 
 def _agent_settings(args: argparse.Namespace) -> AgentSettings:
-    if not 0 <= args.agent_generation_retries <= 5:
-        raise ValueError("agent-generation-retries must be in [0, 5]")
+    if not 0 <= args.agent_generation_retries <= 9:
+        raise ValueError("agent-generation-retries must be in [0, 9] (at most 10 total attempts)")
     return AgentSettings(
         max_steps=args.agent_max_steps,
         max_searches=args.agent_max_searches,
