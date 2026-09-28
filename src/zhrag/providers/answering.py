@@ -185,7 +185,7 @@ def _retry_delay(error: BaseException, retry_number: int) -> float | None:
 def _profile_fingerprint(
     config: ChatConfig,
     *,
-    max_output_tokens: int,
+    max_output_tokens: int | None,
     timeout_seconds: float,
     reasoning_effort: str | None,
     max_response_bytes: int,
@@ -220,7 +220,7 @@ class ChatAnswerGenerator:
     """Generate one answer with bounded linear retries for configured failures."""
 
     config: ChatConfig
-    max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS
+    max_output_tokens: int | None = DEFAULT_MAX_OUTPUT_TOKENS
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     reasoning_effort: str | None = None
     transport: Transport | None = None
@@ -234,12 +234,12 @@ class ChatAnswerGenerator:
             raise ValueError("transport_contract must be nonempty")
         if type(self.max_retries) is not int or not 0 <= self.max_retries <= DEFAULT_MAX_RETRIES:
             raise ValueError("max_retries must be an integer between 0 and 15")
-        if (
+        if self.max_output_tokens is not None and (
             not isinstance(self.max_output_tokens, int)
             or isinstance(self.max_output_tokens, bool)
             or not 1 <= self.max_output_tokens <= 8_192
         ):
-            raise ValueError("max_output_tokens must be a positive integer")
+            raise ValueError("max_output_tokens must be an integer in [1, 8192] or None")
         if (
             not isinstance(self.timeout_seconds, (int, float))
             or isinstance(self.timeout_seconds, bool)

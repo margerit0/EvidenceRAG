@@ -58,6 +58,18 @@ def generator(recorder: Recorder, **kwargs: object) -> ChatAnswerGenerator:
 
 
 class TestChatAnswerGenerator:
+    def test_no_output_cap_omits_limit_fields_and_preserves_long_response(self) -> None:
+        text = "synthetic response " * 1000
+        recorder = Recorder(body(content=text))
+        answerer = generator(recorder, max_output_tokens=None)
+        assert answerer.generate("system", "user") == text
+        payload = json.loads(recorder.requests[0].data or b"{}")
+        assert "max_completion_tokens" not in payload and "max_tokens" not in payload
+        assert (
+            answerer.profile_fingerprint
+            != generator(Recorder(body()), max_output_tokens=4096).profile_fingerprint
+        )
+
     def test_generates_once_with_bounded_output_and_no_reasoning_effort(self) -> None:
         recorder = Recorder(body())
         answerer = generator(recorder)

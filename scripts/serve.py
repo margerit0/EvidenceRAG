@@ -151,7 +151,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=15,
         help="retries after the first chat attempt (0-15); wait 5, 10, ... seconds",
     )
-    parser.add_argument("--generation-max-tokens", type=int, default=2048)
+    output_limit = parser.add_mutually_exclusive_group()
+    output_limit.add_argument("--generation-max-tokens", type=int, default=2048)
+    output_limit.add_argument(
+        "--generation-no-token-limit",
+        dest="generation_max_tokens",
+        action="store_const",
+        const=None,
+        help="omit the request output-token cap; provider defaults and model limits still apply",
+    )
     parser.add_argument("--context-tokens", type=int, default=12_000)
     parser.add_argument("--context-passages", type=int, default=6)
     parser.add_argument(
@@ -496,7 +504,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("generation-timeout must be in (0, 300]")
         if not 0 <= args.generation_retries <= 15:
             raise ValueError("generation-retries must be in [0, 15]")
-        if not 1 <= args.generation_max_tokens <= 8_192:
+        if args.generation_max_tokens is not None and not 1 <= args.generation_max_tokens <= 8_192:
             raise ValueError("generation-max-tokens must be in [1, 8192]")
         AnswerSettings(max_passages=args.context_passages, max_prompt_tokens=args.context_tokens)
         state, index = _load_published_artifacts(args.artifacts)

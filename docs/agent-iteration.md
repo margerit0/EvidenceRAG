@@ -8,6 +8,79 @@
 
 ## 新会话从这里继续（2026-09-28）
 
+本轮最后追加的授权是一次 Grok 流式、无输出 token 上限复核；已执行且未重试。
+Grok 流式连接可用，但没有收到完整最终 JSON。DeepSeek 无显式上限的独立诊断在
+四次 504 后第五次成功；其最终内容与思考已分离，本次供应商报告的 completion_tokens
+未超过 4096。不能宣称已经实际验证超过 4096 token，也不能把成功归因给单一参数。
+
+<!-- BEGIN AGENT-REVIEW-GROK-STREAM -->
+用户授权的单次 Grok 流式诊断：`grok-4.7` / `high`，相同复核输入，stream=true，未发送 max_tokens/max_completion_tokens，只发一次且不重试。
+
+HTTP 200，首个 SSE 事件 1.64s；共 38 个事件，最后一个在 20.21s，思考片段累计 1384 字符，最终 content 0 字符。未保存或展示思考正文。
+
+结果 `stream_failed` / `TimeoutError`，总耗时 110.2s；完成标记 False，finish_reason=None，usage=`{}`。未收到最终 JSON，不能标为复核成功。
+
+流式连接能够建立并返回中间数据，但之后停流触发 90 秒读取超时；本次未出现 HTTP 504，仍未取得完整答案。没有收到 usage，实际费用未知。
+
+本次同时使用流式和无显式 token 上限，只有一条试次，不能据此单独归因或宣称已解决 Grok 故障。保留原始数值事件记录，不自动追加付费请求。
+<!-- END AGENT-REVIEW-GROK-STREAM -->
+
+下一步若继续 Grok，应先检查约 20 秒后停止出流的供应商链路和 90 秒空闲超时；本轮
+不自动增加超时或再付费。GLM 与 DeepSeek 已分别取得单条有效复核，仍需新的同期
+Agent 对照计划才能比较整体行为，不能用旧模型任务失败率替代新配置测试。
+
+最新用户要求取消本轮请求中的 4096 输出限制，并询问两模型是否做了同一任务。
+已核对两次系统提示词、问题、两段草稿、证据和生成参数的指纹：除模型名外一致。
+GLM 最终正文只有 647 字符且为完整 JSON，思考放在独立字段；DeepSeek 将大量分析放入
+正文，输出达到 4096 token 后 JSON 未完成。旧诊断未保存思考字段长度或嵌套 usage
+明细，不能把 742/4096 当作跨模型思考总量比较；输入 token 不同也可能来自分词器差异。
+
+已增加 `ChatAnswerGenerator(max_output_tokens=None)` 和服务/对照 CLI 的
+`--generation-no-token-limit`，不发送任何输出 token 限制参数，计划和指纹以 null
+标识。本轮后续诊断采用此选项，不沿用旧的 4096 计划。供应商自身默认额度仍可能生效，
+省略参数不保证无限输出。原有模型调用、旧计划和结果没有改写；无显式上限的 DeepSeek
+诊断另存 `answer-review-deepseek-no-cap/`，保持相同输入与其他生成设置。
+代码和离线回归验证与真实效果分开记录；全套 pytest 1584 passed，ruff check/format、
+mypy 均通过，JUnit 在 `indexes/agent_eval/v2/output-limit/pytest-full.xml`。
+输入与输出对照摘要在 `indexes/agent_eval/v2/output-limit/input_output_comparison.json`。
+
+<!-- BEGIN AGENT-REVIEW-NO-CAP -->
+无显式 token 上限诊断 `v2-review-deepseek-no-cap-20260928`：同一 DeepSeek 模型、输入、`high`、90 秒超时及最多十次总尝试，仅移除请求的输出 token 上限参数；运行时断言未发送 max_completion_tokens 或 max_tokens。
+
+结果 `review_response_valid`，尝试 5 次，总耗时 321.5s；HTTP 错误 `{'504': 4}`，其他异常 `{}`。
+
+成功响应 usage：`{'completion_tokens': 3354, 'prompt_tokens': 1792, 'total_tokens': 5146}`；观察到 completion_tokens 超过 4096：否；有效复核 JSON：有。失败调用的计费未知。
+
+成功响应最终正文 985 字符，独立思考字段 11223 字符，finish_reason=stop；usage 思考分项 `{'accepted_prediction_tokens': 0, 'reasoning_tokens': 0, 'rejected_prediction_tokens': 0}`。若非空思考字段却报告 reasoning_tokens=0，不能用该分项推断实际思考用量。
+
+省略请求上限不取消供应商默认额度或模型最大输出长度，也不能解决中转自身的等待超时；本次真实结果与离线选项验证分开记录。
+<!-- END AGENT-REVIEW-NO-CAP -->
+
+### GLM 同输入诊断（历史）
+
+最新用户要求沿用 DeepSeek 的 key 和地址，只把模型名改为 `z-ai/glm-5.3` 测试。
+已完成同一输入、`high`、4096 输出上限的一次复核调用，正常返回完整 JSON 并通过校验。
+本轮仅补充本地诊断和交接文档，产品代码仍为 `2275144`；继续在
+`feat/document-investigation-agent`，未修改 main、原 `.env` 或旧实验记录。
+
+<!-- BEGIN AGENT-REVIEW-GLM -->
+同输入诊断 `v2-review-glm53-20260928`：沿用 DeepSeek 的独立凭证文件与地址，仅请求模型改为 `z-ai/glm-5.3`；保持 `high`、4096 token 上限、90 秒超时和最多十次总尝试。
+
+首次请求 37.7s 返回 2xx，返回模型匹配，finish_reason=`stop`；共 1 次，无重试。供应商 usage：`{'completion_tokens': 742, 'prompt_tokens': 1782, 'total_tokens': 2524}`。
+
+最终正文为完整 JSON（647 字符），通过复核结构与引用边界校验；四项覆盖、两个段落支持度及条件范围均通过。供应商使用独立 reasoning_content 字段，正文未混入非 JSON 文本；本次输出未触及上限。
+
+独立模型检查与原题和所引 FAQ 一致，人工审核仍为零。此结果只验证该配置能正常完成这一条复核调用，不代表完整 Agent 对照成功或复核具有泛化提升。
+
+后续同类诊断可沿用最多十次总尝试、成功即停；本次首次即成功，不能据此证明额外重试的收益。完整 Agent 六试次需另建新模型计划。旧 Grok/DeepSeek 结果、原 .env 和冻结 test 保留。
+<!-- END AGENT-REVIEW-GLM -->
+
+下一步可准备 GLM 同期 off/on 六试次，验证完整调查、复核与追问流程；不要把本次
+单条复核通过当成整体收益，复核开关继续默认关闭。DeepSeek 的输出格式问题单独保留，
+若继续排查，应另建实验并只改变一项设置，不与 GLM 结果混合归因。
+
+### DeepSeek 诊断与此前交接
+
 最新用户要求停止旧模型诊断，立即改用提供的 `deepseek-v4.1-flash` 配置。
 已终止旧进程并保存独立中断记录，原记录中有九次完整 504，不能写成十次全失败。
 新配置只执行同一简单题答案的单次复核诊断（同一输入指纹、`high`、4096 输出 token）；

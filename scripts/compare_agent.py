@@ -46,7 +46,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-reads", type=int, default=6)
     parser.add_argument("--max-seconds", type=float, default=180.0)
     parser.add_argument("--generation-timeout", type=float, default=60.0)
-    parser.add_argument("--generation-max-tokens", type=int, default=4096)
+    output_limit = parser.add_mutually_exclusive_group()
+    output_limit.add_argument("--generation-max-tokens", type=int, default=4096)
+    output_limit.add_argument(
+        "--generation-no-token-limit",
+        dest="generation_max_tokens",
+        action="store_const",
+        const=None,
+        help="omit the request output-token cap; provider defaults and model limits still apply",
+    )
     parser.add_argument("--generation-retries", type=int, default=0)
     parser.add_argument("--agent-review-answers", action="store_true")
     parser.add_argument(
@@ -80,7 +88,7 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
     )
     if not math.isfinite(args.generation_timeout) or not 0 < args.generation_timeout <= 300:
         raise ValueError("invalid generation timeout")
-    if not 1 <= args.generation_max_tokens <= 8192:
+    if args.generation_max_tokens is not None and not 1 <= args.generation_max_tokens <= 8192:
         raise ValueError("invalid generation output cap")
     if not 0 <= args.generation_retries <= 5:
         raise ValueError("generation-retries must be in [0, 5]")
@@ -137,8 +145,6 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
         str(args.env),
         "--generation-reasoning-effort",
         reasoning_effort,
-        "--generation-max-tokens",
-        str(args.generation_max_tokens),
         "--generation-timeout",
         str(args.generation_timeout),
         "--agent-max-steps",
@@ -152,6 +158,10 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
         "--agent-generation-retries",
         str(args.generation_retries),
     ]
+    if args.generation_max_tokens is None:
+        service_options.append("--generation-no-token-limit")
+    else:
+        service_options.extend(["--generation-max-tokens", str(args.generation_max_tokens)])
     if budgets.review_answers:
         service_options.append("--agent-review-answers")
     service_args = serve._parse_args(service_options)

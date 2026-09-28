@@ -327,6 +327,31 @@ class TestStoreValidation:
 
 
 class TestAnswerComposition:
+    def test_no_output_cap_reaches_answer_and_agent_generators(self, tmp_path: Path) -> None:
+        env = tmp_path / ".env"
+        write_text(
+            env,
+            "LLM_API_KEY=synthetic\nLLM_BASE_URL=https://example.invalid\nLLM_MODEL_NAME=model\n",
+        )
+        args = serve._parse_args(
+            [
+                "--enable-generation",
+                "--enable-agent",
+                "--env",
+                str(env),
+                "--generation-no-token-limit",
+            ]
+        )
+        assert serve._build_answerer(args).generator.max_output_tokens is None
+        assert (
+            serve._build_agent(
+                args, FakeRetriever(), index_identity="test"
+            ).generator.max_output_tokens
+            is None
+        )
+        with pytest.raises(SystemExit):
+            serve._parse_args(["--generation-no-token-limit", "--generation-max-tokens", "4096"])
+
     def test_default_does_not_read_chat_configuration(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

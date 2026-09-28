@@ -124,9 +124,11 @@ def test_task_initializer_never_overwrites_review_work(
         tasks._local_path(tasks.ROOT / "public.jsonl")
 
 
+@pytest.mark.parametrize("no_output_cap", [False, True])
 def test_private_trials_written_with_pending_review_and_no_overwrite(
     cli: tuple[ModuleType, ModuleType, Path],
     monkeypatch: pytest.MonkeyPatch,
+    no_output_cap: bool,
 ) -> None:
     compare, _, path = cli
     agent, _ = make_agent(ABSTAIN)
@@ -172,12 +174,20 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
         "high",
         "--agent-review-answers",
     ]
+    if no_output_cap:
+        args.append("--generation-no-token-limit")
     assert compare.main(args) == 0
     run = compare.ROOT / "indexes/agent_eval/runs/synthetic-run"
     manifest = read_json(run / "manifest.json")
     assert manifest["complete"] is True and manifest["human_review_required"] is True
     assert manifest["generation"]["max_retries"] == 2
     assert manifest["generation"]["reasoning_effort"] == "high"
+    assert manifest["generation"]["max_output_tokens"] == (None if no_output_cap else 4096)
+    if no_output_cap:
+        assert "--generation-no-token-limit" in service_argv[0]
+        assert "--generation-max-tokens" not in service_argv[0]
+    else:
+        assert service_argv[0][service_argv[0].index("--generation-max-tokens") + 1] == "4096"
     assert manifest["agent_budgets"]["review_answers"] is True
     assert "--agent-review-answers" in service_argv[0]
     assert service_argv[0][service_argv[0].index("--agent-generation-retries") + 1] == "2"

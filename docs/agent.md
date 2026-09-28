@@ -227,6 +227,11 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/c
 冒烟可用 `--methods document_agent --limit 1 --max-steps 6 --max-searches 1 --max-reads 3`
 限制工作量；`--max-seconds`、`--generation-timeout`、`--generation-max-tokens`、`--generation-retries`
 分别设置调用边界时长检查、单次 chat I/O 超时、输出上限与 chat 重试次数（0–5，默认 0）。
+用户明确不希望使用 4096 输出上限时，服务和对照 CLI 可传
+`--generation-no-token-limit`，不发送 `max_completion_tokens` 或 `max_tokens`。
+该选项与 `--generation-max-tokens` 互斥，计划及生成器指纹记录
+`max_output_tokens: null`，本轮后续诊断使用此设置。省略请求参数仍可能受到供应商默认
+输出额度和模型最大输出长度限制，不能称为无限输出；时间、响应字节和结构校验仍适用。
 `--max-seconds` 的有效范围是 `(0, 600]`；本轮使用 `600`、chat 超时 `90` 秒和 `5` 次重试。
 实际检索仍采用现有 embedding/rerank 重试策略，因此这些参数不是按金额或严格墙钟终止的费用上限。
 
