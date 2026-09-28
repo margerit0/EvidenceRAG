@@ -46,6 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-reads", type=int, default=6)
     parser.add_argument("--max-seconds", type=float, default=180.0)
     parser.add_argument("--generation-timeout", type=float, default=60.0)
+    parser.add_argument("--generation-stream", action="store_true")
     output_limit = parser.add_mutually_exclusive_group()
     output_limit.add_argument("--generation-max-tokens", type=int, default=4096)
     output_limit.add_argument(
@@ -126,6 +127,7 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
         "order": "task-order-with-cyclic-method-rotation-v1",
         "agent_budgets": asdict(budgets),
         "generation": {
+            **({"stream": True} if getattr(args, "generation_stream", False) else {}),
             "max_output_tokens": args.generation_max_tokens,
             "timeout_seconds": min(args.generation_timeout, args.max_seconds),
             "max_retries": args.generation_retries,
@@ -173,6 +175,8 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
         service_options.append("--agent-review-answers")
     if budgets.plan_investigation:
         service_options.append("--agent-plan-investigation")
+    if getattr(args, "generation_stream", False):
+        service_options.append("--generation-stream")
     service_args = serve._parse_args(service_options)
     state, index = serve._load_published_artifacts(service_args.artifacts)
     serve._direct_loopback()

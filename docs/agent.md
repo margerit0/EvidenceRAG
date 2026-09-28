@@ -19,6 +19,17 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/s
 `--enable-generation`。`--enable-agent` 不能与仅支持限定查询的 `--query-cache` 同用。
 这些启动参数不是 Agent 真实效果验收记录。
 
+实验性 `--generation-stream` 默认关闭，服务和对照 CLI 均支持。开启后，chat 请求使用
+供应商 SSE，程序收齐正文、匹配模型标识及 `stop` / `[DONE]` 后才解析和执行动作；
+错误事件、截断、模型不符或结构异常均不发布部分结果。它不改变网页响应方式。
+流式合同进入生成器和 Agent 指纹；关闭时保持原非流式请求、指纹与重试行为。
+
+传输仍直连配置的服务端，验证 TLS，不使用系统代理或自动跟随重定向。原响应字节上限
+约束整个 SSE 数据（含元数据），另有 64 KiB 行上限。内部思考只可统计长度，不传给答案。
+暂时性 HTTP/连接错误按原尝试上限重试，每次重新收集；协议错误直接失败。
+流式读取边界与重试等待会检查取消及调查剩余时间；阻塞 I/O 最长仍受单次 timeout
+约束，不能承诺即时取消或严格墙钟截止。非 Agent 单次流式另设 600 秒读取边界。
+
 接口：`POST /api/investigate`，请求体仅接受 `{"query":"需要调查的问题"}`。
 `GET /api/capabilities` 增加 `agent_enabled` 与 `agent_profile`。
 原 `/api/search` 与 `/api/ask` 分别保留独立检索、单轮问答语义。

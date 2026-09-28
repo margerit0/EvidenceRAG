@@ -141,6 +141,7 @@ class ChatClient:
         *,
         json_object: bool = True,
         max_output_tokens: int | None = None,
+        stream: bool = False,
     ) -> ChatReply:
         """Send one two-message turn and return the assistant's text."""
         if not isinstance(system, str) or not system.strip():
@@ -165,6 +166,9 @@ class ChatClient:
             payload["reasoning_effort"] = self.reasoning_effort
         if json_object:
             payload["response_format"] = {"type": "json_object"}
+        if stream:
+            payload["stream"] = True
+            payload["stream_options"] = {"include_usage": True}
         if max_output_tokens is not None:
             # OpenAI-compatible relays use this newer spelling for chat output
             # caps.  Do not add it by default: existing batch callers rely on the

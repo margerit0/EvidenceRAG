@@ -65,6 +65,7 @@ def test_dry_run_never_imports_service_or_providers(
     assert plan["selection"]["reviewed_count"] == 0
     assert plan["generation"]["reasoning_effort"] == reasoning_effort
     assert plan["generation"]["max_retries"] == retries
+    assert "stream" not in plan["generation"]
     assert plan["agent_budgets"]["review_answers"] is False
     assert plan["agent_budgets"]["plan_investigation"] is False
 
@@ -87,8 +88,21 @@ def test_investigation_plan_is_explicit_and_offline(
 ) -> None:
     compare, _, path = cli
     monkeypatch.setitem(sys.modules, "serve", None)
-    assert compare.main(["--tasks", str(path), "--allow-drafts", "--agent-plan-investigation"]) == 0
-    budgets = json.loads(capsys.readouterr().out)["agent_budgets"]
+    assert (
+        compare.main(
+            [
+                "--tasks",
+                str(path),
+                "--allow-drafts",
+                "--agent-plan-investigation",
+                "--generation-stream",
+            ]
+        )
+        == 0
+    )
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["generation"]["stream"] is True
+    budgets = plan["agent_budgets"]
     assert budgets["plan_investigation"] is True and budgets["review_answers"] is False
 
 
@@ -193,6 +207,7 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
         "high",
         "--agent-review-answers",
         "--agent-plan-investigation",
+        "--generation-stream",
     ]
     if no_output_cap:
         args.append("--generation-no-token-limit")
@@ -201,6 +216,8 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
     manifest = read_json(run / "manifest.json")
     assert manifest["complete"] is True and manifest["human_review_required"] is True
     assert manifest["generation"]["max_retries"] == retries
+    assert manifest["generation"]["stream"] is True
+    assert "--generation-stream" in service_argv[0]
     assert manifest["generation"]["reasoning_effort"] == "high"
     assert manifest["generation"]["max_output_tokens"] == (None if no_output_cap else 4096)
     if no_output_cap:

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from zhrag.answering import AnswerBlock, Evidence
 
-PLANNING_CONTRACT = "document-investigation-planning-v1"
+PLANNING_CONTRACT = "document-investigation-planning-v2"
 PLANNING_DIAGNOSTICS_CONTRACT = "planning-validation-v1"
 _RULE_CODES = {
     message: message.replace(" ", "_")
@@ -83,6 +83,10 @@ Return ONLY this JSON object, with no extra keys:
 {"requirements":[{"id":1,"kind":"procedure","question_quote":"exact question span",
 "description":"one concise required answer aspect"}],
 "facts":[{"id":1,"quote":"exact user-provided fact span"}]}
+The two entry schemas are DIFFERENT. Each requirements entry has EXACTLY these
+four keys: id, kind, question_quote, description. Each facts entry has EXACTLY
+two keys: id, quote. NEVER put description, kind or question_quote in facts,
+even with an empty string or null. Check these key sets before returning JSON.
 List every explicit requested aspect, including reasons, conditions and risks:
 1-8 requirements; kind is fact, procedure, mechanism, condition, or risk.
 For a workaround after an error, include the underlying limitation and what the
@@ -95,6 +99,11 @@ facts contains 0-8 explicit environment observations, each quoted verbatim in
 1-300 characters. Preserve subject, time and qualifiers. A question or possible
 choice is not a fact. Never rewrite a task duration as an outage duration, infer
 defaults, or add facts from general knowledge. Do not repeat identical facts.
+Desired outcomes and future requirements belong in requirements, not facts;
+facts records only what the user says is currently observed or configured.
+Write descriptions as aspects to investigate, not established conclusions.
+Ask to determine whether/why a limitation or risk applies; do not assert the
+mechanism, damage or data loss before reading evidence.
 """
 
 PLANNED_ACTION_PROMPT = """Investigate the Chinese question using the supplied fixed

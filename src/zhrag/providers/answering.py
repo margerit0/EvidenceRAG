@@ -23,8 +23,10 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
 from zhrag.answering import GenerationError
+from zhrag.generation_control import GenerationInterrupted, remaining_seconds
 from zhrag.providers.chat import REASONING_EFFORTS, ChatClient, ChatConfig
 from zhrag.providers.http import MAX_RETRY_AFTER, RETRY_STATUS, Transport
+from zhrag.providers.streaming import STREAM_CONTRACT, STREAM_MAX_SECONDS, StreamingTransport
 
 __all__ = ["MAX_RESPONSE_BYTES", "ChatAnswerGenerator"]
 
@@ -191,6 +193,7 @@ def _profile_fingerprint(
     max_response_bytes: int,
     max_retries: int,
     transport_contract: str = "urllib-default-v1",
+    stream: bool = False,
 ) -> str:
     canonical = json.dumps(
         {
@@ -207,6 +210,11 @@ def _profile_fingerprint(
             "retry_after_cap_seconds": MAX_RETRY_AFTER,
             "transport_retry_contract": TRANSPORT_RETRY_CONTRACT,
             "transport_contract": transport_contract,
+            **(
+                {"stream_contract": STREAM_CONTRACT, "stream_max_seconds": STREAM_MAX_SECONDS}
+                if stream
+                else {}
+            ),
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -228,8 +236,11 @@ class ChatAnswerGenerator:
     max_retries: int = DEFAULT_MAX_RETRIES
     sleep: Callable[[float], None] = time.sleep
     transport_contract: str = "urllib-default-v1"
+    stream: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.stream) is not bool:
+            raise ValueError("stream must be boolean")
         if not isinstance(self.transport_contract, str) or not self.transport_contract.strip():
             raise ValueError("transport_contract must be nonempty")
         if type(self.max_retries) is not int or not 0 <= self.max_retries <= DEFAULT_MAX_RETRIES:
@@ -272,11 +283,14 @@ class ChatAnswerGenerator:
             max_response_bytes=self.max_response_bytes,
             max_retries=self.max_retries,
             transport_contract=self.transport_contract,
+            stream=self.stream,
         )
 
     def _transport(self) -> Transport:
         if self.transport is not None:
             return self.transport
+        if self.stream:
+            return StreamingTransport(self.timeout_seconds, self.max_response_bytes)
 
         def transport(request: urllib.request.Request) -> bytes:
             return _bounded_urlopen(
@@ -292,6 +306,8 @@ class ChatAnswerGenerator:
 
         def send(request: urllib.request.Request) -> bytes:
             for attempt in range(self.max_retries + 1):
+                if self.stream:
+                    remaining_seconds()
                 try:
                     return transport(request)
                 except (OSError, http.client.HTTPException) as exc:
@@ -302,7 +318,13 @@ class ChatAnswerGenerator:
                     if delay is None or attempt == self.max_retries:
                         code = "generation_timeout" if _is_timeout(exc) else "generation_failed"
                         raise GenerationError(code) from None
-                    self.sleep(delay)
+                    if self.stream:
+                        while delay > 0:
+                            step = min(delay, 0.5, remaining_seconds())
+                            self.sleep(step)
+                            delay -= step
+                    else:
+                        self.sleep(delay)
             raise AssertionError("unreachable retry loop")
 
         return send
@@ -323,8 +345,9 @@ class ChatAnswerGenerator:
                 user,
                 json_object=True,
                 max_output_tokens=self.max_output_tokens,
+                stream=self.stream,
             )
-        except GenerationError:
+        except (GenerationError, GenerationInterrupted):
             raise
         except (Exception, SystemExit) as exc:
             code = "generation_timeout" if _is_timeout(exc) else "generation_failed"

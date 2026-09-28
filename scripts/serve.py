@@ -132,6 +132,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--generation-timeout", type=float, default=60.0)
     parser.add_argument(
+        "--generation-stream",
+        action="store_true",
+        help="assemble complete provider SSE replies before dispatching agent actions",
+    )
+    parser.add_argument(
         "--enable-agent",
         action="store_true",
         help="enable paid bounded document investigation; requires LLM_* configuration",
@@ -196,7 +201,10 @@ def _build_answerer(args: argparse.Namespace) -> Answerer | None:
             timeout_seconds=args.generation_timeout,
             reasoning_effort=args.generation_reasoning_effort,
             max_retries=args.generation_retries,
-            transport=DirectTransport(args.generation_timeout, 256 * 1024),
+            stream=args.generation_stream,
+            transport=None
+            if args.generation_stream
+            else DirectTransport(args.generation_timeout, 256 * 1024),
             transport_contract=DIRECT_CONTRACT,
         ),
         settings=AnswerSettings(
@@ -267,9 +275,10 @@ def _build_agent(
             reasoning_effort=args.generation_reasoning_effort,
             # Defaults to one attempt; optional retries are explicit and fingerprinted.
             max_retries=args.agent_generation_retries,
-            transport=DirectTransport(
-                min(args.generation_timeout, args.agent_max_seconds), 256 * 1024
-            ),
+            stream=args.generation_stream,
+            transport=None
+            if args.generation_stream
+            else DirectTransport(min(args.generation_timeout, args.agent_max_seconds), 256 * 1024),
             transport_contract=DIRECT_CONTRACT,
         ),
         retrieval_identity=identity,

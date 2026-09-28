@@ -453,6 +453,17 @@ def test_fact_extra_field_fails_closed_and_http_exposes_only_safe_code() -> None
     assert "PRIVATE_FIELD" not in response.text and "PRIVATE_VALUE" not in response.text
 
 
+def test_empty_requirement_field_in_fact_is_rejected_without_repair() -> None:
+    plan = deepcopy(PLAN)
+    plan["facts"][0]["description"] = ""
+    with pytest.raises(PlanningValidationError) as error:
+        parse_plan(json.dumps(plan), QUESTION)
+    assert error.value.reason == "extra_fields"
+    assert plan["facts"][0]["description"] == ""
+    valid = parse_plan(json.dumps(PLAN), QUESTION)
+    assert valid.facts[0].quote == PLAN["facts"][0]["quote"]
+
+
 def test_json_recursion_failure_has_a_safe_diagnostic(monkeypatch: pytest.MonkeyPatch) -> None:
     def fail(*args: object, **kwargs: object) -> object:
         raise RecursionError("PRIVATE_DETAIL")

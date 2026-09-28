@@ -40,6 +40,7 @@ from zhrag.answering import (
     Generator,
     parse_answer,
 )
+from zhrag.generation_control import GenerationInterrupted, generation_control
 from zhrag.retrieval.online import OnlineRetrievalResult, RankedPassage
 from zhrag.tokens import estimate_tokens
 
@@ -523,7 +524,12 @@ class DocumentAgent:
             state.model_calls += 1
             state.prompt_tokens += tokens
             try:
-                raw = self.generator.generate(system, prompt)
+                with generation_control(
+                    cancelled, lambda: self.settings.max_seconds - self._elapsed(state)
+                ):
+                    raw = self.generator.generate(system, prompt)
+            except GenerationInterrupted as exc:
+                return self._outcome(state, exc.code)
             except GenerationError as exc:
                 return self._outcome(state, exc.code)
             except (Exception, SystemExit):
