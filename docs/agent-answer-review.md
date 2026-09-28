@@ -5,6 +5,24 @@
 
 ## GLM 六试次进展（2026-09-28）
 
+当前已在先前六试次之外完成三条 review off 的输出合同与失败诊断回归，保持原任务和预算，
+不重跑旧记录。以下独立摘要由 `report_glm53_contract.py` 重算；它不是新的 off/on 复核对照。
+
+<!-- BEGIN AGENT-GLM53-CONTRACT -->
+输出合同回归 `v2-glm53-contract-20260928-off`：原三条 dev、review off；GLM 5.3 / high / 无显式输出 token 上限，最多十次总尝试。
+全套门禁 1640 passed，ruff check / format / mypy 通过；三条均独立模型审核，人工审核 0。
+终态 `{'answered': 3}`；完整验收 0/3；引用支持陈述 42/46；平均耗时 207.7s，平均模型调用 4.0。
+答案校验错误码：`{}`。
+返回证据 5 项、5 个唯一片段，全部与本地快照重建文本一致。
+相对上一轮 GLM off 的历史配对差：0.000，95% CI [0.000, 0.000]；配对整组置换 p=1.000，Holm p=1.000。
+这是同题单次、非同期的开发回归；不能把差异单独归因于提示词或诊断改动，不能据此声称稳定性或泛化提升。
+两次完整验收标签全为失败，bootstrap 差值区间退化为 [0, 0]，不构成真实零差或等效性证明。
+成功请求 `{'chat': 12, 'embedding': 4, 'rerank': 4}`；HTTP 错误 `{'504': 2}`；其他异常 `{}`；重试请求 2 个、恢复 2 个，实际 chat 最多尝试 2 次。
+成功 chat usage：prompt 27,057 / completion 2,528；完整账单及失败请求、embedding/rerank 金额未知。
+289 个已有文件通过保护指纹检查；旧任务、试次和评分保留，冻结 test 未使用。
+本轮仅执行三试次，复核继续默认关闭；后续是否重新评估复核取决于基础流程验证，不自动扩量。
+<!-- END AGENT-GLM53-CONTRACT -->
+
 在 `4533dd0` 上补齐服务/对照 CLI 的显式 9 次重试支持，默认仍为零重试；本轮使用
 `z-ai/glm-5.3` / `high` / `--generation-no-token-limit`，保持原三条 dev 和调查预算。
 新计划、源码快照、报告和 JUnit 位于 `indexes/agent_eval/v2/answer-review-glm53-pair/`。

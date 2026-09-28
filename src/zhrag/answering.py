@@ -9,6 +9,7 @@ import re
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
+from enum import StrEnum
 from typing import Literal, Protocol
 
 from zhrag.retrieval.online import RankedPassage
@@ -61,6 +62,48 @@ class GenerationError(Exception):
         else:
             self.code = "generation_failed"
         super().__init__(self.code)
+
+
+class AnswerValidationReason(StrEnum):
+    """Fixed diagnostic codes; never include model text or unknown field names."""
+
+    REPLY_TYPE = "reply_type"
+    REPLY_SIZE = "reply_size"
+    JSON_SYNTAX = "json_syntax"
+    JSON_DUPLICATE_KEY = "json_duplicate_key"
+    JSON_NONFINITE = "json_nonfinite"
+    JSON_DEPTH = "json_depth"
+    JSON_VALUE = "json_value"
+    INVALID_UNICODE = "invalid_unicode"
+    ANSWER_OBJECT = "answer_object"
+    ANSWER_MISSING_FIELD = "answer_missing_field"
+    ANSWER_EXTRA_FIELD = "answer_extra_field"
+    ANSWERABLE_TYPE = "answerable_type"
+    BLOCKS_TYPE = "blocks_type"
+    REFUSAL_WITH_BLOCKS = "refusal_with_blocks"
+    NO_READ_EVIDENCE = "no_read_evidence"
+    BLOCK_COUNT = "block_count"
+    BLOCK_OBJECT = "block_object"
+    BLOCK_MISSING_FIELD = "block_missing_field"
+    BLOCK_EXTRA_FIELD = "block_extra_field"
+    BLOCK_TEXT = "block_text"
+    INLINE_CITATION = "inline_citation"
+    CITATIONS_TYPE = "citations_type"
+    CITATIONS_EMPTY = "citations_empty"
+    CITATION_TYPE = "citation_type"
+    CITATION_UNREAD = "citation_unread"
+    CITATION_DUPLICATE = "citation_duplicate"
+    ANSWER_SIZE = "answer_size"
+
+
+class AnswerValidationError(GenerationError):
+    """Retain the public category while exposing an allowlisted local diagnosis."""
+
+    def __init__(self, reason: AnswerValidationReason) -> None:
+        if not isinstance(reason, AnswerValidationReason):
+            raise ValueError("answer validation reason must be an approved code")
+        self.reason = reason
+        super().__init__("invalid_answer")
 
 
 class Generator(Protocol):
@@ -200,59 +243,84 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     obj: dict[str, object] = {}
     for key, value in pairs:
         if key in obj:
-            raise ValueError("duplicate JSON key")
+            raise AnswerValidationError(AnswerValidationReason.JSON_DUPLICATE_KEY)
         obj[key] = value
     return obj
 
 
-def _reject_constant(value: str) -> object:
-    raise ValueError(f"non-finite JSON constant: {value}")
+def _reject_constant(_value: str) -> object:
+    raise AnswerValidationError(AnswerValidationReason.JSON_NONFINITE)
 
 
-def parse_answer(  # noqa: PLR0912 - fail-closed output boundary
+def parse_answer(  # noqa: PLR0912, PLR0915 - fail-closed output boundary
     raw: str,
     context: AnswerContext,
     settings: AnswerSettings,
 ) -> tuple[AnswerBlock, ...]:
     """Reject the whole answer on any invalid paragraph or citation."""
     try:
-        if not isinstance(raw, str) or len(raw) > settings.max_reply_chars:
-            raise ValueError("reply size")
+        if not isinstance(raw, str):
+            raise AnswerValidationError(AnswerValidationReason.REPLY_TYPE)
+        if len(raw) > settings.max_reply_chars:
+            raise AnswerValidationError(AnswerValidationReason.REPLY_SIZE)
+        raw.encode("utf-8")
         obj = json.loads(raw, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
-        if not isinstance(obj, dict) or set(obj) != {"answerable", "blocks"}:
-            raise ValueError("answer schema")
-        if type(obj["answerable"]) is not bool or not isinstance(obj["blocks"], list):
-            raise ValueError("answer types")
+        if not isinstance(obj, dict):
+            raise AnswerValidationError(AnswerValidationReason.ANSWER_OBJECT)
+        if {"answerable", "blocks"} - obj.keys():
+            raise AnswerValidationError(AnswerValidationReason.ANSWER_MISSING_FIELD)
+        if obj.keys() - {"answerable", "blocks"}:
+            raise AnswerValidationError(AnswerValidationReason.ANSWER_EXTRA_FIELD)
+        if type(obj["answerable"]) is not bool:
+            raise AnswerValidationError(AnswerValidationReason.ANSWERABLE_TYPE)
+        if not isinstance(obj["blocks"], list):
+            raise AnswerValidationError(AnswerValidationReason.BLOCKS_TYPE)
         rows = obj["blocks"]
         if not obj["answerable"]:
             if rows:
-                raise ValueError("refusal must have no blocks")
+                raise AnswerValidationError(AnswerValidationReason.REFUSAL_WITH_BLOCKS)
             return ()
-        if not context.evidence or not 1 <= len(rows) <= settings.max_blocks:
-            raise ValueError("block count")
+        if not context.evidence:
+            raise AnswerValidationError(AnswerValidationReason.NO_READ_EVIDENCE)
+        if not 1 <= len(rows) <= settings.max_blocks:
+            raise AnswerValidationError(AnswerValidationReason.BLOCK_COUNT)
         valid_ids = {row.citation_id for row in context.evidence}
         blocks: list[AnswerBlock] = []
         for row in rows:
-            if not isinstance(row, dict) or set(row) != {"text", "citations"}:
-                raise ValueError("block schema")
+            if not isinstance(row, dict):
+                raise AnswerValidationError(AnswerValidationReason.BLOCK_OBJECT)
+            if {"text", "citations"} - row.keys():
+                raise AnswerValidationError(AnswerValidationReason.BLOCK_MISSING_FIELD)
+            if row.keys() - {"text", "citations"}:
+                raise AnswerValidationError(AnswerValidationReason.BLOCK_EXTRA_FIELD)
             text, citations = row["text"], row["citations"]
             if not isinstance(text, str) or not text.strip():
-                raise ValueError("block text")
+                raise AnswerValidationError(AnswerValidationReason.BLOCK_TEXT)
             text.encode("utf-8")
             if re.search(r"\[\s*\d+(?:\s*[,，-]\s*\d+)*\s*\]", text):
-                raise ValueError("inline citation markers are not permitted")
-            if not isinstance(citations, list) or not citations:
-                raise ValueError("missing citations")
-            if any(type(value) is not int or value not in valid_ids for value in citations):
-                raise ValueError("invalid citation")
+                raise AnswerValidationError(AnswerValidationReason.INLINE_CITATION)
+            if not isinstance(citations, list):
+                raise AnswerValidationError(AnswerValidationReason.CITATIONS_TYPE)
+            if not citations:
+                raise AnswerValidationError(AnswerValidationReason.CITATIONS_EMPTY)
+            if any(type(value) is not int for value in citations):
+                raise AnswerValidationError(AnswerValidationReason.CITATION_TYPE)
+            if any(value not in valid_ids for value in citations):
+                raise AnswerValidationError(AnswerValidationReason.CITATION_UNREAD)
             if len(set(citations)) != len(citations):
-                raise ValueError("duplicate citation")
+                raise AnswerValidationError(AnswerValidationReason.CITATION_DUPLICATE)
             blocks.append(AnswerBlock(text.strip(), tuple(citations)))
         if sum(len(block.text) for block in blocks) > settings.max_answer_chars:
-            raise ValueError("answer size")
+            raise AnswerValidationError(AnswerValidationReason.ANSWER_SIZE)
         return tuple(blocks)
-    except (ValueError, TypeError, RecursionError):
-        raise GenerationError("invalid_answer") from None
+    except json.JSONDecodeError:
+        raise AnswerValidationError(AnswerValidationReason.JSON_SYNTAX) from None
+    except UnicodeError:
+        raise AnswerValidationError(AnswerValidationReason.INVALID_UNICODE) from None
+    except RecursionError:
+        raise AnswerValidationError(AnswerValidationReason.JSON_DEPTH) from None
+    except (ValueError, TypeError):
+        raise AnswerValidationError(AnswerValidationReason.JSON_VALUE) from None
 
 
 @dataclass(frozen=True, slots=True)

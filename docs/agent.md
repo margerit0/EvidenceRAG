@@ -62,6 +62,12 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/s
 ## 执行预算
 
 默认最多 10 次模型决策、3 次搜索、6 次读取；相同查询和已读取证据不重复调用。
+`document-investigation-v3` 保持严格答案合同，并在终止事件的 `validation_error` 字段
+提供固定错误码（正常事件为 null），区分字段缺失/多余、类型错误、未读引用、重复或内联
+引用、大小限制等。不会记录未知字段名、被拒绝正文或思考内容；公共失败状态仍为
+`invalid_answer`，不会自动提取 JSON 片段、转换引用类型或绕过校验。
+提示词进一步明确嵌套对象、布尔值和整数引用的格式，以及必要追问和机制/风险证据的读取。
+该指导不能代替实际模型验收，代码与提示词改动使用新 Agent 指纹。
 通过 `--agent-max-steps`、`--agent-max-searches`、`--agent-max-seconds` 配置主要预算，
 `--context-passages` 与 `--context-tokens` 配置读取数量及每轮输入估算 token 上限。
 模型每次输出可用 `--generation-max-tokens` 约束，或用 `--generation-no-token-limit`

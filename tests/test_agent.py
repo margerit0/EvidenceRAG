@@ -144,6 +144,18 @@ def test_invalid_actions_do_not_dispatch(raw: str) -> None:
     assert outcome.status == "invalid_action" and outcome.search_calls == 0
 
 
+def test_nested_nonfinite_answer_has_safe_diagnostic_instead_of_escaping() -> None:
+    raw = (
+        '{"action":"answer","answer":{"answerable":true,'
+        '"blocks":[{"text":"private","citations":[1e999]}]}}'
+    )
+    agent, _ = make_agent(SEARCH, READ, raw)
+    outcome = agent.run("q")
+    assert outcome.status == "invalid_answer" and not outcome.blocks
+    assert outcome.events[-1].validation_error == "json_value"
+    assert "private" not in repr(outcome)
+
+
 def test_duplicate_queries_reads_and_unknown_ids_do_not_consume_tool_budget() -> None:
     agent, _ = make_agent(
         SEARCH,
@@ -200,7 +212,7 @@ def test_prompt_budgets_checked_before_paid_call(settings: AgentSettings) -> Non
 
 def test_complete_oversized_passage_is_not_opened() -> None:
     agent, generator = make_agent(
-        SEARCH, READ, ABSTAIN, fake=FakeRetriever(), settings=AgentSettings(max_prompt_chars=3500)
+        SEARCH, READ, ABSTAIN, fake=FakeRetriever(), settings=AgentSettings(max_prompt_chars=5000)
     )
     outcome = agent.run("q")
     assert not outcome.evidence and outcome.status == "insufficient_evidence"

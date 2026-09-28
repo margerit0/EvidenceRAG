@@ -181,7 +181,8 @@ def test_review_consumes_decision_and_cumulative_token_budgets() -> None:
     reference, _ = make_agent(
         SEARCH, READ, ANSWER, feedback(), settings=AgentSettings(review_answers=True)
     )
-    total = reference.run("合成问题").prompt_estimated_tokens
+    # Elapsed floats enter observations; pin the clock for an exact token boundary.
+    total = replace(reference, clock=lambda: 0.0).run("合成问题").prompt_estimated_tokens
     agent, generator = make_agent(
         SEARCH,
         READ,
@@ -189,7 +190,7 @@ def test_review_consumes_decision_and_cumulative_token_budgets() -> None:
         feedback(),
         settings=AgentSettings(review_answers=True, max_total_prompt_tokens=total - 1),
     )
-    result = agent.run("合成问题")
+    result = replace(agent, clock=lambda: 0.0).run("合成问题")
     assert result.status == "budget_exhausted" and result.model_calls == 3
     assert result.prompt_estimated_tokens < total and not result.blocks
 
@@ -232,7 +233,7 @@ def test_time_or_cancellation_during_review_prevents_publication(cancel: bool) -
     assert result.model_calls == 4 and not result.blocks
 
 
-def test_repair_state_is_request_local_and_off_preserves_committed_profile() -> None:
+def test_repair_state_is_request_local_and_new_contract_changes_legacy_profile() -> None:
     agent, generator = make_agent(
         SEARCH,
         READ,
@@ -247,10 +248,14 @@ def test_repair_state_is_request_local_and_off_preserves_committed_profile() -> 
     assert agent.run("另一问题").status == "insufficient_evidence"
     assert "answer_review" not in generator.calls[-1]
     original, _ = make_agent(SEARCH, READ, ANSWER)
-    # Profile computed from committed 3503741 with these synthetic dependencies.
+    # The v3 wire guidance and diagnostics intentionally differ from 3503741.
     assert (
         original.profile_fingerprint
-        == "2a38d4d76071f6f767e4927b6c5d9642ba4f1fecca3133bee2815070ff92329e"
+        != "2a38d4d76071f6f767e4927b6c5d9642ba4f1fecca3133bee2815070ff92329e"
+    )
+    assert (
+        replace(agent, settings=replace(agent.settings, review_answers=False)).profile_fingerprint
+        == original.profile_fingerprint
     )
     assert original.run("合成问题").model_calls == 3
     assert agent.profile_fingerprint != original.profile_fingerprint

@@ -56,6 +56,23 @@ def test_http_failure_preserves_evidence_and_releases_admission() -> None:
     assert client.post("/api/search", json={"query": "q"}).status_code == 200
 
 
+def test_http_validation_diagnostic_does_not_echo_answer_or_unknown_fields() -> None:
+    private = "PRIVATE_UNKNOWN_FIELD_AND_ANSWER"
+    answer = {
+        "action": "answer",
+        "answer": {
+            "answerable": True,
+            "blocks": [{"text": private, "citations": [1], private: private}],
+        },
+    }
+    response = TestClient(app_for(SEARCH, READ, answer)).post(
+        "/api/investigate", json={"query": "q"}
+    )
+    assert response.status_code == 503 and response.json()["status"] == "invalid_answer"
+    assert response.json()["events"][-1]["validation_error"] == "block_extra_field"
+    assert response.json()["blocks"] == [] and private not in response.text
+
+
 def test_http_retrieval_failure_is_503_even_when_model_declines_via_answer() -> None:
     retriever = FakeRetriever(error=RuntimeError("private-retrieval-error"))
     declined = {"action": "answer", "answer": {"answerable": False, "blocks": []}}
