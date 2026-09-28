@@ -1,23 +1,158 @@
 # 文档调查 Agent 迭代计划与会话交接
 
-更新日期：2026-09-21。工作分支：`feat/document-investigation-agent`。
+更新日期：2026-09-28。工作分支：`feat/document-investigation-agent`。
 
 本文件是本轮迭代的进度与决策入口。跨会话先读 `CLAUDE.md`、本文件，再运行
 `git status --short --branch` 和 `git log -5 --oneline`；代码、测试和真实运行记录优先于文档描述。
 不要在 main 上开发；尚未验证的能力不能写成已完成的项目成果。
 
-## 新会话从这里继续（2026-09-21 第二次交接）
+## 新会话从这里继续（2026-09-28）
 
-本节优先于下文历史进度。不要 reset、clean、重新创建分支或重做已提交功能。
+本节记录基于 `e52a969` 完成的 dev 验收校准、Agent 提示词修正，以及对照 CLI 的
+思考等级参数和测试。此前文档改动一并保留，README 测试数量由脚本同步。
+用户已授权判断并提交本轮成果；实际提交以 `git log` 为准，没有推送或合并。
+
+校准版本另存 `indexes/agent_eval/v2/calibrated-20260928/`。只修正冒烟发现的旧 dev
+验收限定，并记录原审核者、复核者、前后条件与源文依据；原任务、证据、冻结记录及旧试次
+保持原样。模型审核不计人工审核。FAQ 仅作为校准佐证，正式任务的引用和来源组不变。
+
+<!-- BEGIN AGENT-V2-CALIBRATION -->
+2026-09-28 校准版本：79 条模型审核任务，dev 48 条 / test 31 条；只修改 1 条 dev 任务的一个验收条件及复核者信息。314 段引文复核通过，人工审核 0 条。
+
+- 新任务集 SHA-256：`da30f5f8c4e1ab362ee51640052872093d45f3c56f8c464776956409f4c30564`。
+- 继承的冻结 test SHA-256：`d5974735b36efa3e1ea02e73819d91553d82ca33b9d83d8ded91996825100a8c`；任务逐条不变。
+- 原审核目录和旧冒烟目录共 26 个文件通过字节指纹保护检查。
+- 本轮全套 pytest：**1512 passed**；ruff check、ruff format --check、mypy 均通过。
+- 已准备 dev 冒烟 9 试次与全量 dev 144 试次的离线清单，用户已选择先跑 dev 冒烟；全量 dev 尚未执行。
+
+本轮 `v2-cal-smoke-20260928-high` 已完成：3 条 dev、3 个来源组、9 个试次，全部完成模型审核，人工审核仍为 0。
+请求模型：`grok-4.7`；思考等级：`high`。返回的 42 个证据条目（23 个唯一片段、14 篇文档）全部与本地快照重建文本精确一致。
+
+| 方法 | 返回状态 | 验收通过 | 获引用支持的陈述 | 平均耗时（含失败） |
+| --- | --- | ---: | ---: | ---: |
+| `single_rag` | answered 3 | 2/3 | 50/50 | 141.0s |
+| `fixed_workflow` | answered 3 | 1/3 | 42/43 | 163.9s |
+| `document_agent` | answered 2、clarification_needed 1 | 2/3 | 26/27 | 210.9s |
+
+成功 chat / embedding / rerank 请求：27 / 21 / 21；HTTP 错误计数：`{'504': 4}`；其他请求异常：`{'TimeoutError': 3}`。
+成功 chat 响应的供应商 usage：prompt 111,559 / completion 36,109 token；失败请求计费未知，embedding/rerank 金额未知，不能据此给出总费用。
+首次沙箱尝试 `v2-cal-smoke-20260928` 在嵌入阶段连续连接失败后中止，未产生完整试次；其原始记录单独保留。正式受控网络运行的全部试次均保留，失败不从分母删除。
+旧 key/model 的 `v2-cal-smoke-20260928-direct` 在用户更新配置时停止，六个已完成试次和第七个中断记录保留；不与新配置混合计算质量。新运行的 chat 请求逐次校验 requested model 与 reasoning_effort=high，密钥不记录。
+质量报告按来源组重算 95% CI、配对整组置换检验与 Holm 校正。这里只是同一小组 dev 场景上的开发回归，传输重试影响耗时；本次同时更换 key/model 和思考等级，不能据此归因于提示词或推断完整 dev/test 效果。
+逐条审核发现两条将‘如果’升级为‘只有’的必要条件误读；Agent 的跨文档答案还遗漏了机制解释。Agent 在追问场景正确询问了实际模式；基线仍返回分支答案，未执行追问。
+预算在依赖调用边界检查，重试中的请求可能使实际耗时超过 max_seconds；迟到的答案不发布。未回答的试次没有答案陈述，0/0 不表示引用完全可靠。
+试次 SHA-256：`d805592c05ec344f539a9b3ef5dde62318c567ad06f455d24d9a16cbab40c1c0`。
+<!-- END AGENT-V2-CALIBRATION -->
+
+失败分析：一次调查追加搜索后没有读取新候选，就用已读段落推导了更强的禁令；另一次
+已经读取包含模式差异的证据，却以分支建议代替必要追问。现在提示词明确要求核对用户
+问题的各个部分、读取所用证据、避免将建议升级为禁令或保证，并在具体操作选择依赖
+未知环境信息时追问。一般性的方案比较仍可直接回答，已提供的信息不重复询问。
+这项提示词修正已完成有限真实回归并暴露剩余问题，不表示已建立语义校验器或已证明质量提升。
+
+运行入口默认只做离线检查与预览；`--run` 才调用付费接口。已生成的两份计划绑定任务、
+提示词及关键代码指纹；运行前必须匹配，使用新 run-id，拒绝覆盖旧目录。
+基线的问答与动作合同未改，单轮 RAG / 固定流程仍无追问动作，因此不能把整体对比
+解释成单一因素消融。新任务条件不得用于回写旧试次的评分。
+
+```powershell
+.venv/Scripts/python.exe indexes/agent_eval/v2/review/calibrate_dev.py
+.venv/Scripts/python.exe indexes/agent_eval/v2/review/run_calibrated_dev.py --scope smoke --run-id v2-cal-smoke-20260928-high --reasoning-effort high
+.venv/Scripts/python.exe indexes/agent_eval/v2/review/run_calibrated_dev.py --scope full-dev --run-id v2-cal-full-dev-20260928-high --reasoning-effort high
+.venv/Scripts/python.exe indexes/agent_eval/v2/review/sync_calibrated_docs.py --check
+```
+
+用户已选择先跑九试次 dev 回归。首次沙箱尝试在嵌入阶段连接失败后中止，记录保留；
+旧配置的 `v2-cal-smoke-20260928-direct` 在用户修改 `.env` 的 key/model 后停止，已有
+六个试次和第七个中断记录保留。用户要求使用新设置并改为 `high`；当前运行改为
+`v2-cal-smoke-20260928-high`，请求逐次校验模型名与思考等级，密钥不记录。
+本轮九试次、逐条模型审核、证据重建校验和质量报告均已完成。仍存在条件误读与机制
+解释遗漏，下一步应先针对这两类问题改进 dev 上的证据覆盖与判断，再决定是否扩大；
+不能自动启动全量 dev。最终 test 不用于调参。
+人工审核、页面视觉验收仍为后续事项。本轮按用户委托在当前功能分支保存提交。
+
+## 2026-09-26 交接（历史）
+
+本节取代下面的历史交接。当前 HEAD 为 `e52a969`；本轮完成任务审核、文档和有限付费冒烟，
+没有提交、推送或合并。仍在 `feat/document-investigation-agent` 分支。
+
+用户委托模型续审剩余五组。前批四十条审核记录保持其原审核者，本批三十九条记录实际模型审核者；
+**模型审核不计入人工审核，人工审核仍为零**。原始 `v2/tasks.jsonl`、`draft_evidence.jsonl`
+和 `drafts/` 保留为未审核出处；审核后的任务、证据、聚合摘要及冻结记录写到
+`indexes/agent_eval/v2/reviewed/`。审核结论和复核脚本位于同级 `review/`，所有这些产物均被 Git 忽略。
+
+<!-- BEGIN AGENT-V2-REVIEW -->
+2026-09-26 模型审核写出结果（由本地聚合摘要重算；快照 `pingcap/docs-cn@26f202b`）：
+
+| 范围 | 任务 | simple | multi_document | clarification | unanswerable | 来源组 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 全部 | 79 | 31 | 20 | 18 | 10 | 10 |
+| dev | 48 | 19 | 12 | 11 | 6 | 6 |
+| test（已冻结） | 31 | 12 | 8 | 7 | 4 | 4 |
+
+模型审核 79 条，人工审核 0 条；2 accept / 77 revise / 0 reject。314 段引文通过规范化逐字校验，所有引用均在已发布索引内。
+所有任务均通过 `validate_tasks(..., require_reviewed=True)`；原始任务与证据 packet 逐条对齐。
+
+- 任务集 canonical SHA-256：`090f7408661a334b8b800470b282f3a9ff237f9f857f5d734298c883cf54749e`
+- `tasks.jsonl` 文件 SHA-256：`a593ac04cd4386e5c4b771bbe5ce3088e6cabbb767c773f2cfaf7cfcab5b0de8`
+- 冻结 test canonical SHA-256：`d5974735b36efa3e1ea02e73819d91553d82ca33b9d83d8ded91996825100a8c`
+<!-- END AGENT-V2-REVIEW -->
+
+本轮统一口径：验收只要求问题直接询问且原文支持的事实，接受等价表述；跨文档题核查文档间的
+重复内容；追问题只检查决定性信息与不预设结论；无答案题重新搜索全部本地语料，并按
+`insufficient_evidence` 且无答案段落验收。语料中冲突的数值不作为唯一金标准。
+最终额外检查了引文来源的组归属，清除一处冗余跨组引用；装配器自身并不证明语义正确或来源组独立。
+
+本次付费范围为三个不同来源组的 dev 任务、三个方法，共九个试次。样本在调用前选定，覆盖简单、
+跨文档、追问三类；副本在 `reviewed/smoke/tasks.jsonl`，`selection.json` 绑定完整任务集指纹。
+这使三个方法能共享同一输入，并避免默认 `--limit 3` 只取到同组简单题。
+test 已冻结，未参与本轮运行或调参。全量 dev/test 仍须另行确认规模与预算。
+
+<!-- BEGIN AGENT-V2-SMOKE -->
+2026-09-26 完成 `v2-dev-smoke-20260926-direct`：3 条已审核 dev 任务、3 个来源组、9 个试次，全部保留并完成独立模型审核。人工审核仍为 0。
+
+| 方法 | 返回状态 | 按本轮固定条件通过 | 回答内获引用支持的陈述 | 平均耗时 |
+| --- | --- | ---: | ---: | ---: |
+| `single_rag` | answered 3 | 1/3 | 39/39 | 45.5s |
+| `fixed_workflow` | answered 3 | 1/3 | 45/45 | 77.9s |
+| `document_agent` | answered 3 | 1/3 | 35/36 | 61.2s |
+
+进程导出指向已确认未监听端口的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 后，chat / embedding / rerank 分别完成 23 / 18 / 18 次成功请求，验证了本次直连路径。
+成功 chat 响应汇总的供应商 usage 为 prompt 50,759 / completion 15,114 token。这不包含 embedding/rerank 的货币费用，也不能代替供应商账单。
+本轮未观察到出站 HTTP 错误；无据推算具体金额。
+
+完整 `quality_report.json` 已按来源组生成 95% CI、配对整组置换检验与 Holm 校正，并通过重算检查。
+这里只有三个来源组、每题每方法一次执行，且追问能力在方法间不同；上述计数仅描述冒烟，不能据此声称准确率提升或推断完整 dev/test 表现。
+逐条复核区分了缺少必答信息、缺少所引证据支持和未执行追问三类问题。另发现一项前批 dev 验收限定比语料允许的场景更窄，已写入本地 `rubric_observations.json`：本次保留原任务、试次与评分口径，不把有据的其他方案判成事实错误；全量 dev 对照前需在新任务版本中校准该项。
+试次 SHA-256：`e91aac1bae18a554a17720894cbfc7e261c17c6d7b4776bc9122a7eafd875f99`。
+<!-- END AGENT-V2-SMOKE -->
+
+复核入口（本地脚本不调用付费接口，除非显式加 `--run`）：
+
+```powershell
+.venv/Scripts/python.exe indexes/agent_eval/v2/review/finalize_review.py
+.venv/Scripts/python.exe indexes/agent_eval/v2/review/run_reviewed_smoke.py
+```
+
+`finalize_review.py` 默认只读重算任务、引文、出处指纹与冻结信息；不要对已冻结任务重新执行
+`--write`，不要用 test 结果改任务、提示词或参数。后续只在新 run-id 下安排已授权的实验。
+只有用户明确要求时才提交。页面视觉验收、人工审核和更大规模的对照实验仍是后续工作。
+
+环境复核：2026-09-26 C 盘可用约 21.2 GiB，旧的极低空间告警已不代表当前状态。
+日志与报告继续写到 D 盘 `indexes/`。本轮定向离线测试为 **96 passed**；首次运行因既有
+`.pytest_tmp` 权限失败，按环境权限流程重跑后全部通过。没有设置 `PYTHONUTF8`。
+
+## 2026-09-21 第二次交接（历史）
+
+本节保留当时进度，最新状态以上节为准。不要 reset、clean、重新创建分支或重做已提交功能。
 
 - 工作目录：`D:\rag`，分支：`feat/document-investigation-agent`；main 保持 `0668fa9`；没有合并或推送。
 - 本会话新增并提交：语料落地任务草稿装配器（`src/zhrag/eval/agent_task_drafts.py`、
   `scripts/assemble_agent_tasks.py`、`tests/test_agent_task_drafts.py`）与 `docs/agent.md` 的说明。
 - 提交前全套门禁：**pytest 1510 passed**、ruff check、ruff format --check、mypy 均通过；
   README 测试数量已由 `scripts/sync_quality_gate_docs.py` 重出并 `--check` 通过。
-- **本机 C 盘只剩约 38 MB**：pytest 全量运行时曾因写不下临时输出而出现 4 个假失败，
-  单独重跑全部通过；日志请写到 D 盘 gitignored 位置（`.pytest_tmp` 在 pytest 启动时会被清空）。
-  未删除任何系统文件，清盘由用户决定。
+- 当时 C 盘空间不足，pytest 全量运行曾因写不下临时输出出现 4 个假失败，单独重跑全部通过。
+  当前空间情况见最新交接；日志继续写到 D 盘 gitignored 位置（`.pytest_tmp` 启动时会被清空）。
 
 本会话完成的任务集扩充（全部位于 `indexes/agent_eval/v2/`，已忽略，不入库）：
 
@@ -45,13 +180,12 @@ v1 的 24 条模板草稿保持原样，`dev-agent-smoke-20260921-direct-5` 的�
 下一会话按这个顺序继续：
 
 1. 阅读 `CLAUDE.md` 和本文，核对 `git status --short --branch` / `git log -3 --oneline`。
-2. **人工审核 v2 任务集**：逐条阅读 `tasks.jsonl` + `draft_evidence.jsonl`，复核分类、验收条件与
-   unanswerable 的无答案判断，改写 `reviewer`、把 `reviewed` 设为 true。这一步只能由人完成；
-   模型起草不计入人工审核数量。审核后测试集冻结，禁止用它调参。
-3. 大规模付费对照试验仍未授权，须先确认预算。参考经验值：`--max-seconds ≥ 600`、
+2. 当时计划由人审核 v2；之后用户明确委托模型审核，执行记录见最新交接。
+   必须区分模型审核与人工审核，完成语义复核后才能标记 `reviewed=true`，最终 test 不用于调参。
+3. 大规模付费对照试验仍未授权，须先确认预算。参考经验值：`--max-seconds 600`（上限就是 600）、
    `--generation-timeout 90`、`--generation-retries ≥ 2`；单次 chat 决策 20–60 秒、偶发 61 秒 504。
    79 任务 × 3 方法 ≈ 237 试次，按上次冒烟每试次 4–6 次 chat 估算调用量，费用需以供应商账单为准。
-4. 若要先做小规模开发集冒烟（如 `--split dev --limit 3 --run`），仍需用户明确批准。
+4. 当时小规模 dev 冒烟尚待授权；本轮已获授权的范围见最新交接。
 5. 页面视觉验收仍为独立待办。
 
 ## 2026-09-21 第一次交接（已由上节取代，保留为历史）
@@ -101,7 +235,7 @@ v1 的 24 条模板草稿保持原样，`dev-agent-smoke-20260921-direct-5` 的�
    这属于模型判官标签，不计入人工审核数量；任务本身仍是 `reviewed=false` 的草稿、验收条件为空，
    `--report` 按合同拒绝发布。需要人工确认时，改写 reviewer 字段并复核。
 3. 扩充并审核任务集（目标 50–100 条）；大规模付费对照试验仍未授权，须先确认预算。
-   基于本次观测：单次 chat 决策 20–60 秒、偶发 61 秒 504，建议正式运行 `--max-seconds ≥ 600`、
+   基于本次观测：单次 chat 决策 20–60 秒、偶发 61 秒 504，建议正式运行 `--max-seconds 600`（允许范围 (0, 600]）、
    `--generation-timeout 90`、`--generation-retries ≥ 2`；这些是经验值，不是合同。
 4. 页面视觉验收仍为独立待办。
 
@@ -134,7 +268,8 @@ v1 的 24 条模板草稿保持原样，`dev-agent-smoke-20260921-direct-5` 的�
 - 文档使用工程目标、实现决策与验证记录表述。
 - 用户选择暂不使用浏览器自动化工具，继续完成代码与离线验证。
 - 当前先交付可验证的文档调查 MVP，再按证据决定是否接 SQL 执行计划与日志工具。
-- 已获准对一个开发任务进行有限调用的真实冒烟及单次连通性对照；大规模付费试验尚未安排。
+- 2026-09-26 已获准完成剩余 v2 模型审核、写出、文档及有限付费测试；当前执行范围为
+  三条 dev 任务 × 三方法。此前单任务授权记录保留为历史，全量 dev/test 尚未确认规模。
 
 ## 起点与选择理由
 
@@ -177,7 +312,8 @@ v1 的 24 条模板草稿保持原样，`dev-agent-smoke-20260921-direct-5` 的�
 - [x] 建立任务格式、审核状态、开发集/测试集与来源分组约束。
 - [x] 提供本地任务草稿初始化及校验入口；任务正文、证据和模型产物留在 gitignored 目录。
 - [ ] 起步目标为 50–100 个经人工审阅的任务；草稿不计入人工审核数量。
-      2026-09-21：v2 已有 79 条语料落地、引文逐字核验的模型起草草稿，0 条人工审核。
+      2026-09-26：v2 的 79 条已完成用户委托的模型审核，0 条人工审核；原草稿仍保留。
+- [x] 完成用户委托的 v2 模型审核、单独写出及出处/引文/组归属校验。
 - [x] 草稿覆盖简单文档问答、跨章节整合、信息不足、无答案；诊断任务待真实工具接入后补充。
 - [x] 实现同任务对照单轮 RAG、固定拆解检索流程和自适应 Agent 的运行入口与合成测试。
 - [x] 记录调用次数、估算输入 token 和耗时，预留任务成功/支持度/追问拒答的人工审核字段。
@@ -185,9 +321,12 @@ v1 的 24 条模板草稿保持原样，`dev-agent-smoke-20260921-direct-5` 的�
 - [x] 对照 CLI 可配置模型决策、搜索、读取、时长和输出上限；执行前清单展示预算。
 - [ ] 人工审核完成后汇总任务质量；实际成本需供应商 usage/账单数据，不用估算输入冒充费用。
 - [x] 模型/提示词/索引/任务集指纹及每个 run 独立产物目录。
-- [ ] 审核后冻结测试集；禁止在最终测试集反向调参。
+- [x] 模型审核后冻结 test 及其指纹；禁止在最终测试集反向调参。
 - [ ] 人工审核标签与模型判官区分；对提升结论使用配对比较及 95% CI。
-- [ ] 获得真实实验预算后执行并审阅结果；数字只能从认证产物生成。
+- [x] 完成有限 dev 付费冒烟及独立模型审核，数字从认证产物生成。
+- [x] 全量 dev 前另存新任务版本，校准冒烟发现的一项旧 dev 验收限定。
+- [x] 执行修正后 dev 真实回归，并在用户更换 key/model 后以 high 重跑、完成模型审核。
+- [ ] 解决回归暴露的条件误读与机制解释遗漏；全量 dev/test 规模待确认。
 
 ### C：领域诊断工具与演示完善
 

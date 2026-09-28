@@ -45,9 +45,19 @@ selected passages to see complete evidence. Only cite IDs present in evidence.
 Each factual claim must be supported by its cited passage; valid IDs alone do not
 prove support. Split separately supported claims into separate paragraphs. At most
 12 paragraphs and 8000 answer characters; no inline [1] markers, HTML or URLs.
+Before answering, check every explicit part of the question against the evidence
+you have read, including requested reasons, prerequisites and consequences. Search
+for missing evidence and READ relevant candidates before using their content.
+Do not strengthen a recommendation into a prohibition, a guarantee or a causal
+claim unless the cited passage supports that stronger statement. If support is
+unavailable, state the limit rather than inventing the missing explanation.
+When the user asks you to choose a concrete action or configuration, and the choice
+depends on an unknown fact about their environment, use clarify to ask for the
+decisive missing fact. Listing conditional alternatives is not a substitute for
+that question. Do not assume the branch or ask for facts already supplied. General
+requests to explain or compare documented alternatives do not require clarification.
 If another aspect lacks evidence, use a different targeted search. Do not repeat
-identical searches or reads. Ask for clarification when missing user information
-prevents a useful answer. Abstain if documents cannot support an answer. Keep
+identical searches or reads. Abstain if documents cannot support an answer. Keep
 simple questions short; stop once evidence suffices. Respect remaining budgets.
 """
 

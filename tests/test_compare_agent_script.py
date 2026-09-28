@@ -36,17 +36,43 @@ def cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[ModuleType, Mo
     return compare, task_script, path
 
 
+@pytest.mark.parametrize("reasoning_effort", ["low", "high"])
 def test_dry_run_never_imports_service_or_providers(
     cli: tuple[ModuleType, ModuleType, Path],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    reasoning_effort: str,
 ) -> None:
     compare, _, path = cli
     monkeypatch.setitem(sys.modules, "serve", None)
-    assert compare.main(["--tasks", str(path), "--allow-drafts"]) == 0
+    assert (
+        compare.main(
+            [
+                "--tasks",
+                str(path),
+                "--allow-drafts",
+                "--generation-reasoning-effort",
+                reasoning_effort,
+            ]
+        )
+        == 0
+    )
     plan = json.loads(capsys.readouterr().out)
     assert plan["provider_calls_enabled"] is False and plan["trial_count"] == 9
     assert plan["selection"]["reviewed_count"] == 0
+    assert plan["generation"]["reasoning_effort"] == reasoning_effort
+
+
+def test_invalid_reasoning_effort_rejected_before_service_composition(
+    cli: tuple[ModuleType, ModuleType, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    compare, _, path = cli
+    monkeypatch.setitem(sys.modules, "serve", None)
+    with pytest.raises(SystemExit) as exc:
+        compare.main(
+            ["--tasks", str(path), "--allow-drafts", "--generation-reasoning-effort", "invalid"]
+        )
+    assert exc.value.code == 2
 
 
 @pytest.mark.parametrize(
@@ -130,13 +156,17 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
         "document_agent",
         "--generation-retries",
         "2",
+        "--generation-reasoning-effort",
+        "high",
     ]
     assert compare.main(args) == 0
     run = compare.ROOT / "indexes/agent_eval/runs/synthetic-run"
     manifest = read_json(run / "manifest.json")
     assert manifest["complete"] is True and manifest["human_review_required"] is True
     assert manifest["generation"]["max_retries"] == 2
+    assert manifest["generation"]["reasoning_effort"] == "high"
     assert service_argv[0][service_argv[0].index("--agent-generation-retries") + 1] == "2"
+    assert service_argv[0][service_argv[0].index("--generation-reasoning-effort") + 1] == "high"
     trials = list(read_jsonl(run / "trials.jsonl"))
     assert len(trials) == 1 and trials[0]["review"]["task_success"] is None
     assert not trials[0]["review"]["reviewed"] and closed == [True]

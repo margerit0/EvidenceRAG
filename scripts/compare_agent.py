@@ -48,6 +48,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--generation-timeout", type=float, default=60.0)
     parser.add_argument("--generation-max-tokens", type=int, default=4096)
     parser.add_argument("--generation-retries", type=int, default=0)
+    parser.add_argument(
+        "--generation-reasoning-effort",
+        choices=("minimal", "low", "medium", "high"),
+        default="low",
+    )
     args = parser.parse_args(argv)
     try:
         return _execute(args)
@@ -77,6 +82,9 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
         raise ValueError("invalid generation output cap")
     if not 0 <= args.generation_retries <= 5:
         raise ValueError("generation-retries must be in [0, 5]")
+    reasoning_effort = getattr(args, "generation_reasoning_effort", "low")
+    if reasoning_effort not in {"minimal", "low", "medium", "high"}:
+        raise ValueError("invalid generation reasoning effort")
     if len(set(args.methods)) != len(args.methods):
         raise ValueError("duplicate comparison method")
     if args.allow_drafts and args.split != "dev":
@@ -104,7 +112,7 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
             "max_output_tokens": args.generation_max_tokens,
             "timeout_seconds": min(args.generation_timeout, args.max_seconds),
             "max_retries": args.generation_retries,
-            "reasoning_effort": "low",
+            "reasoning_effort": reasoning_effort,
         },
     }
     if not args.run:
@@ -127,7 +135,7 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
             "--env",
             str(args.env),
             "--generation-reasoning-effort",
-            "low",
+            reasoning_effort,
             "--generation-max-tokens",
             str(args.generation_max_tokens),
             "--generation-timeout",
