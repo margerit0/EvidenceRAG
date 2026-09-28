@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import errno
+import http.client
 import io
 import json
+import socket
+import ssl
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime, timedelta
@@ -15,6 +19,7 @@ from zhrag.providers.answering import (
     GENERATION_RETRY_STATUS,
     MAX_RESPONSE_BYTES,
     ChatAnswerGenerator,
+    transport_error_details,
 )
 from zhrag.providers.chat import ChatConfig
 from zhrag.providers.http import RETRY_STATUS
@@ -143,6 +148,113 @@ def http_error(status: int, retry_after: str | None = None) -> urllib.error.HTTP
 
 
 class TestLinearRetries:
+    @pytest.mark.parametrize(
+        "error",
+        [
+            http.client.RemoteDisconnected("private"),
+            http.client.IncompleteRead(b"private", 100),
+            ConnectionAbortedError("private"),
+            ConnectionRefusedError("private"),
+            BrokenPipeError("private"),
+            OSError(errno.ENETUNREACH, "private"),
+            OSError(10054, "private"),
+            socket.gaierror(socket.EAI_AGAIN, "private"),
+            socket.gaierror(11002, "private"),
+            ssl.SSLEOFError(8, "private"),
+        ],
+    )
+    @pytest.mark.parametrize("wrapped", [False, True])
+    def test_transient_transport_errors_recover_with_same_request(
+        self, error: Exception, wrapped: bool
+    ) -> None:
+        requests: list[urllib.request.Request] = []
+        sleeps: list[float] = []
+
+        def transport(request: urllib.request.Request) -> bytes:
+            requests.append(request)
+            if len(requests) < 3:
+                raise urllib.error.URLError(error) if wrapped else error
+            return body()
+
+        answerer = ChatAnswerGenerator(
+            ChatConfig("secret", "https://relay.example", "model"),
+            transport=transport,
+            sleep=sleeps.append,
+            max_retries=5,
+        )
+        assert answerer.generate("system", "user") == '{"answerable":true}'
+        assert len(requests) == 3 and sleeps == [5, 10]
+        assert all(request is requests[0] for request in requests)
+
+    def test_mixed_transient_failures_exhaust_exact_budget(self) -> None:
+        failures = [
+            http_error(504),
+            urllib.error.URLError(socket.gaierror(socket.EAI_AGAIN, "private")),
+            urllib.error.URLError(http.client.RemoteDisconnected("private")),
+        ]
+        sleeps: list[float] = []
+        calls = 0
+
+        def transport(_request: urllib.request.Request) -> bytes:
+            nonlocal calls
+            failure = failures[calls]
+            calls += 1
+            raise failure
+
+        answerer = ChatAnswerGenerator(
+            ChatConfig("secret", "https://relay.example", "model"),
+            transport=transport,
+            sleep=sleeps.append,
+            max_retries=2,
+        )
+        with pytest.raises(GenerationError, match="generation_failed"):
+            answerer.generate("system", "user")
+        assert calls == 3 and sleeps == [5, 10]
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            ssl.SSLCertVerificationError(1, "private"),
+            ssl.SSLError(1, "private"),
+            socket.gaierror(socket.EAI_NONAME, "private"),
+            PermissionError(errno.EACCES, "private"),
+            OSError(errno.EINVAL, "private"),
+            http.client.InvalidURL("private"),
+        ],
+    )
+    def test_permanent_wrapped_failures_stop_without_retry(self, error: Exception) -> None:
+        recorder = Recorder(urllib.error.URLError(error))
+        answerer = generator(recorder, max_retries=5)
+        with pytest.raises(GenerationError, match="generation_failed") as raised:
+            answerer.generate("system", "user")
+        assert len(recorder.requests) == 1
+        assert "private" not in str(raised.value)
+
+    def test_nested_reason_diagnostics_and_cycle_are_safe(self) -> None:
+        error = urllib.error.URLError(
+            urllib.error.URLError(socket.gaierror(socket.EAI_AGAIN, "private"))
+        )
+        assert transport_error_details(error) == {
+            "error_type": "URLError",
+            "reason_type": "gaierror",
+            "errno": socket.EAI_AGAIN,
+            "failure_kind": "dns_temporary",
+            "chat_retryable": True,
+        }
+        error.reason = error
+        recorder = Recorder(error)
+        with pytest.raises(GenerationError, match="generation_failed"):
+            generator(recorder).generate("system", "user")
+        assert len(recorder.requests) == 1
+
+    def test_transient_policy_version_changes_profile(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        answerer = generator(Recorder(body()))
+        before = answerer.profile_fingerprint
+        monkeypatch.setattr("zhrag.providers.answering.TRANSPORT_RETRY_CONTRACT", "future-policy")
+        assert answerer.profile_fingerprint != before
+
     @pytest.mark.parametrize("failure", ["timeout", 401, 504])
     def test_fifteen_retries_have_exact_linear_delays_and_no_final_sleep(
         self, failure: str | int

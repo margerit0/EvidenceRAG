@@ -47,12 +47,20 @@ def test_agent_composition_is_explicit_and_uses_no_chat_retries(tmp_path: Path) 
     agent = serve._build_agent(args, fake, index_identity="test")
     assert agent.generator.max_retries == 0
     assert agent.settings.max_steps == 10
+    assert agent.settings.review_answers is False
     assert agent.retriever is fake
     # Model calls never consult environment or system proxies; the contract is fingerprinted.
     assert isinstance(agent.generator.transport, DirectTransport)
     assert agent.generator.transport.timeout_seconds == 60.0
     assert agent.generator.transport_contract == DIRECT_CONTRACT
     assert DIRECT_CONTRACT != "urllib-default-v1"
+    reviewed = serve._build_agent(
+        serve._parse_args(["--enable-agent", "--env", str(env), "--agent-review-answers"]),
+        fake,
+        index_identity="test",
+    )
+    assert reviewed.settings.review_answers is True
+    assert reviewed.profile_fingerprint != agent.profile_fingerprint
 
 
 def test_agent_retries_are_explicit_bounded_and_fingerprinted(tmp_path: Path) -> None:

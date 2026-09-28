@@ -7,10 +7,13 @@ not disclose credentials, URLs, or provider payloads.
 
 from __future__ import annotations
 
+import errno
 import hashlib
+import http.client
 import json
 import math
 import socket
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -32,6 +35,84 @@ DEFAULT_MAX_RETRIES = 15
 RETRY_STEP_SECONDS = 5.0
 # Online-only policy: retry 401 without changing credentials or batch clients.
 GENERATION_RETRY_STATUS = RETRY_STATUS | {401}
+TRANSPORT_RETRY_CONTRACT = "transient-network-v2"
+_TRANSIENT_ERRNOS = frozenset(
+    (
+        errno.ECONNRESET,
+        errno.ECONNABORTED,
+        errno.ECONNREFUSED,
+        errno.EPIPE,
+        errno.ETIMEDOUT,
+        errno.ENETDOWN,
+        errno.ENETUNREACH,
+        errno.EHOSTUNREACH,
+    )
+)
+# Winsock errors are not portable errno values; inspect winerror explicitly too.
+_TRANSIENT_WINERRORS = frozenset((10050, 10051, 10052, 10053, 10054, 10060, 10061, 10064, 10065))
+
+
+def _transport_reason(error: BaseException) -> BaseException:
+    seen: set[int] = set()
+    while isinstance(error, urllib.error.URLError) and not isinstance(
+        error, urllib.error.HTTPError
+    ):
+        seen.add(id(error))
+        if not isinstance(error.reason, BaseException) or id(error.reason) in seen:
+            break
+        error = error.reason
+    return error
+
+
+def _network_failure_kind(error: BaseException) -> str:  # noqa: PLR0911 - explicit failure classes
+    reason = _transport_reason(error)
+    if isinstance(reason, urllib.error.HTTPError):
+        return "http"
+    if isinstance(reason, (ssl.SSLEOFError, ssl.SSLZeroReturnError)):
+        return "connection_interrupted"
+    if isinstance(reason, ssl.SSLError):
+        return "tls_error"
+    if isinstance(reason, socket.gaierror):
+        return "dns_temporary" if reason.errno in (socket.EAI_AGAIN, 11002) else "dns_error"
+    if isinstance(reason, TimeoutError):
+        return "timeout"
+    if isinstance(
+        reason, (ConnectionError, http.client.RemoteDisconnected, http.client.IncompleteRead)
+    ):
+        return "connection_interrupted"
+    if isinstance(reason, OSError) and (
+        reason.errno in _TRANSIENT_ERRNOS
+        or reason.errno in _TRANSIENT_WINERRORS
+        or getattr(reason, "winerror", None) in _TRANSIENT_WINERRORS
+    ):
+        return "connection_interrupted"
+    # Preserve the existing urllib string-timeout compatibility, without matching
+    # arbitrary error text for DNS, TLS, configuration or permission failures.
+    if (
+        isinstance(reason, urllib.error.URLError)
+        and isinstance(reason.reason, str)
+        and "timed out" in reason.reason.lower()
+    ):
+        return "timeout"
+    return "unclassified"
+
+
+def transport_error_details(error: BaseException) -> dict[str, str | int | bool]:
+    """Diagnostic codes only: never stringify errors, endpoints or response bodies."""
+    reason = _transport_reason(error)
+    details: dict[str, str | int | bool] = {
+        "error_type": type(error).__name__,
+        "reason_type": type(reason).__name__,
+        "failure_kind": _network_failure_kind(error),
+        "chat_retryable": _retry_delay(error, 1) is not None,
+    }
+    for name in ("errno", "winerror"):
+        value = getattr(reason, name, None)
+        if type(value) is int:
+            details[name] = value
+    if isinstance(error, urllib.error.HTTPError):
+        details["http_status"] = error.code
+    return details
 
 
 def _bounded_urlopen(
@@ -51,18 +132,23 @@ def _bounded_urlopen(
 def _is_timeout(error: BaseException) -> bool:
     """Inspect wrapped transport errors without exposing them to the caller."""
     seen: set[int] = set()
-    current: BaseException | None = error
-    while current is not None and id(current) not in seen:
+    pending = [error]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
         seen.add(id(current))
         if isinstance(current, (TimeoutError, socket.timeout)):
             return True
         if isinstance(current, urllib.error.URLError):
             reason = current.reason
-            if isinstance(reason, BaseException) and _is_timeout(reason):
-                return True
+            if isinstance(reason, BaseException):
+                pending.append(reason)
             if isinstance(reason, str) and "timed out" in reason.lower():
                 return True
-        current = current.__cause__ or current.__context__
+        cause = current.__cause__ or current.__context__
+        if cause is not None:
+            pending.append(cause)
     return False
 
 
@@ -91,11 +177,7 @@ def _retry_delay(error: BaseException, retry_number: int) -> float | None:
             return None
         retry_after = _retry_after_seconds(error.headers.get("Retry-After"))
         return max(RETRY_STEP_SECONDS * retry_number, retry_after)
-    if isinstance(error, (TimeoutError, ConnectionResetError)):
-        return RETRY_STEP_SECONDS * retry_number
-    if isinstance(error, urllib.error.URLError) and (
-        _is_timeout(error) or isinstance(error.reason, ConnectionResetError)
-    ):
+    if _network_failure_kind(error) in {"timeout", "connection_interrupted", "dns_temporary"}:
         return RETRY_STEP_SECONDS * retry_number
     return None
 
@@ -123,6 +205,7 @@ def _profile_fingerprint(
             "retry_step_seconds": RETRY_STEP_SECONDS,
             "retry_statuses": sorted(GENERATION_RETRY_STATUS),
             "retry_after_cap_seconds": MAX_RETRY_AFTER,
+            "transport_retry_contract": TRANSPORT_RETRY_CONTRACT,
             "transport_contract": transport_contract,
         },
         ensure_ascii=False,
@@ -211,7 +294,7 @@ class ChatAnswerGenerator:
             for attempt in range(self.max_retries + 1):
                 try:
                     return transport(request)
-                except (urllib.error.URLError, TimeoutError, ConnectionResetError) as exc:
+                except (OSError, http.client.HTTPException) as exc:
                     delay = _retry_delay(exc, attempt + 1)
                     if isinstance(exc, urllib.error.HTTPError):
                         # Consume no error payload: it can be large or contain private text.

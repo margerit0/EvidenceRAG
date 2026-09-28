@@ -141,6 +141,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--agent-max-seconds", type=float, default=180.0)
     parser.add_argument("--agent-generation-retries", type=int, default=0)
     parser.add_argument(
+        "--agent-review-answers",
+        action="store_true",
+        help="experimentally review answer drafts within the existing agent budgets",
+    )
+    parser.add_argument(
         "--generation-retries",
         type=int,
         default=15,
@@ -192,6 +197,7 @@ def _agent_settings(args: argparse.Namespace) -> AgentSettings:
         max_seconds=args.agent_max_seconds,
         max_prompt_tokens=args.context_tokens,
         max_reads=args.context_passages,
+        review_answers=args.agent_review_answers,
     )
 
 

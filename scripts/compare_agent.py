@@ -48,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--generation-timeout", type=float, default=60.0)
     parser.add_argument("--generation-max-tokens", type=int, default=4096)
     parser.add_argument("--generation-retries", type=int, default=0)
+    parser.add_argument("--agent-review-answers", action="store_true")
     parser.add_argument(
         "--generation-reasoning-effort",
         choices=("minimal", "low", "medium", "high"),
@@ -75,6 +76,7 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
         max_searches=args.max_searches,
         max_reads=args.max_reads,
         max_seconds=args.max_seconds,
+        review_answers=getattr(args, "agent_review_answers", False),
     )
     if not math.isfinite(args.generation_timeout) or not 0 < args.generation_timeout <= 300:
         raise ValueError("invalid generation timeout")
@@ -129,29 +131,30 @@ def _execute(  # noqa: PLR0912, PLR0915 - explicit offline/paid boundary
     import serve  # noqa: PLC0415 - explicitly paid composition boundary
 
     # All comparison methods share the exact same model, retrieval and context caps.
-    service_args = serve._parse_args(
-        [
-            "--enable-agent",
-            "--env",
-            str(args.env),
-            "--generation-reasoning-effort",
-            reasoning_effort,
-            "--generation-max-tokens",
-            str(args.generation_max_tokens),
-            "--generation-timeout",
-            str(args.generation_timeout),
-            "--agent-max-steps",
-            str(args.max_steps),
-            "--agent-max-searches",
-            str(args.max_searches),
-            "--agent-max-seconds",
-            str(args.max_seconds),
-            "--context-passages",
-            str(args.max_reads),
-            "--agent-generation-retries",
-            str(args.generation_retries),
-        ]
-    )
+    service_options = [
+        "--enable-agent",
+        "--env",
+        str(args.env),
+        "--generation-reasoning-effort",
+        reasoning_effort,
+        "--generation-max-tokens",
+        str(args.generation_max_tokens),
+        "--generation-timeout",
+        str(args.generation_timeout),
+        "--agent-max-steps",
+        str(args.max_steps),
+        "--agent-max-searches",
+        str(args.max_searches),
+        "--agent-max-seconds",
+        str(args.max_seconds),
+        "--context-passages",
+        str(args.max_reads),
+        "--agent-generation-retries",
+        str(args.generation_retries),
+    ]
+    if budgets.review_answers:
+        service_options.append("--agent-review-answers")
+    service_args = serve._parse_args(service_options)
     state, index = serve._load_published_artifacts(service_args.artifacts)
     serve._direct_loopback()
     store = serve.MilvusStore(

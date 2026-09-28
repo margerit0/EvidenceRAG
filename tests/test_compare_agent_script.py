@@ -61,6 +61,18 @@ def test_dry_run_never_imports_service_or_providers(
     assert plan["provider_calls_enabled"] is False and plan["trial_count"] == 9
     assert plan["selection"]["reviewed_count"] == 0
     assert plan["generation"]["reasoning_effort"] == reasoning_effort
+    assert plan["agent_budgets"]["review_answers"] is False
+
+
+def test_review_plan_is_explicit_without_provider_imports(
+    cli: tuple[ModuleType, ModuleType, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    compare, _, path = cli
+    monkeypatch.setitem(sys.modules, "serve", None)
+    assert compare.main(["--tasks", str(path), "--allow-drafts", "--agent-review-answers"]) == 0
+    assert json.loads(capsys.readouterr().out)["agent_budgets"]["review_answers"] is True
 
 
 def test_invalid_reasoning_effort_rejected_before_service_composition(
@@ -158,6 +170,7 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
         "2",
         "--generation-reasoning-effort",
         "high",
+        "--agent-review-answers",
     ]
     assert compare.main(args) == 0
     run = compare.ROOT / "indexes/agent_eval/runs/synthetic-run"
@@ -165,6 +178,8 @@ def test_private_trials_written_with_pending_review_and_no_overwrite(
     assert manifest["complete"] is True and manifest["human_review_required"] is True
     assert manifest["generation"]["max_retries"] == 2
     assert manifest["generation"]["reasoning_effort"] == "high"
+    assert manifest["agent_budgets"]["review_answers"] is True
+    assert "--agent-review-answers" in service_argv[0]
     assert service_argv[0][service_argv[0].index("--agent-generation-retries") + 1] == "2"
     assert service_argv[0][service_argv[0].index("--generation-reasoning-effort") + 1] == "high"
     trials = list(read_jsonl(run / "trials.jsonl"))

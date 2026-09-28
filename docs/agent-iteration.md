@@ -8,6 +8,132 @@
 
 ## 新会话从这里继续（2026-09-28）
 
+最新用户要求停止旧模型诊断，立即改用提供的 `deepseek-v4.1-flash` 配置。
+已终止旧进程并保存独立中断记录，原记录中有九次完整 504，不能写成十次全失败。
+新配置只执行同一简单题答案的单次复核诊断（同一输入指纹、`high`、4096 输出 token）；
+没有覆盖原 `.env`，凭证位于 Git 忽略的独立文件，报告不记录密钥。
+本轮实现、重试修正、测试及全部结果将按用户授权在本分支提交，实际提交以 Git log 为准。
+完整门禁通过；尚未证明语义复核有效，开关继续默认关闭，不扩大 dev/test。
+
+<!-- BEGIN AGENT-REVIEW-DEEPSEEK -->
+新配置诊断 `v2-review-deepseek-20260928`：请求 `deepseek-v4.1-flash` / `high`；同一个已保存简单题答案、证据与复核提示词，输入指纹与旧十次诊断相同。
+
+首次请求在 36.1s 返回 2xx，返回模型匹配；共 1 次，没有发生传输重试。结果 `invalid_review`，有效复核响应：无。
+
+成功响应 usage：`{'completion_tokens': 4096, 'prompt_tokens': 1792, 'total_tokens': 5888}`。正文不是完整 JSON，包含非 JSON 说明文字，输出达到 4096 token 上限且末尾 JSON 不完整；没有提取片段或绕过结构校验。
+
+这一条证明新配置能够返回响应，但未跑通现有复核合同；不能作为整条 Agent 任务成功或语义复核通过，也不能据此采用十次默认策略。尚未用新模型重跑六试次对照。
+
+新凭证仅存于 Git 忽略的独立环境文件，原 .env 未修改；原 grok 配对结果和中断记录保持原样。下一步先验证新供应商在 high + JSON 输出模式下能否可靠返回完整最终 JSON，再决定是否接入 Agent 复核。
+<!-- END AGENT-REVIEW-DEEPSEEK -->
+
+下一步先定位新供应商的结构化输出兼容性：发送最小固定 JSON 合同，保持 `high`，
+检查是否把非最终文本放进 `content`、是否遵守 `response_format`、是否正确报告截断。
+这项诊断须另存新计划与结果，不增加上限掩盖当前失败；确认返回完整最终 JSON 后，
+再用新模型准备同期 off/on 六试次，而非与 grok 历史结果直接相减归因。
+继续保留失败并独立审核；十次默认策略的条件尚未满足，没有改成无限或十次通用重试。
+
+### 旧模型十次上限诊断（用户中止）
+
+用户新增授权：六次仍失败时先做一次最多十次总尝试的诊断，成功后后续实验再采用十次。
+十次按首次 + 9 次重试执行，不修改正在执行的六试次配置，另存为
+`indexes/agent_eval/v2/answer-review-ten-attempts/`；只复核已保存的简单题答案及证据。
+复核原始草稿未保存，故不是失败请求的逐字重放。结果由
+`indexes/agent_eval/v2/review/report_review_ten_attempts.py --check` 认证。
+
+<!-- BEGIN AGENT-REVIEW-TEN-ATTEMPTS -->
+单次复核诊断 `v2-review-ten-attempts-20260928`：`grok-4.7` / `high`，最多 10 次总尝试（首次 + 9 次重试），已记录 9 次完整请求。用户中止，最后未记录的在途请求及总耗时未知。
+
+结果 `user_interrupted`；HTTP 错误 `{'504': 9}`，其他异常 `{}`；有效复核响应：无。
+
+成功响应 usage：`{}`；失败尝试是否计费及金额未知。
+
+只复核已保存的 off 简单题答案及其核验过的证据，没有新调查、embedding 或 rerank；失败的 on 草稿未持久化，这不是原请求逐字重放。此诊断独立于六试次配对报告。
+
+用户要求不等十次，旧模型诊断已停止并转向新配置；不能记录为“十次全部失败”，旧配置未满足采用十次的条件。
+<!-- END AGENT-REVIEW-TEN-ATTEMPTS -->
+
+用户指出后台常见失败后重试成功，现已核实首次配对实验并非没有重试：唯一复核请求
+尝试六次（504 ×4、连接重置 ×1、URLError ×1），之后四个试次的 URLError 未被旧策略
+识别，首错即停。旧日志没有 reason，不能确定这五次 URLError 的具体根因，也不能据此
+证明后台迟到成功。已补齐临时 DNS、远端断开、不完整响应和暂时性 socket 错误的有限
+重试，永久 DNS、证书/其他 TLS、权限/配置错误仍停止。次数及 5/10/15/20/25 秒等待不变，
+成功立即返回，策略版本进入生成器指纹。
+
+重跑使用 `v2-answer-review-retry-20260928-{off,on}`，仍为原三条 dev 各一次，固定
+`grok-4.7` / `high` 和原预算。新诊断提供本地 request_seq、attempt、UTC 时间、reason 类型
+及数字错误码；不写异常正文、请求正文或密钥。旧试次、旧计划和已认证执行代码快照均保留，
+新报告入口为 `indexes/agent_eval/v2/review/report_answer_review_retry_pair.py --check`。
+旧报告继续通过 `report_answer_review_pair.py --check` 校验原实验。完整 pytest、ruff
+check/format、mypy 已通过，当前 JUnit 位于 `indexes/agent_eval/v2/answer-review-retry/`。
+
+<!-- BEGIN AGENT-ANSWER-REVIEW-RETRY -->
+答案复核实验（`v2-answer-review-retry-20260928`）：`grok-4.7` / `high`，3 条 dev、off/on 共 6 试次，均已独立模型审核；人工审核 0。
+全套离线门禁：1581 tests passed，ruff check / format / mypy 通过。
+
+| 配置 | 状态 | 验收通过 | 引用支持陈述 | 平均模型调用 | 平均耗时 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| review off | answered 2、clarification_needed 1 | 2/3 | 27/28 | 6.0 | 155.6s |
+| review on | clarification_needed 1、generation_failed 2 | 1/3 | 0/0 | 7.7 | 549.2s |
+
+配对成功率差（on − off）：-0.333，95% CI [-1.000, 0.000]；整组置换 p=1.000，Holm p=1.000。
+成功请求：`{'chat': 39, 'embedding': 18, 'rerank': 18}`；HTTP 错误：`{'504': 15}`；其他请求异常：`{}`。
+成功 chat usage：prompt 174,208 / completion 42,074；失败请求及 embedding/rerank 金额未知。
+每题每配置只运行一次，且题目已用于开发；模型审核不计人工审核。此小样本不足以证明泛化提升或抵消供应商耗时波动。
+未达到扩量门槛：保留全部失败记录，复核开关继续默认关闭，暂不扩大 dev。
+成功返回的复核响应：0；发生重试的请求：3，其中最终成功：1。错误类别：`{'http': 15}`。
+新运行两侧均使用 transient-network-v2，不能把与旧运行的差异单独归因于重试修正。旧六试次和失败记录保持原样。
+<!-- END AGENT-ANSWER-REVIEW-RETRY -->
+
+### 首次配对实验与实现
+
+用户要求按计划继续执行。已完成离线失败清单、[答案复核设计](agent-answer-review.md)、
+默认关闭的 `--agent-review-answers` 开关与回归测试。复核与补救共享既有预算；开启时
+答案先作为草稿，首次未通过可补救一次，修订草稿再次未通过则停止；追问/拒答不额外复核。
+同一生成器配置下关闭时保留 `3503741` 的 Agent profile 和行为。后续传输重试升级会
+同时改变 off/on 的生成器及 Agent 指纹。此能力仍为实验，不能视为语义正确性证明。
+
+本轮实现基于 `fb3f19d`，按用户既有提交委托保存阶段成果，实际提交以 `git log` 为准。
+定向和完整离线门禁已通过，JUnit 位于
+`indexes/agent_eval/v2/answer-review/`，README 已由完整报告同步。
+本轮按已接受计划限定为六个 dev Agent 试次：三题各 off/on 一次，按题交错执行。
+`pair_plan.json` 绑定任务、预算和代码指纹，固定 `grok-4.7` / `high`；运行入口为
+`indexes/agent_eval/v2/review/run_answer_review_pair.py`，默认离线，`--run` 才付费。
+两个新 run-id 为 `v2-answer-review-20260928-off` 与 `v2-answer-review-20260928-on`，
+六试次已执行并独立审核；旧任务、冻结 test、试次和评分保持原样。复核阶段出现连续
+504 和连接重置，后续 URLError 根因未被原日志记录，本轮没有成功复核响应，未达到扩量门槛。
+
+后续已按用户反馈修正重试并准备新的同模型、任务及预算六试次计划，进度见文首。
+复核开关继续默认关闭，分层样本和全量 dev 暂不执行。
+本地运行器的最终发布曾把内存 tuple 送入要求 JSON list 的校验器；已改为从磁盘读取
+canonical JSON 后认证，恢复记录与实际执行脚本快照保存到同一实验目录，原始试次未改。
+旧计划绑定的是归档代码，不得原地覆盖或重用旧 run-id。离线复核入口：
+
+```powershell
+.venv/Scripts/python.exe indexes/agent_eval/v2/review/report_answer_review_pair.py --check
+.venv/Scripts/python.exe indexes/agent_eval/v2/review/calibrate_dev.py
+```
+
+<!-- BEGIN AGENT-ANSWER-REVIEW -->
+答案复核实验（`v2-answer-review-20260928`）：`grok-4.7` / `high`，3 条 dev、off/on 共 6 试次，均已独立模型审核；人工审核 0。
+全套离线门禁：1552 tests passed，ruff check / format / mypy 通过。
+
+| 配置 | 状态 | 验收通过 | 引用支持陈述 | 平均模型调用 | 平均耗时 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| review off | answered 1、generation_failed 2 | 1/3 | 9/9 | 2.0 | 66.9s |
+| review on | generation_failed 3 | 0/3 | 0/0 | 2.7 | 185.3s |
+
+配对成功率差（on − off）：-0.333，95% CI [-1.000, 0.000]；整组置换 p=1.000，Holm p=1.000。
+成功请求：`{'chat': 9, 'embedding': 5, 'rerank': 5}`；HTTP 错误：`{'504': 4}`；其他请求异常：`{'TimeoutError': 1, 'ConnectionResetError': 1, 'URLError': 5}`。
+成功 chat usage：prompt 33,360 / completion 6,746；失败请求及 embedding/rerank 金额未知。
+每题每配置只运行一次，且题目已用于开发；模型审核不计人工审核。此小样本不足以证明泛化提升或抵消供应商耗时波动。
+本轮没有成功返回的复核响应，后续连接故障同时影响 off/on；不能把这些任务失败解释为语义复核有效或无效。
+最终清单发布的 tuple/list 类型兼容问题已离线修复：重新读取磁盘 JSON 认证，保留原元数据与实际执行脚本快照，六条原始试次未改写。
+未达到扩量门槛：保留全部失败记录，复核开关继续默认关闭，暂不扩大 dev。
+<!-- END AGENT-ANSWER-REVIEW -->
+
+### 本轮计划的起点（历史）
+
 已按用户授权将本轮实现、测试及审核记录提交为 **`3503741`**
 （`feat: honor agent reasoning effort and record reviewed dev runs`）。本节行动计划另作
 文档提交；实际 HEAD 看 `git log`。继续使用 `feat/document-investigation-agent`，
