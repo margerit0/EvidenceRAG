@@ -7,7 +7,7 @@ import {
   MarkerType,
   Position,
   ReactFlow,
-  useNodesInitialized,
+  getViewportForBounds,
   useReactFlow,
   type Node,
   type NodeProps,
@@ -95,12 +95,15 @@ const stages: { id: NodeKey; label: string; x: number; y: number }[] = [
 const fitOptions = { padding: 0.06, maxZoom: 1 };
 
 function FitGraph({ width, height }: { width: number; height: number }) {
-  const ready = useNodesInitialized();
-  const { fitView } = useReactFlow();
+  const { viewportInitialized, getNodes, getNodesBounds, setViewport } = useReactFlow();
   useEffect(() => {
-    // Only refit when the canvas changes size, not when an invocation is selected.
-    if (ready && width && height) void fitView(fitOptions);
-  }, [ready, width, height, fitView]);
+    // Fit against the observed canvas size immediately. Queued fitView can wait
+    // for a node update even though collapsing the inspector only resizes the canvas.
+    if (viewportInitialized && width && height) {
+      const bounds = getNodesBounds(getNodes());
+      void setViewport(getViewportForBounds(bounds, width, height, 0.35, 1, fitOptions.padding));
+    }
+  }, [viewportInitialized, width, height, getNodes, getNodesBounds, setViewport]);
   return null;
 }
 const definitions = [
@@ -170,6 +173,10 @@ export function ExecutionGraph({
     return {
       id: stage.id,
       type: 'stage',
+      // Fixed dimensions match the reserved title/status/selection rows.
+      // Supplying them also lets viewport fitting run without a measurement round trip.
+      width: 188,
+      height: 96,
       position: compact ? { x: 55, y: index * 112 } : { x: stage.x, y: stage.y },
       selected: !!inspected,
       data: {

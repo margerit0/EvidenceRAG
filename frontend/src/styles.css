@@ -367,13 +367,37 @@ main {
 }
 .workbench {
   display: grid;
-  grid-template-columns: minmax(290px, 1fr) minmax(390px, 1.3fr) minmax(290px, 1fr);
+  grid-template-columns: minmax(290px, 1fr) minmax(390px, 1.3fr) 32px minmax(290px, 1fr);
   min-height: 676px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 3px 18px #00000002;
+}
+.workbench.inspector-collapsed {
+  grid-template-columns: minmax(290px, 1fr) minmax(390px, 1.3fr) 32px;
+}
+.inspector-rail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-left: 1px solid var(--line);
+  background: var(--surface-subtle);
+}
+.inspector-rail .inspector-toggle {
+  width: 28px;
+  height: 56px;
+  min-height: 56px;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--muted);
+}
+.inspector-rail .inspector-toggle:hover {
+  color: var(--brand);
+}
+.inspector-pane[hidden] {
+  display: none;
 }
 .pane-heading {
   height: 52px;
@@ -407,8 +431,7 @@ main {
   display: flex;
   flex-direction: column;
 }
-.execution-pane,
-.inspector-pane {
+.execution-pane {
   border-left: 1px solid var(--line);
 }
 .conversation-scroll {
@@ -821,13 +844,12 @@ main {
   padding: 0;
   border: 0;
   background: transparent;
-  width: 188px;
 }
 .flow-node {
   background: var(--surface);
   border: 1px solid var(--line-strong);
   border-radius: 8px;
-  height: 96px;
+  height: 100%;
   padding: 8px 10px;
   display: grid;
   grid-template-rows: 24px 18px 32px;
@@ -1716,29 +1738,12 @@ main {
   .topbar {
     padding: 0 20px;
   }
-  .workbench {
+  .workbench,
+  .workbench.inspector-collapsed {
     grid-template-columns: minmax(260px, 0.9fr) minmax(340px, 1.4fr);
-  }
-  .inspector-pane {
-    grid-column: 1/-1;
-    border-left: 0;
-    border-top: 1px solid var(--line);
-  }
-  .inspector-pane .pane-heading {
-    display: none;
-  }
-  .inspector-tabs {
-    min-height: 220px;
-  }
-  .tabs-content {
-    max-height: 360px;
   }
   .inspector-empty {
     padding: 27px;
-    max-width: 500px;
-  }
-  .inspector-empty p {
-    max-width: 400px;
   }
   .inspector-empty-icon {
     display: none;
@@ -1747,32 +1752,10 @@ main {
     margin-top: 15px;
   }
   .step-detail {
-    display: grid;
-    grid-template-columns: 200px 1fr;
-    column-gap: 25px;
     padding: 23px;
   }
   .step-detail .detail-icon {
     display: none;
-  }
-  .step-detail > .section-kicker,
-  .step-detail > h2,
-  .step-detail > .detail-description {
-    grid-column: 1;
-  }
-  .step-detail .detail-properties {
-    grid-column: 2;
-    grid-row: 1/5;
-    margin-top: 0;
-  }
-  .step-detail .outcome-code,
-  .step-detail .step-evidence {
-    grid-column: 1/-1;
-  }
-  .evidence-panel {
-    display: grid;
-    grid-template-columns: 230px 1fr;
-    gap: 25px;
   }
   .evidence-detail {
     padding-top: 20px;
@@ -2255,5 +2238,70 @@ main {
     gap: 4px;
     padding-inline: 4px;
     font-size: 11px;
+  }
+}
+
+/* On narrow screens, details slide in without squeezing the investigation. */
+@media (max-width: 1180px) {
+  .inspector-rail {
+    position: fixed;
+    right: 0;
+    top: calc(50dvh - 28px);
+    z-index: 20;
+    border: 1px solid var(--line-strong);
+    border-right: 0;
+    border-radius: 8px 0 0 8px;
+    box-shadow: var(--shadow);
+  }
+  .inspector-rail .inspector-toggle {
+    width: 36px;
+  }
+}
+.inspector-overlay {
+  z-index: 65;
+}
+.inspector-drawer {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 66;
+  width: min(400px, calc(100vw - 32px));
+  height: 100dvh;
+  background: var(--surface);
+  color: var(--text);
+  border-left: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  outline: none;
+  animation: inspector-enter 0.18s ease-out;
+}
+.inspector-drawer .pane-heading {
+  height: 56px;
+}
+.inspector-drawer .pane-heading .button {
+  width: 40px;
+  min-height: 40px;
+}
+.inspector-drawer .inspector-tabs,
+.inspector-drawer .tabs-content {
+  min-height: 0;
+  max-height: none;
+}
+.inspector-drawer .tabs-content {
+  overscroll-behavior: contain;
+}
+.inspector-drawer .inspector-footer,
+.inspector-drawer .inspector-outcome {
+  flex-shrink: 0;
+}
+@keyframes inspector-enter {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .inspector-drawer {
+    animation: none;
   }
 }

@@ -42,6 +42,7 @@ import {
   Tip,
   TooltipProvider,
 } from './components/ui';
+import { Inspector } from './components/Inspector';
 import { ExecutionGraph } from './components/ExecutionGraph';
 import { ApiError, capabilities, investigate } from './lib/api';
 import { playDemo, scenarios, type ScenarioId } from './lib/demo';
@@ -115,6 +116,7 @@ export default function App() {
   const [selectedRun, setSelectedRun] = useState<string>();
   const [selectedCall, setSelectedCall] = useState<string>();
   const [detailTab, setDetailTab] = useState('step');
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [sourceId, setSourceId] = useState<number>();
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const evidenceOrigin = useRef<HTMLElement | null>(null);
@@ -258,6 +260,7 @@ export default function App() {
   function inspect(call: Invocation) {
     setSelectedCall(call.id);
     setDetailTab('step');
+    setInspectorOpen(true);
   }
   function cite(id: number) {
     setSourceId(id);
@@ -267,6 +270,8 @@ export default function App() {
       sources.some((source) => source.citation_id === id)
     ) {
       openEvidence();
+    } else {
+      setInspectorOpen(true);
     }
   }
   function openEvidence() {
@@ -498,7 +503,9 @@ export default function App() {
                   </Button>
                 </div>
               )}
-              <div className="workbench">
+              <div
+                className={`workbench ${inspectorOpen ? 'inspector-open' : 'inspector-collapsed'}`}
+              >
                 <section className="conversation-pane" aria-label="问题与答案">
                   <div className="pane-heading">
                     <span>
@@ -840,13 +847,7 @@ export default function App() {
                     )}
                   </div>
                 </section>
-                <aside className="inspector-pane" aria-label="详情与证据">
-                  <div className="pane-heading">
-                    <span>
-                      <Layers2 size={16} /> 检查器
-                    </span>
-                    <span className="subtle-number">03</span>
-                  </div>
+                <Inspector open={inspectorOpen} onOpenChange={setInspectorOpen}>
                   {needsAttention && (
                     <div className={`inspector-outcome tone-${toneFor(current.state)}`}>
                       <div>
@@ -1154,7 +1155,7 @@ export default function App() {
                     <ShieldCheck size={13} />
                     <span>执行记录与证据 · 不含内部思考</span>
                   </div>
-                </aside>
+                </Inspector>
               </div>
               <footer className="workspace-footer">
                 <span>

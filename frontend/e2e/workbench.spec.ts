@@ -59,7 +59,10 @@ test('repeated searches have separate details and citations open their evidence'
   await expect(navigation).toContainText('第 2 / 2 次');
   await expect(navigation.getByRole('button', { name: '下一次同类调用' })).toBeDisabled();
   await expect(navigation.getByRole('button', { name: '跳到最新同类调用' })).toBeDisabled();
+  await page.getByRole('button', { name: '收起检查器', exact: true }).click();
+  await expect(page.locator('.inspector-pane')).toBeHidden();
   await page.getByRole('button', { name: '查看引用 2' }).click();
+  await expect(page.locator('.inspector-pane')).toBeVisible();
   await expect(page.getByRole('button', { name: '查看引用 2' })).toHaveAttribute(
     'aria-pressed',
     'true',
@@ -149,6 +152,7 @@ for (const scenario of [
     await page.getByRole('button', { name: '运行演示', exact: true }).click();
     await expect(page.locator('.answer-status')).toContainText(scenario.result);
     await expect(page.locator('.answer-body')).toHaveCount(0);
+    await page.getByRole('button', { name: '展开检查器', exact: true }).click();
     await expect(page.locator('.inspector-outcome')).toContainText(scenario.result);
     if (scenario.name !== '需要补充信息') {
       await page.getByRole('button', { name: '查看已读取证据' }).click();
@@ -204,6 +208,7 @@ test('mobile citation opens evidence and restores focus and reading position', a
   await expect(citation).toBeFocused();
   expect(await page.evaluate(() => scrollY)).toBe(position);
   await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('button', { name: '展开检查器', exact: true }).click();
   await page.getByRole('button', { name: '展开阅读' }).click();
   await expect(dialog).toContainText('升级演练 / 回退条件');
 });
@@ -213,6 +218,7 @@ test('short desktop keeps controls visible and selected graph labels clear', asy
 }, info) => {
   await page.setViewportSize({ width: 1366, height: 768 });
   await page.goto('/workbench/');
+  await page.getByRole('button', { name: '展开检查器', exact: true }).click();
   await expect(page.getByRole('textbox', { name: '调查问题' })).toBeInViewport({ ratio: 1 });
   await expect(page.getByRole('button', { name: '运行演示', exact: true })).toBeInViewport({
     ratio: 1,
@@ -253,6 +259,110 @@ test('short desktop keeps controls visible and selected graph labels clear', asy
   expect(geometry.clearLabels).toBe(true);
   expect(geometry.timelineHeight).toBeGreaterThanOrEqual(geometry.threeRows);
   await page.screenshot({ path: info.outputPath('laptop-selected-call.png') });
+});
+
+test('inspector collapse frees space and preserves the selected call and tab', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/workbench/');
+  const expectGraphFits = async () => {
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const canvas = document.querySelector('.graph-canvas')!.getBoundingClientRect();
+          const nodes = [...document.querySelectorAll('.flow-node')];
+          return (
+            nodes.length === 4 &&
+            nodes.every((node) => {
+              const rect = node.getBoundingClientRect();
+              return (
+                rect.width > 0 &&
+                rect.height > 0 &&
+                rect.left >= canvas.left &&
+                rect.right <= canvas.right &&
+                rect.top >= canvas.top &&
+                rect.bottom <= canvas.bottom
+              );
+            })
+          );
+        }),
+      )
+      .toBe(true);
+  };
+  const pane = page.locator('.inspector-pane');
+  await expect(pane).toBeHidden();
+  await expect(page.getByRole('button', { name: '展开检查器', exact: true })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  const collapsedWidth = (await page.locator('.execution-pane').boundingBox())!.width;
+  await expectGraphFits();
+  await page.getByRole('button', { name: '展开检查器', exact: true }).click();
+  await expectGraphFits();
+  await page.getByRole('button', { name: '收起检查器', exact: true }).click();
+  await expectGraphFits();
+  await page.getByRole('button', { name: '运行演示', exact: true }).click();
+  await expect(page.locator('.answer-status')).toContainText('已生成答案');
+  await expect(pane).toBeHidden();
+  await page.locator('.timeline-row').filter({ hasText: 'Agent 决策' }).first().click();
+  await expect(pane).toBeVisible();
+  await expectGraphFits();
+  expect((await page.locator('.execution-pane').boundingBox())!.width).toBeLessThan(
+    collapsedWidth - 100,
+  );
+  await page.getByRole('button', { name: '下一次同类调用' }).click();
+  await page.getByRole('tab', { name: '运行', exact: true }).click();
+  await page.getByRole('button', { name: '收起检查器', exact: true }).click();
+  await expect(pane).toBeHidden();
+  await expectGraphFits();
+  expect((await page.locator('.execution-pane').boundingBox())!.width).toBeCloseTo(
+    collapsedWidth,
+    0,
+  );
+  const expand = page.getByRole('button', { name: '展开检查器', exact: true });
+  await expect(expand).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('tab', { name: '运行', exact: true })).toHaveAttribute(
+    'data-state',
+    'active',
+  );
+  await page.getByRole('tab', { name: '步骤', exact: true }).click();
+  await expect(page.locator('.step-detail h2')).toHaveText('Agent 决策 · 第 2 次');
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await expectGraphFits();
+});
+
+test('narrow inspector opens at the right edge and restores focus without moving the page', async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/workbench/');
+  const expand = page.getByRole('button', { name: '展开检查器', exact: true });
+  await expect(expand).toBeInViewport({ ratio: 1 });
+  await page.getByRole('region', { name: '执行流程', exact: true }).scrollIntoViewIfNeeded();
+  const position = await page.evaluate(() => scrollY);
+  await expand.click();
+  const drawer = page.getByRole('dialog', { name: '检查器', exact: true });
+  await expect(drawer).toBeInViewport({ ratio: 1 });
+  const bounds = (await drawer.boundingBox())!;
+  expect(bounds.x + bounds.width).toBe(390);
+  await expect(drawer.getByRole('button', { name: '收起检查器', exact: true })).toBeFocused();
+  await page.getByRole('tab', { name: '运行', exact: true }).click();
+  await page.screenshot({ path: info.outputPath('mobile-inspector-open.png') });
+  await page.keyboard.press('Escape');
+  await expect(drawer).toHaveCount(0);
+  await expect(expand).toBeFocused();
+  expect(await page.evaluate(() => scrollY)).toBe(position);
+  await expand.click();
+  await expect(page.getByRole('tab', { name: '运行', exact: true })).toHaveAttribute(
+    'data-state',
+    'active',
+  );
+  await drawer.getByRole('button', { name: '收起检查器', exact: true }).click();
+  await expect(expand).toBeFocused();
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expand.click();
+  await expect(drawer).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
 test('narrow viewport reflows into continuous sections', async ({ page }, info) => {

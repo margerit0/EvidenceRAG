@@ -7,7 +7,7 @@
 
 - 项目：`D:\rag`；分支：`feat/frontend-design`。
 - React、SSE 和相关测试的初始版本已提交为 `f0c089e`；视觉优化已提交为 `ddd8554`。
-  2026-09-30 用户继续要求增加同类调用的相邻导航；
+  同类调用的相邻导航已提交为 `d38d3ad`；用户随后要求检查器默认收起、以右侧箭头切换。
   新会话需要读取这个工作区的实际文件，不能仅根据 `git log` 推断现状。
   先运行 `git status --short --branch` 核对。
 - 用户最初要求先实际审查并给出建议；评审已完成。
@@ -30,7 +30,7 @@
 > 或拖慢操作。
 
 现有实现采用冷灰底色、青绿色强调色、独立语义状态色，左侧问题与答案、
-中间执行图和时间线、右侧步骤／证据／运行详情。这是待评审的当前方案，
+中间执行图和时间线、右侧可折叠的步骤／证据／运行详情。这是待评审的当前方案，
 布局比例、视觉层级和具体色值都可以被质疑和改进。
 
 最初参考图是 `start → agent → tools → agent / end` 的循环图。
@@ -80,6 +80,7 @@ npm run dev
 | `frontend/src/App.tsx` | 页面结构、问题与答案、时间线、检查器、历史和运行交互 |
 | `frontend/src/styles.css` | 浅深主题、排版、间距、状态色、响应式布局和动效 |
 | `frontend/src/components/ExecutionGraph.tsx` | React Flow 节点、连线、高亮及窄屏布局 |
+| `frontend/src/components/Inspector.tsx` | 桌面检查器折叠栏、窄屏右侧抽屉与焦点恢复 |
 | `frontend/src/components/ui.tsx` | shadcn 风格的 Radix / CVA 组件组合 |
 | `frontend/src/lib/demo.ts` | 原创合成场景与事件序列 |
 | `frontend/src/lib/model.ts` | 状态、调用实例与证据数据 |
@@ -140,3 +141,11 @@ Lucide；本地打包 Inter Latin 字体和系统中文字体。
 13 项单元测试、12 项浏览器测试、构建、格式和 diff 空白检查通过。浅深主题桌面与手机
 截图已实际检查，产物位于 `.research_tmp/frontend-call-navigation/`（gitignored）。
 全部为合成演示或拦截的合成 API 响应；真实模型调用仍暂停。
+
+## 检查器折叠（`d38d3ad` 后）
+
+检查器默认收起，仅留右侧箭头。桌面释放布局空间，1180px 及以下改为右侧模态抽屉；
+保留调用、证据及标签选择。主动点击调用或桌面引用会展开，运行事件不会主动展开。
+流程图随画布宽高重新适配，已修复展开后的节点裁切。13 项单元测试、14 项浏览器测试、
+构建/格式检查通过，浅深主题与桌面、笔记本、手机、平板截图已检查。
+本机产物位于 `.research_tmp/inspector-collapse/`（gitignored）；实际 Git 状态优先。
