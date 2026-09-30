@@ -7,6 +7,8 @@ import {
   MarkerType,
   Position,
   ReactFlow,
+  useNodesInitialized,
+  useReactFlow,
   type Node,
   type NodeProps,
 } from '@xyflow/react';
@@ -33,7 +35,6 @@ import {
 
 type GraphData = {
   label: string;
-  code: string;
   kind: NodeKey;
   status: string;
   visits: number;
@@ -65,7 +66,6 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<FlowNode
         )}
       </div>
       <div className="node-meta">
-        <span>{data.code}</span>
         <span>
           {data.active
             ? '执行中'
@@ -76,7 +76,9 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<FlowNode
               : '等待'}
         </span>
       </div>
-      {data.inspection && <div className="node-inspection">正在查看{data.inspection}</div>}
+      <div className="node-inspection" aria-hidden={!data.inspection}>
+        {data.inspection ? `正在查看${data.inspection}` : '\u00a0'}
+      </div>
       <Handle type="source" position={Position.Bottom} id="out" />
       <Handle type="source" position={Position.Left} id="loop-left" />
       <Handle type="source" position={Position.Right} id="loop-right" />
@@ -84,12 +86,23 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<FlowNode
   );
 });
 const nodeTypes = { stage: AgentNode };
-const stages: { id: NodeKey; label: string; code: string; x: number; y: number }[] = [
-  { id: 'agent', label: 'Agent 决策', code: 'DECIDE', x: 154, y: 20 },
-  { id: 'search', label: '搜索文档', code: 'SEARCH', x: 0, y: 163 },
-  { id: 'read', label: '读取证据', code: 'READ', x: 308, y: 163 },
-  { id: 'finish', label: '校验与输出', code: 'FINISH', x: 154, y: 309 },
+const stages: { id: NodeKey; label: string; x: number; y: number }[] = [
+  { id: 'agent', label: 'Agent 决策', x: 106, y: 0 },
+  { id: 'search', label: '搜索文档', x: 0, y: 108 },
+  { id: 'read', label: '读取证据', x: 212, y: 108 },
+  { id: 'finish', label: '校验与输出', x: 106, y: 216 },
 ];
+const fitOptions = { padding: 0.06, maxZoom: 1 };
+
+function FitGraph({ width, height }: { width: number; height: number }) {
+  const ready = useNodesInitialized();
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    // Only refit when the canvas changes size, not when an invocation is selected.
+    if (ready && width && height) void fitView(fitOptions);
+  }, [ready, width, height, fitView]);
+  return null;
+}
 const definitions = [
   {
     id: 'agent-search',
@@ -133,10 +146,13 @@ export function ExecutionGraph({
   theme: 'light' | 'dark';
 }) {
   const container = useRef<HTMLDivElement>(null);
-  const [compact, setCompact] = useState(false);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const compact = size.width > 0 && size.width < 380;
   useEffect(() => {
     if (!container.current) return;
-    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 400));
+    const observer = new ResizeObserver(([entry]) =>
+      setSize({ width: entry.contentRect.width, height: entry.contentRect.height }),
+    );
     observer.observe(container.current);
     return () => observer.disconnect();
   }, []);
@@ -154,11 +170,10 @@ export function ExecutionGraph({
     return {
       id: stage.id,
       type: 'stage',
-      position: compact ? { x: 55, y: 20 + index * 130 } : { x: stage.x, y: stage.y },
+      position: compact ? { x: 55, y: index * 112 } : { x: stage.x, y: stage.y },
       selected: !!inspected,
       data: {
         label: stage.label,
-        code: stage.code,
         kind: stage.id,
         visits: visits.length,
         inspection,
@@ -206,48 +221,51 @@ export function ExecutionGraph({
       style: {
         stroke: flowing ? 'var(--brand)' : traversed ? 'var(--graph-visited)' : 'var(--graph-line)',
         strokeWidth: flowing ? 1.7 : 1.2,
-        opacity: traversed || flowing ? 1 : 0.72,
+        opacity: traversed || flowing ? 1 : 0.9,
       },
     };
   });
   return (
-    <div
-      ref={container}
-      className={`graph-canvas ${compact ? 'is-compact' : ''}`}
-      data-testid="execution-graph"
-    >
-      <ReactFlow
-        key={compact ? 'compact' : 'wide'}
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.23 }}
-        minZoom={0.35}
-        maxZoom={1.4}
-        nodesDraggable={false}
-        nodesConnectable={false}
-        elementsSelectable
-        zoomOnScroll={false}
-        preventScrolling={false}
-        colorMode={theme}
-        onNodeClick={(_, node) => {
-          const call = calls.filter((c) => c.node === node.id).at(-1);
-          if (call) onSelect(call);
-        }}
-        ariaLabelConfig={{
-          'controls.zoomIn.ariaLabel': '放大流程图',
-          'controls.zoomOut.ariaLabel': '缩小流程图',
-          'controls.fitView.ariaLabel': '适应画布',
-        }}
+    <>
+      <div
+        ref={container}
+        className={`graph-canvas ${compact ? 'is-compact' : ''}`}
+        data-testid="execution-graph"
       >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--graph-dot)" />
-        <Controls showInteractive={false} position="bottom-left" />
-      </ReactFlow>
-      <span className="graph-caption">
+        <ReactFlow
+          key={compact ? 'compact' : 'wide'}
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          fitView
+          fitViewOptions={fitOptions}
+          minZoom={0.35}
+          maxZoom={1.4}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable
+          zoomOnScroll={false}
+          preventScrolling={false}
+          colorMode={theme}
+          onNodeClick={(_, node) => {
+            const call = calls.filter((c) => c.node === node.id).at(-1);
+            if (call) onSelect(call);
+          }}
+          ariaLabelConfig={{
+            'controls.zoomIn.ariaLabel': '放大流程图',
+            'controls.zoomOut.ariaLabel': '缩小流程图',
+            'controls.fitView.ariaLabel': '适应画布',
+          }}
+        >
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--graph-dot)" />
+          <FitGraph width={size.width} height={size.height} />
+          <Controls showInteractive={false} position="bottom-left" fitViewOptions={fitOptions} />
+        </ReactFlow>
+      </div>
+      <p className="graph-caption">
         <ArrowUpRight size={12} />
         工具结果返回 Agent，继续决策
-      </span>
-    </div>
+      </p>
+    </>
   );
 }

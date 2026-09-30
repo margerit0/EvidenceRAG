@@ -11,9 +11,10 @@
 
 ### React 工作台实现（2026-09-29）
 
-下一步是现有页面的视觉审查；新会话入口见
-[前端视觉审查交接](frontend-visual-review.md)。当前前端相关修改尚未提交，
-继续使用 `D:\rag` 工作区并先核对 `feat/frontend-design` 分支。
+视觉审查与后续迭代的新会话入口见
+[前端视觉审查交接](frontend-visual-review.md)。初始前端版本已提交为 `f0c089e`；
+2026-09-30 已按用户要求继续实施首屏、流程图和引用入口的视觉优化，
+继续使用 `D:\rag` 工作区并先核对 `feat/frontend-design` 分支与未提交修改。
 
 用户明确改用 React，并要求全部前端工作在 `feat/frontend-design` 分支。
 实现与启动入口见 [frontend.md](frontend.md)：默认原创合成演示，包含浅深主题、

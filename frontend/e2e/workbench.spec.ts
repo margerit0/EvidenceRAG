@@ -54,6 +54,15 @@ test('repeated searches have separate details and citations open their evidence'
   await expect(searchNode).toContainText('正在查看第 2 次');
   await expect(page.locator('.historical-call-note')).toHaveCount(0);
   await page.getByRole('button', { name: '查看引用 2' }).click();
+  await expect(page.getByRole('button', { name: '查看引用 2' })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.getByRole('button', { name: '查看引用 1' })).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
+  await expect(page.locator('.evidence-list [aria-pressed="true"]')).toContainText('回退条件');
   await expect(page.locator('.evidence-detail')).toContainText('回退条件');
   await expect(page.locator('.evidence-text')).toContainText('原创合成演示文档');
   await page.screenshot({
@@ -110,9 +119,20 @@ test('mobile citation opens evidence and restores focus and reading position', a
   await page.goto('/workbench/');
   await page.getByRole('button', { name: '运行演示', exact: true }).click();
   await expect(page.locator('.current-action')).toContainText('执行中');
+  const progress = page.locator('.mobile-progress');
+  await expect(progress).toBeInViewport({ ratio: 1 });
+  await expect(progress).toContainText('执行中');
+  await expect(page.locator('.working-copy')).toContainText('下方');
+  await page.getByRole('button', { name: '查看流程', exact: true }).click();
+  await expect(page.getByRole('region', { name: '执行流程', exact: true })).toBeFocused();
+  await expect(progress).toBeInViewport({ ratio: 1 });
+  await expect(page.locator('.current-action')).toBeInViewport({ ratio: 1 });
   await expect(page.locator('.answer-status')).toContainText('已生成答案');
   const citation = page.getByRole('button', { name: '查看引用 2', exact: true });
   await citation.scrollIntoViewIfNeeded();
+  const target = await citation.boundingBox();
+  expect(target!.width).toBeGreaterThanOrEqual(40);
+  expect(target!.height).toBeGreaterThanOrEqual(40);
   const position = await page.evaluate(() => scrollY);
   await citation.click();
   const dialog = page.getByRole('dialog', { name: '引用证据' });
@@ -126,6 +146,53 @@ test('mobile citation opens evidence and restores focus and reading position', a
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByRole('button', { name: '展开阅读' }).click();
   await expect(dialog).toContainText('升级演练 / 回退条件');
+});
+
+test('short desktop keeps controls visible and selected graph labels clear', async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await page.goto('/workbench/');
+  await expect(page.getByRole('textbox', { name: '调查问题' })).toBeInViewport({ ratio: 1 });
+  await expect(page.getByRole('button', { name: '运行演示', exact: true })).toBeInViewport({
+    ratio: 1,
+  });
+  await page.getByRole('button', { name: '运行演示', exact: true }).click();
+  await expect(page.getByRole('button', { name: '停止', exact: true })).toBeInViewport({
+    ratio: 1,
+  });
+  await expect(page.locator('.answer-status')).toContainText('已生成答案');
+  const before = await page
+    .locator('.flow-node')
+    .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
+  await page.locator('.timeline-row').filter({ hasText: '搜索文档' }).first().click();
+  await expect(page.locator('.step-detail h2')).toHaveText('搜索文档 · 第 1 次');
+  const after = await page
+    .locator('.flow-node')
+    .evaluateAll((nodes) => nodes.map((node) => node.getBoundingClientRect().height));
+  expect(after).toEqual(before);
+  const geometry = await page.evaluate(() => {
+    const caption = document.querySelector('.graph-caption')!.getBoundingClientRect();
+    const canvas = document.querySelector('.graph-canvas')!.getBoundingClientRect();
+    const nodes = [...document.querySelectorAll<HTMLElement>('.flow-node')];
+    const rows = [...document.querySelectorAll('.timeline-row')];
+    return {
+      clearLabels: nodes.every((node) => {
+        const rect = node.getBoundingClientRect();
+        const title = node.querySelector('.node-heading')!;
+        const visibleFontSize =
+          (parseFloat(getComputedStyle(title).fontSize) * rect.width) / node.offsetWidth;
+        return rect.bottom < caption.top && rect.top >= canvas.top && visibleFontSize >= 13;
+      }),
+      timelineHeight: document.querySelector('.timeline')!.clientHeight,
+      threeRows: rows
+        .slice(0, 3)
+        .reduce((height, row) => height + row.getBoundingClientRect().height, 0),
+    };
+  });
+  expect(geometry.clearLabels).toBe(true);
+  expect(geometry.timelineHeight).toBeGreaterThanOrEqual(geometry.threeRows);
+  await page.screenshot({ path: info.outputPath('laptop-selected-call.png') });
 });
 
 test('narrow viewport reflows into continuous sections', async ({ page }, info) => {

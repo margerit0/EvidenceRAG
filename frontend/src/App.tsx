@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion, MotionConfig } from 'motion/react';
 import {
   ArrowRight,
+  ArrowDown,
   AlertCircle,
   ArrowUp,
   BookOpen,
@@ -21,7 +22,6 @@ import {
   Network,
   Plus,
   Radio,
-  RotateCcw,
   Search,
   ShieldCheck,
   Square,
@@ -125,6 +125,7 @@ export default function App() {
   const abortRef = useRef<AbortController | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const executionRef = useRef<HTMLElement>(null);
   const current = runs.find((run) => run.id === selectedRun);
   const busy = runs.some((run) => run.state === 'running');
   const calls = invocations(current?.progress ?? []);
@@ -463,6 +464,34 @@ export default function App() {
                   </span>
                 </div>
               </div>
+              {current && (
+                <div
+                  className={`mobile-progress ${current.state === 'running' ? 'is-running' : ''}`}
+                >
+                  <div>
+                    <span className="mobile-progress-label">
+                      {current.demo ? '模拟演示' : '本次调查'} · 当前进度
+                    </span>
+                    <span className="mobile-progress-action">{actionSummary}</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-controls="execution-flow"
+                    onClick={() => {
+                      executionRef.current?.focus({ preventScroll: true });
+                      executionRef.current?.scrollIntoView({
+                        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+                          ? 'instant'
+                          : 'smooth',
+                        block: 'start',
+                      });
+                    }}
+                  >
+                    查看流程 <ArrowDown size={14} />
+                  </Button>
+                </div>
+              )}
               <div className="workbench">
                 <section className="conversation-pane" aria-label="问题与答案">
                   <div className="pane-heading">
@@ -507,8 +536,9 @@ export default function App() {
                                           key={id}
                                           onClick={() => cite(id)}
                                           aria-label={`查看引用 ${id}`}
+                                          aria-pressed={sourceId === id}
                                         >
-                                          {id}
+                                          <span>{id}</span>
                                         </button>
                                       ))}
                                     </span>
@@ -536,9 +566,15 @@ export default function App() {
                             ) : current.state === 'running' ? (
                               <div className="working-copy">
                                 <p>
-                                  {current.transport === 'batch'
-                                    ? '等待服务返回完整结果。此服务暂不支持实时步骤。'
-                                    : '调查正在进行，执行过程会显示在右侧。'}
+                                  {current.transport === 'batch' ? (
+                                    '等待服务返回完整结果。此服务暂不支持实时步骤。'
+                                  ) : (
+                                    <>
+                                      调查正在进行，执行过程显示在
+                                      <span className="desktop-direction">右侧</span>
+                                      <span className="mobile-direction">下方</span>。
+                                    </>
+                                  )}
                                 </p>
                                 <div className="working-rule">
                                   <span />
@@ -679,7 +715,13 @@ export default function App() {
                     </p>
                   </form>
                 </section>
-                <section className="execution-pane" aria-label="执行流程">
+                <section
+                  ref={executionRef}
+                  id="execution-flow"
+                  className="execution-pane"
+                  aria-label="执行流程"
+                  tabIndex={-1}
+                >
                   <div className="pane-heading">
                     <span>
                       <Workflow size={16} /> 执行流程
@@ -700,6 +742,12 @@ export default function App() {
                   <div className={`current-action ${activeCall ? 'is-running' : ''}`} role="status">
                     {activeCall ? <Loader2 size={16} className="spin" /> : <Workflow size={16} />}
                     <span>{actionSummary}</span>
+                    <span
+                      className="action-elapsed mono"
+                      aria-label={`运行耗时 ${seconds(elapsed)}`}
+                    >
+                      <Clock3 size={12} /> {seconds(elapsed)}
+                    </span>
                   </div>
                   <ExecutionGraph
                     run={current}
@@ -710,29 +758,6 @@ export default function App() {
                   <p className="graph-selection-note">
                     虚线标记正在查看的调用；节点状态与连线保留实际进度。
                   </p>
-                  <div className="run-strip" aria-live="polite">
-                    <span>
-                      {current ? (
-                        <>
-                          <span className={`tiny-dot tone-${toneFor(current.state)}`} />
-                          {current.state === 'running'
-                            ? latest
-                              ? `${actionNames[latest.action] ?? latest.action}${latest.end !== undefined ? ' · 已完成' : ' · 执行中'}`
-                              : '正在启动'
-                            : (statusLabels[current.state] ?? current.state)}
-                        </>
-                      ) : (
-                        <>
-                          <CircleDashedIcon />
-                          等待发起调查
-                        </>
-                      )}
-                    </span>
-                    <span className="mono">
-                      <Clock3 size={12} />
-                      {seconds(elapsed)}
-                    </span>
-                  </div>
                   <div className="timeline-heading">
                     <span>
                       执行时间线 <span className="count">{calls.length}</span>
@@ -984,6 +1009,7 @@ export default function App() {
                               <button
                                 key={source.citation_id}
                                 className={sourceId === source.citation_id ? 'selected' : ''}
+                                aria-pressed={sourceId === source.citation_id}
                                 onClick={() => cite(source.citation_id)}
                               >
                                 <span className="citation-square">{source.citation_id}</span>
@@ -1122,7 +1148,4 @@ export default function App() {
       </TooltipProvider>
     </MotionConfig>
   );
-}
-function CircleDashedIcon() {
-  return <RotateCcw size={12} />;
 }
