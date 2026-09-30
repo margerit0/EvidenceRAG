@@ -1032,18 +1032,55 @@ main {
   color: var(--secondary);
 }
 .historical-call-note {
-  margin-top: 12px;
-  padding: 10px;
-  background: var(--hover);
-  border-left: 2px solid var(--line-strong);
-  font-size: 12px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
   line-height: 1.8;
   grid-column: 1 / -1;
 }
-.historical-call-note .button {
-  white-space: normal;
-  text-align: left;
-  padding-left: 0;
+.invocation-navigation {
+  grid-column: 1 / -1;
+  margin-top: 14px;
+  padding: 8px 0 10px;
+  border-block: 1px solid var(--line);
+}
+.invocation-navigation-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  color: var(--secondary);
+  font-size: 11px;
+}
+.invocation-navigation-heading .button {
+  min-height: 28px;
+  padding: 3px 0 3px 6px;
+  font-size: 11px;
+  font-weight: 400;
+}
+.invocation-navigation-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+.invocation-navigation-controls .button {
+  min-height: 34px;
+  padding: 5px 6px;
+  gap: 3px;
+  font-size: 12px;
+}
+.invocation-position {
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text);
+}
+.invocation-navigation > p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.7;
 }
 .graph-selection-note {
   margin: 0 18px 10px;
@@ -2169,6 +2206,9 @@ main {
 }
 
 @media (max-width: 760px) {
+  .invocation-navigation .button {
+    min-height: 40px;
+  }
   .mobile-direction {
     display: inline;
   }

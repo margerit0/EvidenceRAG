@@ -7,6 +7,7 @@ import {
   ArrowUp,
   BookOpen,
   Check,
+  ChevronLeft,
   ChevronRight,
   Circle,
   CircleHelp,
@@ -141,6 +142,11 @@ export default function App() {
         : '等待发起调查';
   const needsAttention = current && ['warning', 'danger'].includes(toneFor(current.state));
   const selected = calls.find((call) => call.id === selectedCall) ?? latest;
+  const sameActionCalls = selected ? calls.filter((call) => call.action === selected.action) : [];
+  const selectedActionIndex = sameActionCalls.findIndex((call) => call.id === selected?.id);
+  const previousActionCall = sameActionCalls[selectedActionIndex - 1];
+  const nextActionCall = sameActionCalls[selectedActionIndex + 1];
+  const latestActionCall = sameActionCalls.at(-1);
   const latestForSelectedNode =
     selected && calls.filter((call) => call.node === selected.node).at(-1);
   const sources = current?.result?.sources ?? [];
@@ -873,7 +879,7 @@ export default function App() {
                     <TabsContent value="step">
                       <AnimatePresence mode="wait">
                         <motion.div
-                          key={selected?.id ?? 'empty'}
+                          key={selected ? 'step' : 'empty'}
                           initial={{ opacity: 0, x: 4 }}
                           animate={{ opacity: 1, x: 0 }}
                           exit={{ opacity: 0 }}
@@ -899,23 +905,54 @@ export default function App() {
                                 {actionNames[selected.action] ?? selected.action} · 第{' '}
                                 {invocationOrdinal(calls, selected)} 次
                               </h2>
+                              <nav className="invocation-navigation" aria-label="同类调用导航">
+                                <div className="invocation-navigation-heading">
+                                  <span>同类调用</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    disabled={
+                                      !latestActionCall || latestActionCall.id === selected.id
+                                    }
+                                    onClick={() => latestActionCall && inspect(latestActionCall)}
+                                    aria-label="跳到最新同类调用"
+                                  >
+                                    跳到最新 <ArrowRight size={13} />
+                                  </Button>
+                                </div>
+                                <div className="invocation-navigation-controls">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={!previousActionCall}
+                                    onClick={() =>
+                                      previousActionCall && inspect(previousActionCall)
+                                    }
+                                    aria-label="上一次同类调用"
+                                  >
+                                    <ChevronLeft size={14} /> 上一次
+                                  </Button>
+                                  <span className="invocation-position mono" aria-live="polite">
+                                    第 {selectedActionIndex + 1} / {sameActionCalls.length} 次
+                                  </span>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={!nextActionCall}
+                                    onClick={() => nextActionCall && inspect(nextActionCall)}
+                                    aria-label="下一次同类调用"
+                                  >
+                                    下一次 <ChevronRight size={14} />
+                                  </Button>
+                                </div>
+                                <p>按同类动作浏览；完整执行顺序见时间线。</p>
+                              </nav>
                               {latestForSelectedNode &&
                                 latestForSelectedNode.id !== selected.id && (
                                   <div className="historical-call-note">
                                     <p>
                                       正在查看较早调用；图中“正在查看”与此处对应，“最近”表示最新调用。
                                     </p>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => inspect(latestForSelectedNode)}
-                                    >
-                                      查看
-                                      {actionNames[latestForSelectedNode.action] ??
-                                        latestForSelectedNode.action}{' '}
-                                      · 第 {invocationOrdinal(calls, latestForSelectedNode)} 次{' '}
-                                      <ArrowRight size={13} />
-                                    </Button>
                                   </div>
                                 )}
                               <p className="detail-description">

@@ -49,10 +49,16 @@ test('repeated searches have separate details and citations open their evidence'
   await expect(searchNode).toContainText('正在查看第 1 次');
   await expect(searchNode).toContainText('最近第 2 次');
   await expect(page.locator('.historical-call-note')).toContainText('“正在查看”与此处对应');
-  await page.getByRole('button', { name: '查看搜索文档 · 第 2 次' }).click();
+  const navigation = page.getByRole('navigation', { name: '同类调用导航' });
+  await expect(navigation).toContainText('第 1 / 2 次');
+  await expect(navigation.getByRole('button', { name: '上一次同类调用' })).toBeDisabled();
+  await navigation.getByRole('button', { name: '下一次同类调用' }).click();
   await expect(page.locator('.step-detail h2')).toHaveText('搜索文档 · 第 2 次');
   await expect(searchNode).toContainText('正在查看第 2 次');
   await expect(page.locator('.historical-call-note')).toHaveCount(0);
+  await expect(navigation).toContainText('第 2 / 2 次');
+  await expect(navigation.getByRole('button', { name: '下一次同类调用' })).toBeDisabled();
+  await expect(navigation.getByRole('button', { name: '跳到最新同类调用' })).toBeDisabled();
   await page.getByRole('button', { name: '查看引用 2' }).click();
   await expect(page.getByRole('button', { name: '查看引用 2' })).toHaveAttribute(
     'aria-pressed',
@@ -74,6 +80,60 @@ test('repeated searches have separate details and citations open their evidence'
   await expect(
     page.getByRole('heading', { name: /一个问题，\s*一条清晰的证据路径。/ }),
   ).toBeVisible();
+});
+
+test('same-action navigation stays on history as calls arrive and supports adjacent calls', async ({
+  page,
+}, info) => {
+  await page.goto('/workbench/');
+  await page.getByRole('button', { name: '运行演示', exact: true }).click();
+  const decisions = page.locator('.timeline-row').filter({ hasText: 'Agent 决策' });
+  await expect(decisions.nth(1)).toBeVisible();
+  await decisions.first().click();
+  await expect(page.locator('.step-detail h2')).toHaveText('Agent 决策 · 第 1 次');
+  await expect(page.locator('.answer-status')).toContainText('已生成答案');
+  const navigation = page.getByRole('navigation', { name: '同类调用导航' });
+  const previous = navigation.getByRole('button', { name: '上一次同类调用' });
+  const next = navigation.getByRole('button', { name: '下一次同类调用' });
+  const latest = navigation.getByRole('button', { name: '跳到最新同类调用' });
+  await expect(navigation).toContainText('第 1 / 5 次');
+  await expect(previous).toBeDisabled();
+  await next.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.step-detail h2')).toHaveText('Agent 决策 · 第 2 次');
+  await expect(page.locator('.step-detail')).toContainText('demo-3');
+  await expect(next).toBeFocused();
+  await expect(page.locator('.timeline-row.selected')).toContainText('Agent 决策 · 第 2 次');
+  await expect(page.locator('.flow-node.is-selected')).toContainText(
+    '正在查看Agent 决策 · 第 2 次',
+  );
+  await page.screenshot({ path: info.outputPath('adjacent-decision.png') });
+  await previous.click();
+  await expect(navigation).toContainText('第 1 / 5 次');
+  await latest.click();
+  await expect(page.locator('.step-detail h2')).toHaveText('Agent 决策 · 第 5 次');
+  await expect(next).toBeDisabled();
+  await expect(latest).toBeDisabled();
+  await previous.click();
+  await expect(page.locator('.step-detail h2')).toHaveText('Agent 决策 · 第 4 次');
+  await expect(navigation).toContainText('第 4 / 5 次');
+  // These share the finish graph node, but are distinct action types.
+  for (const action of ['校验答案', '结束调查']) {
+    await page.locator('.timeline-row').filter({ hasText: action }).click();
+    await expect(page.locator('.step-detail h2')).toHaveText(`${action} · 第 1 次`);
+    await expect(navigation).toContainText('第 1 / 1 次');
+    await expect(previous).toBeDisabled();
+    await expect(next).toBeDisabled();
+    await expect(latest).toBeDisabled();
+  }
+  await decisions.first().click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await navigation.scrollIntoViewIfNeeded();
+  await next.click();
+  await expect(page.locator('.step-detail h2')).toHaveText('Agent 决策 · 第 2 次');
+  await expect(navigation).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: info.outputPath('mobile-adjacent-decision.png') });
 });
 
 for (const scenario of [
