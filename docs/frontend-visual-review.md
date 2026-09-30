@@ -3,6 +3,9 @@
 准备日期：2026-09-29。本文用于在新会话中审查现有页面的视觉与交互质量。
 功能、运行命令与接口合同见 [frontend.md](frontend.md)。
 
+下一轮重点为 Agent graph 与右侧检查器的视觉和动效，专用入口见
+[动效优化交接](frontend-motion-handoff.md)。检查器折叠基线已提交为 `2653039`。
+
 ## 工作区与本轮目标
 
 - 项目：`D:\rag`；分支：`feat/frontend-design`。
