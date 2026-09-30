@@ -42,8 +42,10 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/s
 - `usage` 中模型决策、搜索、读取次数和累计估算输入 token 数。
 - `total_seconds` 与绑定模型配置、索引身份、提示词和预算的 `agent_profile`。
 
-页面在请求完成后显示执行记录，尚未实现 SSE 实时事件流。追问没有保存会话状态；
-用户需把补充信息与原问题一起重新提交。
+原静态页面在请求完成后显示执行记录。新增 [React 工作台](frontend.md) 可通过
+`POST /api/investigate/stream` 接收 SSE 实时动作事件；能力接口的 `agent_streaming`
+标识是否可用。该接口与原调查接口共用启用开关和并发预算，不自动重试或恢复运行。
+追问没有保存会话状态；用户需把补充信息与原问题一起重新提交。
 
 ## 工具与证据约束
 

@@ -21,13 +21,16 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
+from starlette.staticfiles import StaticFiles
 
 from zhrag.agent import AGENT_MESSAGES, DocumentAgent
+from zhrag.agent_progress import AgentProgress
 from zhrag.answering import PUBLIC_MESSAGES, Answerer, AnswerOutcome, AnswerStatus
 from zhrag.retrieval.online import OnlineRetrievalResult, OnlineRetriever, StageTimings
+from zhrag.service.agent_stream import ProgressFeed
 from zhrag.service.observability import TraceRecorder, TraceSink, profile_fingerprint
 from zhrag.store.base import MetadataValue
 
@@ -136,6 +139,7 @@ class CapabilitiesResponse(BaseModel):
     generation_profile: str | None
     agent_enabled: bool = False
     agent_profile: str | None = None
+    agent_streaming: bool = False
 
 
 class InvestigateRequest(BaseModel):
@@ -364,6 +368,7 @@ def create_app(  # noqa: PLR0915
     *,
     info: ServiceInfo | None = None,
     static_dir: Path | None = None,
+    frontend_dir: Path | None = None,
     max_concurrency: int = 1,
     search_runner: SearchRunner | None = None,
     answerer: Answerer | None = None,
@@ -435,6 +440,7 @@ def create_app(  # noqa: PLR0915
             generation_profile=answerer.profile_fingerprint if answerer else None,
             agent_enabled=agent is not None,
             agent_profile=agent.profile_fingerprint if agent else None,
+            agent_streaming=agent is not None,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -595,10 +601,11 @@ def create_app(  # noqa: PLR0915
         payload: InvestigateRequest,
         active_agent: DocumentAgent,
         stop: threading.Event,
+        observe: Callable[[AgentProgress], None] | None = None,
     ) -> JSONResponse:
         try:
             outcome = await run_in_threadpool(
-                active_agent.run, payload.query, cancelled=stop.is_set
+                active_agent.run, payload.query, cancelled=stop.is_set, observe=observe
             )
             content = {
                 "status": outcome.status,
@@ -661,5 +668,22 @@ def create_app(  # noqa: PLR0915
         except asyncio.CancelledError:
             stop.set()
             raise
+
+    @app.post("/api/investigate/stream", response_model=None)
+    async def investigate_stream(payload: InvestigateRequest) -> StreamingResponse | JSONResponse:
+        if agent is None:
+            return _error(503, "agent_unavailable", "Document investigation is not enabled.")
+        if not app.state.admission.try_acquire():
+            return _error(429, "service_busy", "The service is at its concurrency limit.")
+        feed = ProgressFeed()
+        work = asyncio.create_task(run_investigation(payload, agent, feed.stop, feed.observe))
+        pending_investigations.add(work)
+        work.add_done_callback(pending_investigations.discard)
+        return feed.response(work)
+
+    # Optional compiled React client. The original root page and API contracts stay available.
+    workbench_dir = frontend_dir or Path(__file__).resolve().parents[3] / "frontend" / "dist"
+    if (workbench_dir / "index.html").is_file():
+        app.mount("/workbench", StaticFiles(directory=workbench_dir, html=True), name="workbench")
 
     return app

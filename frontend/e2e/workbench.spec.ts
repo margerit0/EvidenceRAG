@@ -1,0 +1,181 @@
+import { expect, test } from '@playwright/test';
+import { demoScript } from '../src/lib/demo';
+
+test('desktop composition, dark theme persistence, and no horizontal overflow', async ({
+  page,
+}, info) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/workbench/');
+  await expect(page.getByRole('heading', { name: '从问题出发，让证据说话.' })).toBeVisible();
+  await expect(page.locator('.flow-node')).toHaveCount(4);
+  await page.screenshot({
+    path: info.outputPath('light-desktop.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
+  await page.getByRole('button', { name: '切换深色' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('.flow-node').first()).toHaveCSS('background-color', 'rgb(27, 33, 38)');
+  await page.screenshot({
+    path: info.outputPath('dark-desktop.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('repeated searches have separate details and citations open their evidence', async ({
+  page,
+}, info) => {
+  await page.goto('/workbench/');
+  await page.getByRole('button', { name: '运行演示', exact: true }).click();
+  await expect(page.locator('.answer-status')).toContainText('已生成答案');
+  await expect(page.locator('.timeline-action').filter({ hasText: '搜索文档' })).toHaveCount(2);
+  await page.locator('.timeline-row').filter({ hasText: '搜索文档' }).last().click();
+  await expect(page.locator('.step-detail h2')).toHaveText('搜索文档 · 第 2 次');
+  await expect(page.locator('.step-detail')).toContainText('demo-6');
+  await expect(page.locator('.flow-node').filter({ hasText: '搜索文档' })).toContainText(
+    '最近第 2 次',
+  );
+  await page.locator('.timeline-row').filter({ hasText: '搜索文档' }).first().click();
+  await expect(page.locator('.step-detail h2')).toHaveText('搜索文档 · 第 1 次');
+  await expect(page.locator('.step-detail')).toContainText('demo-2');
+  const searchNode = page.locator('.flow-node').filter({ hasText: '搜索文档' });
+  await expect(searchNode).toHaveClass(/is-selected/);
+  await expect(searchNode).toContainText('正在查看第 1 次');
+  await expect(searchNode).toContainText('最近第 2 次');
+  await expect(page.locator('.historical-call-note')).toContainText('“正在查看”与此处对应');
+  await page.getByRole('button', { name: '查看搜索文档 · 第 2 次' }).click();
+  await expect(page.locator('.step-detail h2')).toHaveText('搜索文档 · 第 2 次');
+  await expect(searchNode).toContainText('正在查看第 2 次');
+  await expect(page.locator('.historical-call-note')).toHaveCount(0);
+  await page.getByRole('button', { name: '查看引用 2' }).click();
+  await expect(page.locator('.evidence-detail')).toContainText('回退条件');
+  await expect(page.locator('.evidence-text')).toContainText('原创合成演示文档');
+  await page.screenshot({
+    path: info.outputPath('answer-and-evidence.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
+  await page.getByRole('button', { name: '新调查', exact: true }).click();
+  await expect(
+    page.getByRole('heading', { name: /一个问题，\s*一条清晰的证据路径。/ }),
+  ).toBeVisible();
+});
+
+for (const scenario of [
+  { name: '需要补充信息', result: '需要补充信息' },
+  { name: '证据不足', result: '证据不足' },
+  { name: '调用超时', result: '模型调用超时' },
+  { name: '预算耗尽', result: '已达预算上限' },
+]) {
+  test(`terminal state: ${scenario.name}`, async ({ page }) => {
+    await page.goto('/workbench/');
+    await page.getByRole('combobox', { name: '演示场景' }).click();
+    await page.getByRole('option', { name: scenario.name, exact: true }).click();
+    await page.getByRole('button', { name: '运行演示', exact: true }).click();
+    await expect(page.locator('.answer-status')).toContainText(scenario.result);
+    await expect(page.locator('.answer-body')).toHaveCount(0);
+    await expect(page.locator('.inspector-outcome')).toContainText(scenario.result);
+    if (scenario.name !== '需要补充信息') {
+      await page.getByRole('button', { name: '查看已读取证据' }).click();
+      await expect(page.locator('.evidence-text')).toContainText('原创合成演示文档');
+    }
+    await expect(page.getByRole('button', { name: '运行演示', exact: true })).toBeEnabled();
+  });
+}
+
+test('stopping a demo retains steps and permits a new run', async ({ page }) => {
+  await page.goto('/workbench/');
+  await page.getByRole('button', { name: '运行演示', exact: true }).click();
+  await expect(page.locator('.timeline-row').first()).toBeVisible();
+  await page.getByRole('button', { name: '停止', exact: true }).click();
+  await expect(page.locator('.answer-status')).toContainText('调查已停止');
+  await expect(page.locator('.timeline-row').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: '运行演示', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: '运行历史' }).click();
+  await expect(page.locator('.history-item')).toHaveCount(1);
+  await page.locator('.history-item').click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+test('mobile citation opens evidence and restores focus and reading position', async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/workbench/');
+  await page.getByRole('button', { name: '运行演示', exact: true }).click();
+  await expect(page.locator('.current-action')).toContainText('执行中');
+  await expect(page.locator('.answer-status')).toContainText('已生成答案');
+  const citation = page.getByRole('button', { name: '查看引用 2', exact: true });
+  await citation.scrollIntoViewIfNeeded();
+  const position = await page.evaluate(() => scrollY);
+  await citation.click();
+  const dialog = page.getByRole('dialog', { name: '引用证据' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText('升级演练 / 回退条件');
+  await page.screenshot({ path: info.outputPath('mobile-evidence-drawer.png') });
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(citation).toBeFocused();
+  expect(await page.evaluate(() => scrollY)).toBe(position);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('button', { name: '展开阅读' }).click();
+  await expect(dialog).toContainText('升级演练 / 回退条件');
+});
+
+test('narrow viewport reflows into continuous sections', async ({ page }, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/workbench/');
+  await expect(page.getByRole('button', { name: '运行演示', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({
+    path: info.outputPath('mobile-light.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
+  await page.getByRole('button', { name: '切换深色' }).click();
+  await page.screenshot({
+    path: info.outputPath('mobile-dark.png'),
+    fullPage: true,
+    animations: 'disabled',
+  });
+});
+
+test('connected mode uses one POST, renders streamed results and treats content as text', async ({
+  page,
+}) => {
+  const script = demoScript('answered', 'synthetic-service');
+  let requests = 0;
+  script.result.blocks[0].text = '<img src=x onerror="alert(1)"> 合成响应';
+  await page.route('**/api/capabilities', (route) =>
+    route.fulfill({
+      json: { agent_enabled: true, agent_profile: 'synthetic', agent_streaming: true },
+    }),
+  );
+  await page.route('**/api/investigate/stream', (route) => {
+    requests++;
+    return route.fulfill({
+      contentType: 'text/event-stream',
+      body:
+        script.events
+          .map((event) => `event: progress\ndata: ${JSON.stringify(event)}\n\n`)
+          .join('') +
+        `event: result\ndata: ${JSON.stringify({ run_id: 'synthetic-service', response: script.result })}\n\n`,
+    });
+  });
+  await page.goto('/workbench/');
+  await page.getByRole('combobox', { name: '运行模式' }).click();
+  await page.getByRole('option', { name: '连接服务', exact: true }).click();
+  await expect(page.locator('.connection-note')).toContainText('服务已连接');
+  await page.getByRole('textbox', { name: '调查问题' }).fill('合成服务问题');
+  await page.getByRole('button', { name: '开始调查', exact: true }).click();
+  await expect(page.locator('.answer-status')).toContainText('已生成答案');
+  await expect(page.locator('.answer-body')).toContainText('<img src=x');
+  await expect(page.locator('.answer-body img')).toHaveCount(0);
+  expect(requests).toBe(1);
+});

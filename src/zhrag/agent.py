@@ -28,6 +28,7 @@ from zhrag.agent_planning import (
     parse_assessment,
     parse_plan,
 )
+from zhrag.agent_progress import AgentProgress, ProgressRecorder
 from zhrag.answering import (
     ANSWER_CONTRACT,
     AnswerBlock,
@@ -272,6 +273,7 @@ class _Run:
     plan: InvestigationPlan | None = None
     assessment: DecisionAssessment | None = None
     planning_feedback: str | None = None
+    progress: ProgressRecorder | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -387,6 +389,8 @@ class DocumentAgent:
                 error_code=error_code,
             )
         )
+        if state.progress is not None:
+            state.progress.record("plan" if initial else "assess", state.model_calls, outcome)
 
     def _fits(self, prompt: str, system: str | None = None) -> bool:
         text = (self._system_prompt if system is None else system) + "\n" + prompt
@@ -414,6 +418,8 @@ class DocumentAgent:
                 validation_error.value if validation_error is not None else None,
             )
         )
+        if state.progress is not None:
+            state.progress.record(action, state.model_calls, outcome, ids)
 
     def _outcome(
         self,
@@ -440,6 +446,8 @@ class DocumentAgent:
         )
 
     def _search(self, state: _Run, query: str) -> None:
+        if state.progress is not None:
+            state.progress.start("search_docs", state.model_calls)
         normalized = " ".join(query.split()).casefold()
         if normalized in state.searches:
             self._event(state, "search_docs", "duplicate_query")
@@ -478,6 +486,8 @@ class DocumentAgent:
         self._event(state, "search_docs", "ok" if added else "no_new_candidates", tuple(added))
 
     def _read(self, state: _Run, key: int) -> None:
+        if state.progress is not None:
+            state.progress.start("read_passage", state.model_calls)
         if key not in state.candidates:
             self._event(state, "read_passage", "unknown_evidence")
         elif key in state.evidence:
@@ -503,12 +513,15 @@ class DocumentAgent:
         question: str,
         *,
         cancelled: Callable[[], bool] = lambda: False,
+        observe: Callable[[AgentProgress], None] | None = None,
     ) -> AgentOutcome:
         """Stop at dependency boundaries; an in-flight synchronous call cannot be killed."""
         if not isinstance(question, str) or not question.strip() or len(question) > 2000:
             raise ValueError("question must contain 1 to 2000 characters")
         question.encode("utf-8")
         state = _Run(question.strip(), self.clock())
+        if observe is not None:
+            state.progress = ProgressRecorder(observe, lambda: self._elapsed(state))
         for _ in range(self.settings.max_steps):
             stopped = self._stop(state, cancelled)
             if stopped:
@@ -523,6 +536,11 @@ class DocumentAgent:
                 return self._outcome(state, "budget_exhausted")
             state.model_calls += 1
             state.prompt_tokens += tokens
+            stage = "review_answer" if reviewing else "decide"
+            if self.settings.plan_investigation and state.plan is None:
+                stage = "plan"
+            if state.progress is not None:
+                state.progress.start(stage, state.model_calls)
             try:
                 with generation_control(
                     cancelled, lambda: self.settings.max_seconds - self._elapsed(state)
@@ -534,9 +552,6 @@ class DocumentAgent:
                 return self._outcome(state, exc.code)
             except (Exception, SystemExit):
                 return self._outcome(state, "generation_failed")
-            stage = "review_answer" if reviewing else "decide"
-            if self.settings.plan_investigation and state.plan is None:
-                stage = "plan"
             self._event(state, stage, "ok")
             stopped = self._stop(state, cancelled)
             if stopped:
@@ -642,6 +657,8 @@ class DocumentAgent:
         elif name == "abstain":
             return self._outcome(state, self._no_answer_status(state))
         elif name == "answer":
+            if state.progress is not None:
+                state.progress.start("validate_answer", state.model_calls)
             context = AnswerContext("", tuple(state.evidence.values()), 0, 0, False)
             try:
                 blocks = parse_answer(_json(action["answer"]), context, AnswerSettings())

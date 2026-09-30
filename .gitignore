@@ -78,3 +78,9 @@ results/qa_cache*
 
 # Local agent instructions
 /AGENTS.md
+
+# React workbench
+node_modules/
+frontend/test-results/
+frontend/playwright-report/
+*.tsbuildinfo
