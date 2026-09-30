@@ -1,16 +1,23 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
   Background,
   BackgroundVariant,
+  BaseEdge,
+  ControlButton,
   Controls,
   Handle,
   MarkerType,
   Position,
   ReactFlow,
+  getBezierPath,
+  getNodesBounds,
   getViewportForBounds,
   useReactFlow,
   type Node,
   type NodeProps,
+  type Edge,
+  type EdgeProps,
+  type Rect,
 } from '@xyflow/react';
 import {
   ArrowUpRight,
@@ -20,6 +27,7 @@ import {
   FileCheck2,
   FileText,
   Loader2,
+  Maximize,
   Search,
   Workflow,
 } from 'lucide-react';
@@ -55,15 +63,17 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<FlowNode
           <Icon size={17} />
         </span>
         <span>{data.label}</span>
-        {data.active ? (
-          <Loader2 size={13} className="spin node-status" />
-        ) : data.status === 'done' ? (
-          <Check size={13} className="node-status" />
-        ) : ['failed', 'warning'].includes(data.status) ? (
-          <AlertCircle size={13} className="node-status" />
-        ) : (
-          <CircleDashed size={13} className="node-status" />
-        )}
+        <span className="node-status" key={data.status}>
+          {data.active ? (
+            <Loader2 size={13} className="spin" />
+          ) : data.status === 'done' ? (
+            <Check size={13} />
+          ) : ['failed', 'warning'].includes(data.status) ? (
+            <AlertCircle size={13} />
+          ) : (
+            <CircleDashed size={13} />
+          )}
+        </span>
       </div>
       <div className="node-meta">
         <span>
@@ -86,25 +96,90 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<FlowNode
   );
 });
 const nodeTypes = { stage: AgentNode };
+type SignalEdge = Edge<{ flowing: boolean }>;
+const ExecutionEdge = memo(function ExecutionEdge(props: EdgeProps<SignalEdge>) {
+  let [path] = getBezierPath(props);
+  if (
+    props.sourceX === props.targetX &&
+    props.sourcePosition === props.targetPosition &&
+    [Position.Left, Position.Right].includes(props.sourcePosition)
+  ) {
+    // Give compact tool/return routes separate lanes instead of drawing several
+    // vertical paths on the node borders. These are still the same event edges.
+    const direction = props.sourcePosition === Position.Right ? 1 : -1;
+    const lane = ['agent-finish', 'read-agent'].includes(props.id) ? 68 : 42;
+    const { sourceX: sx, sourceY: sy, targetX: tx, targetY: ty } = props;
+    path = `M ${sx},${sy} C ${sx + lane * direction},${sy} ${tx + lane * direction},${ty} ${tx},${ty}`;
+  }
+  return (
+    <>
+      <BaseEdge id={props.id} path={path} style={props.style} markerEnd={props.markerEnd} />
+      {props.data?.flowing && (
+        <path d={path} className="graph-edge-signal" pathLength={100} fill="none" />
+      )}
+    </>
+  );
+});
+const edgeTypes = { execution: ExecutionEdge };
+const nodeWidth = 188;
+const nodeHeight = 92;
 const stages: { id: NodeKey; label: string; x: number; y: number }[] = [
-  { id: 'agent', label: 'Agent 决策', x: 106, y: 0 },
-  { id: 'search', label: '搜索文档', x: 0, y: 108 },
-  { id: 'read', label: '读取证据', x: 212, y: 108 },
-  { id: 'finish', label: '校验与输出', x: 106, y: 216 },
+  { id: 'agent', label: 'Agent 决策', x: 112, y: 0 },
+  { id: 'search', label: '搜索文档', x: 0, y: 112 },
+  { id: 'read', label: '读取证据', x: 224, y: 112 },
+  { id: 'finish', label: '校验与输出', x: 112, y: 224 },
 ];
-const fitOptions = { padding: 0.06, maxZoom: 1 };
+const fitOptions = { padding: 0.025, maxZoom: 1 };
 
-function FitGraph({ width, height }: { width: number; height: number }) {
-  const { viewportInitialized, getNodes, getNodesBounds, setViewport } = useReactFlow();
-  useEffect(() => {
-    // Fit against the observed canvas size immediately. Queued fitView can wait
-    // for a node update even though collapsing the inspector only resizes the canvas.
-    if (viewportInitialized && width && height) {
-      const bounds = getNodesBounds(getNodes());
-      void setViewport(getViewportForBounds(bounds, width, height, 0.35, 1, fitOptions.padding));
-    }
-  }, [viewportInitialized, width, height, getNodes, getNodesBounds, setViewport]);
-  return null;
+function FitGraph({
+  container,
+  bounds,
+}: {
+  container: RefObject<HTMLDivElement | null>;
+  bounds: Rect;
+}) {
+  const { viewportInitialized, setViewport } = useReactFlow();
+  useLayoutEffect(() => {
+    const canvas = container.current;
+    if (!viewportInitialized || !canvas) return;
+    const fit = (width: number, height: number) => {
+      if (width && height) {
+        // The layout transition is the only animation clock. Apply each observed
+        // size before paint; a second viewport tween would trail or fight it.
+        void setViewport(getViewportForBounds(bounds, width, height, 0.35, 1, fitOptions.padding));
+      }
+    };
+    fit(canvas.clientWidth, canvas.clientHeight);
+    const observer = new ResizeObserver(([entry]) =>
+      fit(entry.contentRect.width, entry.contentRect.height),
+    );
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [viewportInitialized, container, bounds, setViewport]);
+  return (
+    <Controls showInteractive={false} showFitView={false} position="bottom-left">
+      <ControlButton
+        aria-label="适应画布"
+        title="适应画布"
+        onClick={() => {
+          const canvas = container.current;
+          if (canvas)
+            void setViewport(
+              getViewportForBounds(
+                bounds,
+                canvas.clientWidth,
+                canvas.clientHeight,
+                0.35,
+                1,
+                fitOptions.padding,
+              ),
+            );
+        }}
+      >
+        <Maximize size={12} />
+      </ControlButton>
+    </Controls>
+  );
 }
 const definitions = [
   {
@@ -149,16 +224,36 @@ export function ExecutionGraph({
   theme: 'light' | 'dark';
 }) {
   const container = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ width: 0, height: 0 });
-  const compact = size.width > 0 && size.width < 380;
-  useEffect(() => {
+  const [compact, setCompact] = useState(false);
+  useLayoutEffect(() => {
     if (!container.current) return;
-    const observer = new ResizeObserver(([entry]) =>
-      setSize({ width: entry.contentRect.width, height: entry.contentRect.height }),
-    );
+    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 380));
     observer.observe(container.current);
     return () => observer.disconnect();
   }, []);
+  const layout = useMemo(
+    () =>
+      stages.map((stage, index) => ({
+        id: stage.id,
+        position: compact ? { x: 55, y: index * 112 } : { x: stage.x, y: stage.y },
+        width: nodeWidth,
+        height: nodeHeight,
+        data: {},
+      })),
+    [compact],
+  );
+  const bounds = useMemo(() => {
+    const rect = getNodesBounds(layout);
+    // Include return curves and inspection outlines, not just node rectangles.
+    const side = compact ? 56 : 32;
+    return {
+      x: rect.x - side,
+      y: rect.y - 6,
+      // Leave room for the fixed inspector handle at the phone's right edge.
+      width: rect.width + side * 2 + (compact ? 28 : 0),
+      height: rect.height + 12,
+    };
+  }, [layout, compact]);
   const calls = useMemo(() => invocations(run?.progress ?? []), [run?.progress]);
   const latest = calls.at(-1);
   const active = run?.state === 'running' && latest?.end === undefined ? latest?.node : undefined;
@@ -175,9 +270,9 @@ export function ExecutionGraph({
       type: 'stage',
       // Fixed dimensions match the reserved title/status/selection rows.
       // Supplying them also lets viewport fitting run without a measurement round trip.
-      width: 188,
-      height: 96,
-      position: compact ? { x: 55, y: index * 112 } : { x: stage.x, y: stage.y },
+      width: nodeWidth,
+      height: nodeHeight,
+      position: layout[index].position,
       selected: !!inspected,
       data: {
         label: stage.label,
@@ -217,18 +312,19 @@ export function ExecutionGraph({
       ...(compact && edge.id === 'read-agent'
         ? { sourceHandle: 'loop-left', targetHandle: 'return-left' }
         : {}),
-      type: 'default',
-      animated: flowing,
+      type: 'execution',
+      className: `graph-edge ${flowing ? 'is-flowing' : traversed ? 'is-traversed' : ''}`,
+      data: { flowing },
       markerEnd: {
         type: MarkerType.ArrowClosed,
         width: 14,
         height: 14,
-        color: flowing ? 'var(--brand)' : 'var(--graph-line)',
+        color: flowing ? 'var(--brand)' : traversed ? 'var(--graph-visited)' : 'var(--graph-line)',
       },
       style: {
         stroke: flowing ? 'var(--brand)' : traversed ? 'var(--graph-visited)' : 'var(--graph-line)',
-        strokeWidth: flowing ? 1.7 : 1.2,
-        opacity: traversed || flowing ? 1 : 0.9,
+        strokeWidth: flowing ? 1.6 : 1.15,
+        opacity: flowing ? 0.55 : traversed ? 0.85 : 0.7,
       },
     };
   });
@@ -240,11 +336,10 @@ export function ExecutionGraph({
         data-testid="execution-graph"
       >
         <ReactFlow
-          key={compact ? 'compact' : 'wide'}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
-          fitView
+          edgeTypes={edgeTypes}
           fitViewOptions={fitOptions}
           minZoom={0.35}
           maxZoom={1.4}
@@ -265,8 +360,7 @@ export function ExecutionGraph({
           }}
         >
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--graph-dot)" />
-          <FitGraph width={size.width} height={size.height} />
-          <Controls showInteractive={false} position="bottom-left" fitViewOptions={fitOptions} />
+          <FitGraph container={container} bounds={bounds} />
         </ReactFlow>
       </div>
       <p className="graph-caption">

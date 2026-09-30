@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { demoScript } from '../src/lib/demo';
 
+test.beforeEach(async ({ page }) => {
+  // Tests may replace this with a synthetic response; never reach a real service.
+  await page.route('**/api/**', (route) => route.abort());
+});
+
 test('desktop composition, dark theme persistence, and no horizontal overflow', async ({
   page,
 }, info) => {
@@ -151,6 +156,7 @@ for (const scenario of [
     await page.getByRole('option', { name: scenario.name, exact: true }).click();
     await page.getByRole('button', { name: '运行演示', exact: true }).click();
     await expect(page.locator('.answer-status')).toContainText(scenario.result);
+    await expect(page.locator('.flow-node.running, .graph-edge-signal')).toHaveCount(0);
     await expect(page.locator('.answer-body')).toHaveCount(0);
     await page.getByRole('button', { name: '展开检查器', exact: true }).click();
     await expect(page.locator('.inspector-outcome')).toContainText(scenario.result);
@@ -168,6 +174,7 @@ test('stopping a demo retains steps and permits a new run', async ({ page }) => 
   await expect(page.locator('.timeline-row').first()).toBeVisible();
   await page.getByRole('button', { name: '停止', exact: true }).click();
   await expect(page.locator('.answer-status')).toContainText('调查已停止');
+  await expect(page.locator('.flow-node.running, .graph-edge-signal')).toHaveCount(0);
   await expect(page.locator('.timeline-row').first()).toBeVisible();
   await expect(page.getByRole('button', { name: '运行演示', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: '运行历史' }).click();
@@ -414,5 +421,6 @@ test('connected mode uses one POST, renders streamed results and treats content 
   await expect(page.locator('.answer-status')).toContainText('已生成答案');
   await expect(page.locator('.answer-body')).toContainText('<img src=x');
   await expect(page.locator('.answer-body img')).toHaveCount(0);
+  await expect(page.locator('.flow-node.running, .graph-edge-signal')).toHaveCount(0);
   expect(requests).toBe(1);
 });

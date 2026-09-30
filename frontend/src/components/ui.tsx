@@ -5,6 +5,7 @@ import * as TooltipPrimitive from '@radix-ui/react-tooltip';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
+import { animate, motion, useMotionValue, useTransform, type MotionStyle } from 'motion/react';
 import { Check, ChevronDown, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -64,26 +65,111 @@ export function Select({
   label: string;
   disabled?: boolean;
 }) {
+  const [open, setOpen] = React.useState(false);
+  const [present, setPresent] = React.useState(false);
+  const trigger = React.useRef<HTMLButtonElement>(null);
+  const content = React.useRef<HTMLDivElement>(null);
+  const closeOnPointerDown = React.useRef(false);
+  const reopening = React.useRef(false);
+  const reveal = useMotionValue(0);
+  const offset = useTransform(reveal, [0, 1], [1, 0]);
+  const changeOpen = (next: boolean) => {
+    reopening.current = next && present;
+    if (next) setPresent(true);
+    setOpen(next);
+  };
+  React.useEffect(() => {
+    // Keep Radix's item registration while closed, and retain its positioned
+    // surface only for the exit. One value allows reversal without a reset.
+    const media = matchMedia('(prefers-reduced-motion: reduce)');
+    let playback: ReturnType<typeof animate> | undefined;
+    const update = () => {
+      playback?.stop();
+      playback = animate(reveal, open ? 1 : 0, {
+        duration: media.matches ? 0 : open ? 0.24 : 0.16,
+        ease: [0.22, 1, 0.36, 1],
+        onComplete: () => {
+          if (!open) setPresent(false);
+        },
+      });
+    };
+    update();
+    media.addEventListener('change', update);
+    if (open && reopening.current) {
+      content.current
+        ?.querySelector<HTMLElement>('[role="option"][data-state="checked"]')
+        ?.focus({ preventScroll: true });
+    }
+    return () => {
+      playback?.stop();
+      media.removeEventListener('change', update);
+    };
+  }, [open, reveal]);
   return (
-    <SelectPrimitive.Root value={value} onValueChange={onChange} disabled={disabled}>
-      <SelectPrimitive.Trigger className="select-trigger" aria-label={label}>
+    <SelectPrimitive.Root
+      value={value}
+      onValueChange={onChange}
+      disabled={disabled}
+      open={open}
+      onOpenChange={changeOpen}
+    >
+      <SelectPrimitive.Trigger
+        ref={trigger}
+        className="select-trigger"
+        aria-label={label}
+        style={{ pointerEvents: present ? 'auto' : undefined }}
+        onPointerDown={(event) => {
+          closeOnPointerDown.current = open && event.button === 0 && !event.ctrlKey;
+          if (closeOnPointerDown.current) {
+            event.preventDefault();
+            changeOpen(false);
+          }
+        }}
+        onClick={(event) => {
+          if (closeOnPointerDown.current) {
+            event.preventDefault();
+            closeOnPointerDown.current = false;
+          }
+        }}
+      >
         <SelectPrimitive.Value />
         <SelectPrimitive.Icon>
-          <ChevronDown size={14} />
+          <ChevronDown size={14} className="select-chevron" />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
-        <SelectPrimitive.Content className="select-content" position="popper" sideOffset={5}>
-          <SelectPrimitive.Viewport>
-            {options.map((option) => (
-              <SelectPrimitive.Item className="select-item" key={option.value} value={option.value}>
-                <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
-                <SelectPrimitive.ItemIndicator>
-                  <Check size={14} />
-                </SelectPrimitive.ItemIndicator>
-              </SelectPrimitive.Item>
-            ))}
-          </SelectPrimitive.Viewport>
+        <SelectPrimitive.Content
+          ref={content}
+          forceMount={present ? true : undefined}
+          position="popper"
+          sideOffset={6}
+          collisionPadding={10}
+          asChild
+          onPointerDownOutside={(event) => {
+            if (trigger.current?.contains(event.target as Node)) event.preventDefault();
+          }}
+        >
+          <motion.div
+            className="select-content"
+            inert={!open}
+            aria-hidden={!open || undefined}
+            style={{ opacity: reveal, '--select-offset-progress': offset } as MotionStyle}
+          >
+            <SelectPrimitive.Viewport>
+              {options.map((option) => (
+                <SelectPrimitive.Item
+                  className="select-item"
+                  key={option.value}
+                  value={option.value}
+                >
+                  <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
+                  <SelectPrimitive.ItemIndicator>
+                    <Check size={14} />
+                  </SelectPrimitive.ItemIndicator>
+                </SelectPrimitive.Item>
+              ))}
+            </SelectPrimitive.Viewport>
+          </motion.div>
         </SelectPrimitive.Content>
       </SelectPrimitive.Portal>
     </SelectPrimitive.Root>
