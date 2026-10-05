@@ -24,13 +24,25 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 python scripts/s
 错误事件、截断、模型不符或结构异常均不发布部分结果。它不改变网页响应方式。
 流式合同进入生成器和 Agent 指纹；关闭时保持原非流式请求、指纹与重试行为。
 
+模型名校验在流式和非流式生成中统一只忽略 ASCII 字母大小写。版本、命名空间、标点、
+空格及非字符串仍不能混用，不自动删除前缀或映射其他模型。请求保留配置中的原拼写，
+流式组装保留首次返回的模型名，并继续校验后续帧。身份校验合同
+`ascii-case-insensitive-v1` 纳入两种生成器指纹，流式合同升级为 `chat-sse-direct-v2`，
+因此本次升级后的指纹与旧版不同。`stop` / `[DONE]`、截断及响应大小校验保持有效。
+
 传输仍直连配置的服务端，验证 TLS，不使用系统代理或自动跟随重定向。原响应字节上限
 约束整个 SSE 数据（含元数据），另有 64 KiB 行上限。内部思考只可统计长度，不传给答案。
 暂时性 HTTP/连接错误按原尝试上限重试，每次重新收集；协议错误直接失败。
 流式读取边界与重试等待会检查取消及调查剩余时间；阻塞 I/O 最长仍受单次 timeout
 约束，不能承诺即时取消或严格墙钟截止。非 Agent 单次流式另设 600 秒读取边界。
 
-接口：`POST /api/investigate`，请求体仅接受 `{"query":"需要调查的问题"}`。
+接口：`POST /api/investigate`，请求体接受 `{"query":"需要调查的问题"}`，可额外指定
+`model` 选择服务器白名单中的模型；`POST /api/investigate/stream` 使用相同规则。
+默认模型来自 `LLM_MODEL_NAME`，启动时通过可重复的 `--agent-model` 添加共用当前
+LLM 地址和密钥的模型。`GET /api/capabilities` 的 `agent_models` 返回模型 ID／显示名称，
+`default_agent_model` 返回默认 ID，均不包含密钥。未知模型在调用依赖之前返回
+422 / `invalid_model`。一次请求固定一个 Agent，所有模型共用检索器与并发预算，不自动
+切换或回退；最终结果的 `model` 与 `agent_profile` 标明选定的配置。
 `GET /api/capabilities` 增加 `agent_enabled` 与 `agent_profile`。
 原 `/api/search` 与 `/api/ask` 分别保留独立检索、单轮问答语义。
 

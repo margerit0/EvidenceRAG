@@ -129,6 +129,46 @@ def test_stream_assembles_unicode_and_separates_reasoning_without_using_proxies(
     assert sum(e.get("reasoning_chars", 0) for e in observed) == len("PRIVATE_REASONING")
 
 
+def test_model_case_variations_pass_both_gates_and_preserve_served_spelling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    conn = Connection(
+        event('{"ok":true}').replace(b'"synthetic"', b'"SyNtHeTiC"')
+        + event(finish="stop").replace(b'"synthetic"', b'"SYNTHETIC"')
+        + b"data: [DONE]\n\n"
+    )
+    install(monkeypatch, conn)
+    replies = []
+
+    def transport(request: urllib.request.Request) -> bytes:
+        reply = streaming.StreamingTransport()(request)
+        replies.append(json.loads(reply))
+        return reply
+
+    assert generator(transport=transport).generate("system", "user") == '{"ok":true}'
+    assert replies[0]["model"] == "SyNtHeTiC"
+    assert json.loads(conn.calls[0]["body"])["model"] == "synthetic"
+    assert conn.closed
+
+
+@pytest.mark.parametrize(
+    "served_model", ["other", "synthetic-v2", "provider/synthetic", " synthetic", "synthetic ", 7]
+)
+def test_model_drift_after_valid_content_is_still_rejected(
+    monkeypatch: pytest.MonkeyPatch, served_model: object
+) -> None:
+    conn = Connection(
+        event("PRIVATE_PARTIAL")
+        + sse({"model": served_model, "choices": []})
+        + event(finish="stop")
+        + b"data: [DONE]\n\n"
+    )
+    created = install(monkeypatch, conn)
+    with pytest.raises(GenerationError, match="generation_failed"):
+        replace(generator(), max_retries=9).generate("s", "u")
+    assert len(created) == 1 and conn.closed
+
+
 @pytest.mark.parametrize(
     "bad",
     [

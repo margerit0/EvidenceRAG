@@ -131,6 +131,11 @@ class SearchResponse(BaseModel):
     timings: TimingResponse
 
 
+class AgentModelResponse(BaseModel):
+    id: str
+    name: str
+
+
 class CapabilitiesResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -140,12 +145,15 @@ class CapabilitiesResponse(BaseModel):
     agent_enabled: bool = False
     agent_profile: str | None = None
     agent_streaming: bool = False
+    agent_models: list[AgentModelResponse] = Field(default_factory=list)
+    default_agent_model: str | None = None
 
 
 class InvestigateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     query: Annotated[str, Field(min_length=1, max_length=QUERY_MAX_LENGTH)]
+    model: Annotated[str, Field(min_length=1, max_length=120)] | None = None
 
 
 class AnswerBlockResponse(BaseModel):
@@ -373,6 +381,7 @@ def create_app(  # noqa: PLR0915
     search_runner: SearchRunner | None = None,
     answerer: Answerer | None = None,
     agent: DocumentAgent | None = None,
+    agent_models: Mapping[str, DocumentAgent] | None = None,
     trace_sink: TraceSink | None = None,
     published_index_identity: str | None = None,
 ) -> FastAPI:
@@ -398,6 +407,23 @@ def create_app(  # noqa: PLR0915
     output_limit = settings.output_limit
     if agent is not None and agent.retriever is not retriever:
         raise ValueError("agent must share the service retriever and admission gate")
+    models = dict(agent_models or {})
+    if any(
+        not isinstance(name, str)
+        or not name.strip()
+        or name != name.strip()
+        or len(name) > 120
+        or value.retriever is not retriever
+        for name, value in models.items()
+    ):
+        raise ValueError("model choices must have valid IDs and share the service retriever")
+    default_model = next((name for name, value in models.items() if value is agent), None)
+    if models and (agent is None or default_model is None):
+        raise ValueError("the default agent must belong to the model choices")
+    model_labels = {
+        "deepseek-v4.1-flash": "DeepSeek V4.1 Flash",
+        "z-ai/glm-5.3": "GLM 5.3",
+    }
     resolved_static = static_dir or Path(__file__).resolve().parent / "static"
     index_path = resolved_static / "index.html"
     runner = search_runner
@@ -441,6 +467,11 @@ def create_app(  # noqa: PLR0915
             agent_enabled=agent is not None,
             agent_profile=agent.profile_fingerprint if agent else None,
             agent_streaming=agent is not None,
+            agent_models=[
+                AgentModelResponse(id=name, name=model_labels.get(name.lower(), name))
+                for name in models
+            ],
+            default_agent_model=default_model,
         )
 
     @app.exception_handler(RequestValidationError)
@@ -602,6 +633,7 @@ def create_app(  # noqa: PLR0915
         active_agent: DocumentAgent,
         stop: threading.Event,
         observe: Callable[[AgentProgress], None] | None = None,
+        model: str | None = None,
     ) -> JSONResponse:
         try:
             outcome = await run_in_threadpool(
@@ -631,6 +663,7 @@ def create_app(  # noqa: PLR0915
                 },
                 "total_seconds": outcome.total_seconds,
                 "agent_profile": outcome.profile_fingerprint,
+                "model": model,
             }
             failed = outcome.status in {
                 "invalid_action",
@@ -653,10 +686,16 @@ def create_app(  # noqa: PLR0915
     async def investigate(payload: InvestigateRequest, request: Request) -> JSONResponse:
         if agent is None:
             return _error(503, "agent_unavailable", "Document investigation is not enabled.")
+        active_model = payload.model or default_model
+        active_agent = agent if payload.model is None else models.get(payload.model)
+        if active_agent is None:
+            return _error(422, "invalid_model", "The selected model is not available.")
         if not app.state.admission.try_acquire():
             return _error(429, "service_busy", "The service is at its concurrency limit.")
         stop = threading.Event()
-        work = asyncio.create_task(run_investigation(payload, agent, stop))
+        work = asyncio.create_task(
+            run_investigation(payload, active_agent, stop, model=active_model)
+        )
         pending_investigations.add(work)
         work.add_done_callback(pending_investigations.discard)
         try:
@@ -673,10 +712,16 @@ def create_app(  # noqa: PLR0915
     async def investigate_stream(payload: InvestigateRequest) -> StreamingResponse | JSONResponse:
         if agent is None:
             return _error(503, "agent_unavailable", "Document investigation is not enabled.")
+        active_model = payload.model or default_model
+        active_agent = agent if payload.model is None else models.get(payload.model)
+        if active_agent is None:
+            return _error(422, "invalid_model", "The selected model is not available.")
         if not app.state.admission.try_acquire():
             return _error(429, "service_busy", "The service is at its concurrency limit.")
         feed = ProgressFeed()
-        work = asyncio.create_task(run_investigation(payload, agent, feed.stop, feed.observe))
+        work = asyncio.create_task(
+            run_investigation(payload, active_agent, feed.stop, feed.observe, model=active_model)
+        )
         pending_investigations.add(work)
         work.add_done_callback(pending_investigations.discard)
         return feed.response(work)

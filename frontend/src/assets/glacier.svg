@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1100" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="ice" x2=".8" y2="1">
+      <stop stop-color="#f5fafb"/>
+      <stop offset=".55" stop-color="#b2d3e5"/>
+      <stop offset="1" stop-color="#76accd"/>
+    </linearGradient>
+    <linearGradient id="snow" x2="1" y2=".2">
+      <stop stop-color="#d4e5ed"/>
+      <stop offset=".55" stop-color="#f5fafb"/>
+      <stop offset="1" stop-color="#95c2da"/>
+    </linearGradient>
+  </defs>
+  <path d="M-200 1120C110 130 650 1130 1140 420S1650 150 1850 0V1200Z" fill="url(#ice)"/>
+  <path d="M-200 1130C260 500 720 1220 1220 700S1680 470 1850 430V1300Z" fill="url(#snow)"/>
+  <path d="M-200 1130C260 500 720 1220 1220 700S1680 470 1850 430" fill="none" stroke="#f6fcff" stroke-width="3"/>
+</svg>

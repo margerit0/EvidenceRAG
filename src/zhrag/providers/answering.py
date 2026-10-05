@@ -26,6 +26,7 @@ from zhrag.answering import GenerationError
 from zhrag.generation_control import GenerationInterrupted, remaining_seconds
 from zhrag.providers.chat import REASONING_EFFORTS, ChatClient, ChatConfig
 from zhrag.providers.http import MAX_RETRY_AFTER, RETRY_STATUS, Transport
+from zhrag.providers.model_identity import MODEL_IDENTITY_CONTRACT, model_names_match
 from zhrag.providers.streaming import STREAM_CONTRACT, STREAM_MAX_SECONDS, StreamingTransport
 
 __all__ = ["MAX_RESPONSE_BYTES", "ChatAnswerGenerator"]
@@ -200,6 +201,7 @@ def _profile_fingerprint(
             "contract": "zhrag-chat-answer-v2",
             "endpoint": config.endpoint,
             "model": config.model,
+            "model_identity_contract": MODEL_IDENTITY_CONTRACT,
             "max_output_tokens": max_output_tokens,
             "timeout_seconds": timeout_seconds,
             "reasoning_effort": reasoning_effort,
@@ -353,6 +355,6 @@ class ChatAnswerGenerator:
             code = "generation_timeout" if _is_timeout(exc) else "generation_failed"
             raise GenerationError(code) from None
 
-        if reply.model != self.config.model:
+        if not model_names_match(self.config.model, reply.model):
             raise GenerationError("generation_failed")
         return reply.content

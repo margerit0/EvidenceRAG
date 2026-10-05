@@ -58,12 +58,16 @@ export function Select({
   options,
   label,
   disabled,
+  displayValue,
+  side,
 }: {
   value: string;
   onChange: (value: string) => void;
   options: { value: string; label: string }[];
   label: string;
   disabled?: boolean;
+  displayValue?: string;
+  side?: 'top' | 'bottom';
 }) {
   const [open, setOpen] = React.useState(false);
   const [present, setPresent] = React.useState(false);
@@ -132,7 +136,7 @@ export function Select({
           }
         }}
       >
-        <SelectPrimitive.Value />
+        <SelectPrimitive.Value>{displayValue}</SelectPrimitive.Value>
         <SelectPrimitive.Icon>
           <ChevronDown size={14} className="select-chevron" />
         </SelectPrimitive.Icon>
@@ -142,6 +146,7 @@ export function Select({
           ref={content}
           forceMount={present ? true : undefined}
           position="popper"
+          side={side}
           sideOffset={6}
           collisionPadding={10}
           asChild

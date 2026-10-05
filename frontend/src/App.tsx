@@ -64,9 +64,7 @@ import {
 function Brand({ small = false }: { small?: boolean }) {
   return (
     <span className={`brand-mark ${small ? 'small' : ''}`} aria-label="zhRAG">
-      <span />
-      <span />
-      <span />
+      <Layers2 size={small ? 15 : 22} strokeWidth={1.7} />
     </span>
   );
 }
@@ -110,6 +108,13 @@ export default function App() {
     document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
   );
   const [mode, setMode] = useState('demo');
+  const [model, setModel] = useState(() => {
+    try {
+      return localStorage.getItem('zhrag-agent-model') ?? '';
+    } catch {
+      return '';
+    }
+  });
   const [scenario, setScenario] = useState<ScenarioId>('answered');
   const [query, setQuery] = useState<string>(scenarios[0].question);
   const [runs, setRuns] = useState<Run[]>([]);
@@ -124,6 +129,7 @@ export default function App() {
   const [connection, setConnection] = useState('idle');
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [answerEntering, setAnswerEntering] = useState(false);
   const [, setTick] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -131,6 +137,8 @@ export default function App() {
   const executionRef = useRef<HTMLElement>(null);
   const current = runs.find((run) => run.id === selectedRun);
   const busy = runs.some((run) => run.state === 'running');
+  const selectedModel = caps?.agent_models.find((option) => option.id === model);
+  const modelReady = !caps?.agent_models.length || !!selectedModel;
   const calls = invocations(current?.progress ?? []);
   const latest = calls.at(-1);
   const activeCall = current?.state === 'running' && latest?.end === undefined ? latest : undefined;
@@ -170,6 +178,14 @@ export default function App() {
   }, [theme]);
   useEffect(() => () => abortRef.current?.abort(), []);
   useEffect(() => {
+    if (!model) return;
+    try {
+      localStorage.setItem('zhrag-agent-model', model);
+    } catch {
+      /* Model selection still works without persistence. */
+    }
+  }, [model]);
+  useEffect(() => {
     if (!selectedCall && timelineRef.current)
       timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
   }, [current?.progress.length, selectedRun, selectedCall]);
@@ -184,7 +200,13 @@ export default function App() {
     setConnection('connecting');
     capabilities(abort.signal)
       .then((value) => {
+        if (abort.signal.aborted) return;
         setCaps(value);
+        setModel((previous) =>
+          value.agent_models.some((option) => option.id === previous)
+            ? previous
+            : (value.default_agent_model ?? value.agent_models[0]?.id ?? ''),
+        );
         setConnection(value.agent_enabled ? 'ready' : 'disabled');
       })
       .catch(() => {
@@ -199,7 +221,8 @@ export default function App() {
     setRuns((previous) => previous.map((run) => (run.id === id ? fn(run) : run)));
   }
   async function start() {
-    if (busy || !query.trim() || (mode === 'live' && connection !== 'ready')) return;
+    if (busy || !query.trim() || (mode === 'live' && (connection !== 'ready' || !modelReady)))
+      return;
     const id = crypto.randomUUID();
     const abort = new AbortController();
     abortRef.current = abort;
@@ -209,6 +232,8 @@ export default function App() {
       id,
       query: query.trim(),
       demo,
+      model: demo ? undefined : selectedModel?.id,
+      modelName: demo ? undefined : selectedModel?.name,
       started: Date.now(),
       state: 'running',
       progress: [],
@@ -219,6 +244,7 @@ export default function App() {
     setSelectedCall(undefined);
     setSourceId(undefined);
     setDetailTab('step');
+    setAnswerEntering(false);
     try {
       const receive = (event: Run['progress'][number]) => {
         if (!abort.signal.aborted)
@@ -226,8 +252,9 @@ export default function App() {
       };
       const result = demo
         ? await playDemo(scenario, id, abort.signal, receive)
-        : await investigate(run.query, streaming, abort.signal, receive);
+        : await investigate(run.query, streaming, abort.signal, receive, run.model);
       if (abort.signal.aborted) return;
+      setAnswerEntering(true);
       update(id, (row) => ({
         ...row,
         state: result.status,
@@ -281,6 +308,7 @@ export default function App() {
   }
   function fresh() {
     if (busy) return;
+    setAnswerEntering(false);
     setSelectedRun(undefined);
     setSelectedCall(undefined);
     setSourceId(undefined);
@@ -303,24 +331,30 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <TooltipProvider delayDuration={250}>
+        <div className="glacier-wallpaper" aria-hidden="true" />
         <div className="app-shell">
+          <header className="topbar">
+            <div className="wordmark">
+              <a href="/workbench/" className="brand-home" aria-label="zhRAG 工作台首页">
+                <Brand />
+                <span>zhRAG</span>
+              </a>
+              <span className="wordmark-divider" />
+              <span className="breadcrumb">
+                工作空间 <ChevronRight size={12} /> 文档调查
+              </span>
+            </div>
+            <div className="topbar-actions">
+              <span className="topbar-note">
+                <span className="tiny-dot" /> 本地工作空间
+              </span>
+              <Button variant="outline" aria-label="新调查" disabled={busy} onClick={fresh}>
+                <Plus size={15} /> 新调查
+              </Button>
+            </div>
+          </header>
           <aside className="rail" aria-label="工作台导航">
-            <a href="/workbench/" className="rail-brand" aria-label="zhRAG 工作台首页">
-              <Brand />
-            </a>
             <div className="rail-top">
-              <Tip label="新调查">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label="新调查"
-                  disabled={busy}
-                  onClick={fresh}
-                >
-                  <Plus size={20} />
-                </Button>
-              </Tip>
-              <span className="rail-separator" />
               <Tip label="文档调查">
                 <Button
                   variant="ghost"
@@ -357,7 +391,8 @@ export default function App() {
                           <span>
                             <span className="history-query">{run.query}</span>
                             <span className="history-meta">
-                              {timeLabel(run)} · {run.demo ? '模拟演示' : '服务运行'}
+                              {timeLabel(run)} ·{' '}
+                              {run.demo ? '模拟演示' : (run.modelName ?? '服务运行')}
                             </span>
                           </span>
                           <Status state={run.state} />
@@ -415,26 +450,12 @@ export default function App() {
             </div>
           </aside>
           <div className="workspace">
-            <header className="topbar">
-              <div className="wordmark">
-                zh<span>RAG</span>
-                <span className="wordmark-divider" />
-                <span className="breadcrumb">
-                  工作空间 <ChevronRight size={12} /> 文档调查
-                </span>
-              </div>
-              <span className="topbar-note">
-                <span className="tiny-dot" /> LOCAL WORKSPACE
-              </span>
-            </header>
             <main>
               <div className="page-heading">
                 <div>
-                  <div className="section-kicker">DOCUMENT INVESTIGATION</div>
-                  <h1>
-                    从问题出发，让证据说话<span className="title-period">.</span>
-                  </h1>
-                  <p>看见每一步调查，追溯每一个结论。</p>
+                  <div className="section-kicker">文档调查工作台</div>
+                  <h1>每一步，都看得见。</h1>
+                  <p>从一个问题开始，让答案与证据相连。</p>
                 </div>
                 <div className="mode-control">
                   <Select
@@ -519,7 +540,9 @@ export default function App() {
                         <div className="query-meta">
                           <span className="person-dot">你</span>
                           <span>{timeLabel(current)}</span>
-                          <span className="data-tag">{current.demo ? '模拟数据' : '本次运行'}</span>
+                          <span className="data-tag">
+                            {current.demo ? '模拟数据' : (current.modelName ?? '本次运行')}
+                          </span>
                         </div>
                         <h2 className="submitted-query">{current.query}</h2>
                         <div className="answer-heading">
@@ -537,6 +560,9 @@ export default function App() {
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0 }}
                             transition={{ duration: 0.16 }}
+                            onAnimationComplete={() => {
+                              if (current.result) setAnswerEntering(false);
+                            }}
                           >
                             {current.result?.blocks.length ? (
                               <div className="answer-body">
@@ -693,10 +719,32 @@ export default function App() {
                           }
                         }}
                       />
-                      <div className="composer-actions">
-                        <span className="input-hint">
+                      <div
+                        className={`composer-actions ${mode === 'live' && caps?.agent_models.length ? 'has-model' : ''}`}
+                      >
+                        <span className={`input-hint ${query.length > 1800 ? 'is-count' : ''}`}>
                           {query.length > 1800 ? `${query.length}/2000` : '⌘ / Ctrl + Enter'}
                         </span>
+                        {mode === 'live' && !!caps?.agent_models.length && (
+                          <div className="model-control">
+                            <Select
+                              label="调查模型"
+                              value={model}
+                              displayValue={
+                                selectedModel?.name === 'DeepSeek V4.1 Flash'
+                                  ? 'DeepSeek'
+                                  : selectedModel?.name
+                              }
+                              side="top"
+                              onChange={setModel}
+                              disabled={busy || answerEntering || connection !== 'ready'}
+                              options={caps.agent_models.map((option) => ({
+                                value: option.id,
+                                label: option.name,
+                              }))}
+                            />
+                          </div>
+                        )}
                         {busy ? (
                           <Button
                             variant="outline"
@@ -713,7 +761,10 @@ export default function App() {
                           <Button
                             type="submit"
                             size="sm"
-                            disabled={!query.trim() || (mode === 'live' && connection !== 'ready')}
+                            disabled={
+                              !query.trim() ||
+                              (mode === 'live' && (connection !== 'ready' || !modelReady))
+                            }
                           >
                             {mode === 'demo' ? '运行演示' : '开始调查'}
                             <ArrowUp size={14} />
@@ -724,7 +775,9 @@ export default function App() {
                     <p className="composer-note">
                       {mode === 'demo'
                         ? '按所选脚本演示交互，不分析输入问题。'
-                        : '发起后将使用已配置的模型与检索服务。'}
+                        : selectedModel
+                          ? `使用 ${selectedModel.name} 调查，切换仅对新运行生效。`
+                          : '发起后将使用已配置的模型与检索服务。'}
                     </p>
                   </form>
                 </section>
@@ -1086,6 +1139,12 @@ export default function App() {
                           <div className="section-kicker">RUN DETAILS</div>
                           <h2>本次运行</h2>
                           <dl className="detail-properties">
+                            {!current.demo && current.modelName && (
+                              <div>
+                                <dt>调查模型</dt>
+                                <dd>{current.modelName}</dd>
+                              </div>
+                            )}
                             <div>
                               <dt>数据来源</dt>
                               <dd>{current.demo ? '原创合成演示' : '已连接服务'}</dd>

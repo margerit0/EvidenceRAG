@@ -83,9 +83,19 @@ class TestChatAnswerGenerator:
         assert len(answerer.profile_fingerprint) == 64
         assert "secret-canary" not in answerer.profile_fingerprint
 
-    def test_rejects_served_model_drift_without_leaking_provider_data(self) -> None:
+    def test_accepts_model_case_variations_without_rewriting_request(self) -> None:
+        recorder = Recorder(body(model="MoDeL"))
+        assert generator(recorder).generate("system", "user") == '{"answerable":true}'
+        assert json.loads(recorder.requests[0].data or b"{}")["model"] == "model"
+
+    @pytest.mark.parametrize(
+        "served_model", ["other-model", "model-v2", "provider/model", " model", "model ", "mоdel"]
+    )
+    def test_rejects_served_model_drift_without_leaking_provider_data(
+        self, served_model: str
+    ) -> None:
         canary = "PRIVATE_PROVIDER_PAYLOAD"
-        recorder = Recorder(body(model="other-model", content=canary))
+        recorder = Recorder(body(model=served_model, content=canary))
         answerer = generator(recorder)
 
         with pytest.raises(GenerationError) as raised:
@@ -473,6 +483,15 @@ class TestLinearRetries:
         first = generator(Recorder(body()), max_retries=0)
         second = generator(Recorder(body()), max_retries=15)
         assert first.profile_fingerprint != second.profile_fingerprint
+
+    @pytest.mark.parametrize("stream", [False, True])
+    def test_model_identity_policy_changes_fingerprint(
+        self, monkeypatch: pytest.MonkeyPatch, stream: bool
+    ) -> None:
+        answerer = generator(Recorder(body()), stream=stream)
+        current = answerer.profile_fingerprint
+        monkeypatch.setattr("zhrag.providers.answering.MODEL_IDENTITY_CONTRACT", "exact-v1")
+        assert answerer.profile_fingerprint != current
 
     def test_transport_contract_changes_fingerprint_and_must_be_named(self) -> None:
         default = generator(Recorder(body()))

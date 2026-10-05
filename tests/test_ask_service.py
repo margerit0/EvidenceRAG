@@ -45,6 +45,8 @@ def test_disabled_ask_and_capabilities_do_not_retrieve() -> None:
         "agent_enabled": False,
         "agent_profile": None,
         "agent_streaming": False,
+        "agent_models": [],
+        "default_agent_model": None,
     }
     response = http.post("/api/ask", json={"query": "question"})
     assert response.status_code == 503

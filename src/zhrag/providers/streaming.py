@@ -15,8 +15,9 @@ from urllib.parse import urlsplit
 
 from zhrag.generation_control import remaining_seconds
 from zhrag.providers.direct import DirectTransport
+from zhrag.providers.model_identity import model_names_match
 
-STREAM_CONTRACT = "chat-sse-direct-v1"
+STREAM_CONTRACT = "chat-sse-direct-v2"
 STREAM_MAX_SECONDS = 600.0
 MAX_LINE_BYTES = 65_536
 
@@ -66,7 +67,7 @@ def _constant(_value: str) -> None:
 class StreamCollector:
     model: str
     parts: list[str] = field(default_factory=list)
-    model_seen: bool = False
+    served_model: str | None = None
     stopped: bool = False
     done: bool = False
     usage: dict[str, object] = field(default_factory=dict)
@@ -88,9 +89,10 @@ class StreamCollector:
         if obj.get("error") is not None:
             raise StreamProtocolError("error_event")
         if obj.get("model") is not None:
-            if obj["model"] != self.model:
+            if not model_names_match(self.model, obj["model"]):
                 raise StreamProtocolError("model")
-            self.model_seen = True
+            if self.served_model is None:
+                self.served_model = obj["model"]
         self._usage(obj.get("usage"))
         choices = obj.get("choices", [])
         if not isinstance(choices, list) or len(choices) > 1:
@@ -142,14 +144,14 @@ class StreamCollector:
             event["finish_reason"] = "stop"
 
     def response(self) -> bytes:
-        if not self.done or not self.stopped or not self.model_seen:
+        if not self.done or not self.stopped or self.served_model is None:
             raise StreamProtocolError("incomplete")
         content = "".join(self.parts)
         if not content.strip():
             raise StreamProtocolError("empty")
         return json.dumps(
             {
-                "model": self.model,
+                "model": self.served_model,
                 "usage": self.usage,
                 "choices": [{"finish_reason": "stop", "message": {"content": content}}],
             },

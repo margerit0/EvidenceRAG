@@ -36,6 +36,30 @@ def load_script() -> ModuleType:
 serve = load_script()
 
 
+def test_model_choices_are_explicit_and_keep_default_credentials(tmp_path: Path) -> None:
+    fake = FakeRetriever()
+    assert serve._build_agent_models(serve._parse_args([]), fake, index_identity="test") == {}
+    env = tmp_path / ".env"
+    write_text(
+        env, "LLM_API_KEY=synthetic\nLLM_BASE_URL=https://example.invalid\nLLM_MODEL_NAME=first\n"
+    )
+    args = serve._parse_args(
+        ["--enable-agent", "--env", str(env), "--agent-model", "second", "--agent-model", "second"]
+    )
+    choices = serve._build_agent_models(args, fake, index_identity="test")
+    assert list(choices) == ["first", "second"]
+    for name, agent in choices.items():
+        assert agent.generator.config.model == name
+        assert agent.generator.config.api_key == "synthetic"
+        assert agent.generator.config.base_url == "https://example.invalid"
+        assert agent.retriever is fake
+    assert choices["first"].profile_fingerprint != choices["second"].profile_fingerprint
+    with pytest.raises(ValueError, match="enable-agent"):
+        serve._build_agent_models(
+            serve._parse_args(["--agent-model", "second"]), fake, index_identity="test"
+        )
+
+
 def test_agent_composition_is_explicit_and_uses_no_chat_retries(tmp_path: Path) -> None:
     fake = FakeRetriever()
     assert serve._build_agent(serve._parse_args([]), fake, index_identity="test") is None

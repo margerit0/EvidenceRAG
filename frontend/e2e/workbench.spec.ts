@@ -12,8 +12,12 @@ test('desktop composition, dark theme persistence, and no horizontal overflow', 
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/workbench/');
-  await expect(page.getByRole('heading', { name: '从问题出发，让证据说话.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '每一步，都看得见。' })).toBeVisible();
   await expect(page.locator('.flow-node')).toHaveCount(4);
+  const lightNode = await page
+    .locator('.flow-node')
+    .first()
+    .evaluate((node) => getComputedStyle(node).backgroundColor);
   await page.screenshot({
     path: info.outputPath('light-desktop.png'),
     fullPage: true,
@@ -21,7 +25,7 @@ test('desktop composition, dark theme persistence, and no horizontal overflow', 
   });
   await page.getByRole('button', { name: '切换深色' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await expect(page.locator('.flow-node').first()).toHaveCSS('background-color', 'rgb(27, 33, 38)');
+  await expect(page.locator('.flow-node').first()).not.toHaveCSS('background-color', lightNode);
   await page.screenshot({
     path: info.outputPath('dark-desktop.png'),
     fullPage: true,

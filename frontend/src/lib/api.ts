@@ -50,21 +50,27 @@ export async function investigate(
   streaming: boolean,
   signal: AbortSignal,
   onProgress: (event: Progress) => void,
+  model?: string,
 ): Promise<Result> {
+  const checkedResult = (result: Result) => {
+    if (model && result.model !== model)
+      throw new ApiError('connection_lost', '服务返回的模型与所选模型不一致');
+    return result;
+  };
   const response = await fetch(`/api/investigate${streaming ? '/stream' : ''}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: streaming ? 'text/event-stream' : 'application/json',
     },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, ...(model ? { model } : {}) }),
     signal,
     cache: 'no-store',
   });
   if (!streaming || !response.ok) {
     const body = await response.json();
     const result = resultSchema.safeParse(body);
-    if (result.success) return result.data;
+    if (result.success) return checkedResult(result.data);
     throw new ApiError(
       typeof body.code === 'string' ? body.code : 'connection_lost',
       '服务未能完成请求',
@@ -100,7 +106,7 @@ export async function investigate(
             .parse(frame.data);
           if (runId && envelope.run_id !== runId)
             throw new ApiError('connection_lost', '结果编号不一致');
-          return envelope.response;
+          return checkedResult(envelope.response);
         } else if (frame.event === 'failure') {
           const error = frame.data as { code?: string };
           throw new ApiError(error.code ?? 'connection_lost', '执行连接异常结束');

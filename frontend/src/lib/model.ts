@@ -30,6 +30,7 @@ export const resultSchema = z.object({
   }),
   total_seconds: z.number(),
   agent_profile: z.string(),
+  model: z.string().nullable().optional(),
 });
 export const progressSchema = z.object({
   run_id: z.string(),
@@ -46,6 +47,8 @@ export const capabilitiesSchema = z.object({
   agent_enabled: z.boolean(),
   agent_profile: z.string().nullable(),
   agent_streaming: z.boolean().default(false),
+  agent_models: z.array(z.object({ id: z.string().min(1), name: z.string().min(1) })).default([]),
+  default_agent_model: z.string().nullable().default(null),
 });
 export type Result = z.infer<typeof resultSchema>;
 export type Source = z.infer<typeof sourceSchema>;
@@ -56,6 +59,8 @@ export type Run = {
   id: string;
   query: string;
   demo: boolean;
+  model?: string;
+  modelName?: string;
   started: number;
   state: string;
   progress: Progress[];
@@ -110,6 +115,7 @@ export const statusLabels: Record<string, string> = {
   connection_lost: '连接已中断',
   stream_overflow: '事件流已中断',
   agent_failed: '调查执行失败',
+  invalid_model: '所选模型不可用，请重新检查服务',
 };
 export function toneFor(status: string): 'neutral' | 'brand' | 'success' | 'warning' | 'danger' {
   if (status === 'answered' || status === 'ok' || status === 'completed') return 'success';

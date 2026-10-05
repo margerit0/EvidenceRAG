@@ -31,11 +31,14 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
           inert: boolean;
           open: boolean;
         }[] = [];
-        const start = performance.now();
+        // Start at the first painted frame. A cold browser/font load must not
+        // collapse all four scheduled interactions into consecutive frames.
+        let start: number | undefined;
         const turns = [40, 130, 220, 330];
         let turn = 0;
         await new Promise<void>((resolve) => {
           const frame = (now: number) => {
+            start ??= now;
             const t = now - start;
             if (turn < turns.length && t >= turns[turn]) {
               toggle.click();

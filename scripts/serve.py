@@ -142,6 +142,13 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="enable paid bounded document investigation; requires LLM_* configuration",
     )
     parser.add_argument("--agent-max-steps", type=int, default=10)
+    parser.add_argument(
+        "--agent-model",
+        dest="agent_models",
+        action="append",
+        default=[],
+        help="add a selectable chat model using the same LLM endpoint and key; repeatable",
+    )
     parser.add_argument("--agent-max-searches", type=int, default=3)
     parser.add_argument("--agent-max-seconds", type=float, default=180.0)
     parser.add_argument(
@@ -233,6 +240,7 @@ def _build_agent(
     retriever: OnlineRetriever,
     *,
     index_identity: str,
+    model: str | None = None,
 ) -> DocumentAgent | None:
     if not args.enable_agent:
         return None
@@ -269,7 +277,7 @@ def _build_agent(
     return DocumentAgent(
         retriever,
         ChatAnswerGenerator(
-            ChatConfig.from_env(load_env(args.env)),
+            ChatConfig.from_env(load_env(args.env), model=model),
             max_output_tokens=args.generation_max_tokens,
             timeout_seconds=min(args.generation_timeout, args.agent_max_seconds),
             reasoning_effort=args.generation_reasoning_effort,
@@ -284,6 +292,33 @@ def _build_agent(
         retrieval_identity=identity,
         settings=agent_settings,
     )
+
+
+def _check_agent_models_enabled(args: argparse.Namespace) -> None:
+    if args.agent_models and not args.enable_agent:
+        raise ValueError("agent-model requires enable-agent")
+
+
+def _build_agent_models(
+    args: argparse.Namespace, retriever: OnlineRetriever, *, index_identity: str
+) -> dict[str, DocumentAgent]:
+    _check_agent_models_enabled(args)
+    if not args.enable_agent:
+        return {}
+    _agent_settings(args)
+    from zhrag.providers.chat import ChatConfig  # noqa: PLC0415
+    from zhrag.providers.embedding import load_env  # noqa: PLC0415
+
+    config = ChatConfig.from_env(load_env(args.env))
+    models = dict.fromkeys([config.model, *args.agent_models])
+    if any(not name.strip() or name != name.strip() or len(name) > 120 for name in models):
+        raise ValueError("agent-model must be a nonempty model ID of at most 120 characters")
+    result = {}
+    for name in models:
+        agent = _build_agent(args, retriever, index_identity=index_identity, model=name)
+        assert agent is not None
+        result[name] = agent
+    return result
 
 
 def _load_published_artifacts(artifacts: Path) -> tuple[IngestState, SparseIndex]:
@@ -518,6 +553,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("generation is incompatible with query-cache")
         if args.enable_agent and args.query_cache is not None:
             raise ValueError("agent is incompatible with query-cache")
+        _check_agent_models_enabled(args)
         if args.enable_agent:
             _agent_settings(args)
         if not math.isfinite(args.generation_timeout) or not 0 < args.generation_timeout <= 300:
@@ -543,16 +579,18 @@ def main(argv: list[str] | None = None) -> int:
                 index=index,
                 store=store,
             )
+            models = _build_agent_models(
+                args,
+                retriever,
+                index_identity=f"{state.collection_name}:{state.sparse_fingerprint}",
+            )
             app = create_app(
                 retriever,
                 info=info,
                 max_concurrency=args.max_concurrency,
                 answerer=_build_answerer(args),
-                agent=_build_agent(
-                    args,
-                    retriever,
-                    index_identity=f"{state.collection_name}:{state.sparse_fingerprint}",
-                ),
+                agent=next(iter(models.values()), None),
+                agent_models=models,
                 published_index_identity=(f"{state.collection_name}:{state.sparse_fingerprint}"),
             )
             import uvicorn  # noqa: PLC0415 - optional service dependency

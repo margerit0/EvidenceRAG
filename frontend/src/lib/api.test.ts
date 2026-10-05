@@ -18,6 +18,34 @@ function mockStream(text: string) {
   return request;
 }
 describe('SSE transport', () => {
+  it.each([true, false])('sends and verifies the selected model (stream=%s)', async (stream) => {
+    const model = 'synthetic-b';
+    const result = { ...demoScript('answered', 'run').result, model };
+    const request = stream
+      ? mockStream(
+          `event: result\ndata: ${JSON.stringify({ run_id: 'run', response: result })}\n\n`,
+        )
+      : vi.fn().mockResolvedValue(Response.json(result));
+    if (!stream) vi.stubGlobal('fetch', request);
+    expect(await investigate('q', stream, new AbortController().signal, vi.fn(), model)).toEqual(
+      result,
+    );
+    expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({ query: 'q', model });
+  });
+  it.each([true, false])(
+    'rejects a result from a different selected model (stream=%s)',
+    async (stream) => {
+      const result = { ...demoScript('answered', 'run').result, model: 'synthetic-a' };
+      if (stream)
+        mockStream(
+          `event: result\ndata: ${JSON.stringify({ run_id: 'run', response: result })}\n\n`,
+        );
+      else vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(result)));
+      await expect(
+        investigate('q', stream, new AbortController().signal, vi.fn(), 'synthetic-b'),
+      ).rejects.toThrow('模型与所选模型不一致');
+    },
+  );
   it('decodes frames split across CRLF boundaries and ignores heartbeats', () => {
     const decoder = new SseDecoder();
     expect(decoder.push(': ping\r\n\r')).toEqual([]);
