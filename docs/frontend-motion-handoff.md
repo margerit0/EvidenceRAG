@@ -338,6 +338,31 @@ diff 空白检查通过。E2E 显式使用 `PLAYWRIGHT_BASE_URL=http://127.0.0.1
 - 新会话优先读取 [精简开发交接](frontend-next-session.md)，再核对分支和最新提交。
   下一开发目标尚未指定，用户需在新会话提供具体目标；无需重放整段聊天或粘贴密钥。
 
+## 品牌、README 与阶段收尾（2026-10-07）
+
+- 页面品牌、浏览器标题、关于弹窗、答案署名及无障碍标签统一使用 RAG，内部包名及
+  `zhrag-theme` / `zhrag-agent-model` 存储键保持原样。界面、动效和模型入口位置未改。
+- README 保留此前未提交的工作台介绍与快速开始补充，主图替换为用户提供的连接服务
+  空态图，并插入原创合成演示详情图及说明。两张 PNG 与用户附件 SHA-256 一致；旧 JPG
+  素材保留，README 不再引用。图片均不包含真实语料、引文、凭证或模型响应。
+- 上述内容提交为 `7bd01d3`。随后更新阶段交接与下一步计划，按用户要求快进合入
+  `main`，保留 `feat/frontend-design` 分支；本轮不推送远端或启动后续开发。
+- 完整 Python 门禁：`.venv/Scripts/python.exe -m pytest` 为 1,767 passed，
+  `-m ruff check src tests scripts`、`-m ruff format --check src tests scripts`、
+  `-m mypy` 均通过（173 个文件格式检查、63 个源文件类型检查）。pytest 仅有既存
+  Starlette/httpx 弃用提醒。
+- `frontend/` 下 `npm run test` 为 17 passed，`npm run build` 与
+  `npm run format:check` 通过。构建仅有既存上游 Zod 注释提醒。
+- 首次 `npm run test:e2e` 未识别已启动的本地 Vite 服务，尝试重复启动后因 5173 端口
+  占用退出，尚未执行测试。显式设置 `PLAYWRIGHT_BASE_URL=http://127.0.0.1:5173`、
+  `NO_PROXY=127.0.0.1,localhost,::1`（同时设置小写 `no_proxy`），并在沙箱外按前次
+  交接使用 `npm run test:e2e -- --workers=1`，完整 31 项通过，耗时约 2.7 分钟。
+  未修改测试、动效断言或运行中的服务。
+- 暂存路径白名单、相对 main 的新增文本常见凭证模式扫描、图片引用和 diff 空白检查
+  通过。本次门禁为本机 Windows 验证；远端 CI 未触发，不写成双平台已通过。
+- 下一步顺序与验收写入 [精简开发交接](frontend-next-session.md)：先整理可复现演示，
+  再接续离线审核报告与失败回放。以上待办尚未实施，无新增付费模型调用。
+
 ## 视觉阶段的范围边界
 
 本轮聚焦图与右侧检查器的视觉和动效，不重做整站，不更换框架，不修改后端、Agent
