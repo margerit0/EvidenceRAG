@@ -4,12 +4,28 @@
 
 **默认返回检索证据；显式启用问答后，可根据证据生成带引用的答案。** 引用可以跳转到本次选入的段落；格式或引用不合法时不发布答案，证据不足时返回拒答。
 
-[检索流程](#检索流程) · [实测效果](#实测效果) · [关键取舍](#关键取舍) · [核心工程](#核心工程) · [快速开始](#快速开始) · [详细评估](docs/evaluation.md)
+[调查工作台](#调查工作台) · [检索流程](#检索流程) · [实测效果](#实测效果) · [关键取舍](#关键取舍) · [核心工程](#核心工程) · [快速开始](#快速开始) · [详细评估](docs/evaluation.md)
 
 **实验性文档调查**：在现有检索之上增加受限工具动作、补充搜索、追问、执行预算和调查记录。
 可显式启用 `/api/investigate`；实现与离线控制逻辑已验证，真实模型任务效果仍待评测。
 运行方式和单轮 RAG / 固定流程 / Agent 对照入口见[文档调查说明](docs/agent.md)，
 阶段进度见[迭代计划](docs/agent-iteration.md)。
+
+## 调查工作台
+
+在工作台中提出问题，可以查看每次搜索、读取资料和生成答案的进展。点击答案中的引用，即可在右侧对照原文；同一步骤执行多次时，也能逐次查看记录，了解系统补充了哪些资料、在哪一步中断。
+
+![连接服务后的调查工作台：左侧输入问题与选择模型，中间展示执行流程，右侧为检查器](docs/images/workbench-connected.png)
+
+*连接服务后的工作台：在发送问题前选择调查模型，执行过程中可查看搜索、读取与回答的进展。*
+
+界面支持浅色与深色主题。连接已配置的后端服务后，可在输入框右下角、发送按钮左侧选择 DeepSeek 或 GLM；选择作用于下一次调查，历史记录保留当次使用的模型。
+
+![调查效果详情：左侧展示带引用的答案，中间展示执行流程与时间线，右侧查看单次调用记录](docs/images/workbench-investigation-detail.png)
+
+*模拟演示完成后的详情：答案引用、执行时间线与单次调用记录相互关联，可逐次回看调查过程。图中使用原创合成数据，无 API 调用。*
+
+无需密钥即可[体验模拟演示](#体验调查工作台)。真实连接与模型配置见[工作台说明](docs/frontend.md)。
 
 ## 检索流程
 
@@ -151,6 +167,7 @@ TiDB 文档没有上游人工标注。980 条问题由模型按主题分层抽�
 | 接口解耦 | Python Protocol 隔离模型和存储，Milvus Lite 已验证；TiDB 适配器仍待真实实例验证 |
 | HTTP 与追踪 | `/api/search` 保留独立检索；`/api/ask` 返回答案与引用，分别记录检索和生成耗时 |
 | 问答边界 | 完整段落上下文预算、结构化引用校验、拒答与故障分离；答案不自动落盘 |
+| 调查工作台 | 展示逐次搜索与读取记录，点击答案引用对照原文；支持模型选择和模拟演示 |
 | 质量门禁 | pytest、ruff、严格类型检查；GitHub Actions 配置 Ubuntu / Windows 双系统测试 |
 
 <details>
@@ -165,6 +182,7 @@ TiDB 文档没有上游人工标注。980 条问题由模型按主题分层抽�
 | `src/zhrag/providers/` | HTTP 传输（显式 UA、长退避、Retry-After）、embedding / rerank / chat 客户端、断点续跑缓存与 provenance sidecar | `http.py`、`embedding.py`、`rerank.py`、`chat.py`、`cache.py` |
 | `src/zhrag/answering.py` | 单轮证据问答：上下文预算、结构化引用校验、拒答与故障分离 | 合同见 [docs/answering.md](docs/answering.md) |
 | `src/zhrag/service/` | FastAPI 应用、脱敏 trace 合同、HTTP 基准 | `app.py`、`observability.py`、`bench.py`、`static/index.html` |
+| `frontend/` | React 调查工作台：执行流程、调用记录、引用阅读与模型选择 | 使用方式见 [docs/frontend.md](docs/frontend.md) |
 | `src/zhrag/eval/` | 指标（R@k / MRR / nDCG / bootstrap CI / 精确 McNemar / Holm）、CRUD-RAG 语料重建、TiDB 合成评测集生成、pooling、qrels 与质量报告 | `metrics.py`、`crud.py`、`qgen.py`、`pool.py`、`tidb_quality.py` |
 | `src/zhrag/ingest.py` | manifest 校验、内容哈希变更检测、文档级增量 | — |
 | `src/zhrag/io_utils.py`、`tokens.py` | 唯一的 UTF-8 文件出入口；按 Qwen3 tokenizer 标定的 token 估算 | — |
@@ -181,7 +199,18 @@ p95 表示约 95% 请求不超过该耗时。这是本机基准，不是公网�
 
 ## 快速开始
 
-需要 Python 3.13 和 [uv](https://docs.astral.sh/uv/)。以下命令均在仓库根目录运行。
+以下命令均在仓库根目录运行。模拟演示需要 Node.js 22.12+ 和 npm；后端服务与 Python 测试需要 Python 3.13 和 [uv](https://docs.astral.sh/uv/)。
+
+### 体验调查工作台
+
+```bash
+npm --prefix frontend ci
+npm --prefix frontend run dev
+```
+
+打开 [调查工作台](http://127.0.0.1:5173/workbench/)，点击“运行演示”。默认按预设场景展示调查过程，不调用模型，不需要密钥、语料或后端服务。
+
+连接自己的服务、配置调查模型和生产构建的步骤见[工作台说明](docs/frontend.md)。
 
 ### 运行测试
 
@@ -235,6 +264,7 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
 
 | 内容 | 入口 |
 |---|---|
+| 调查工作台、模拟演示与模型配置 | [工作台说明](docs/frontend.md) |
 | 完整实验表格、统计方法与复现命令 | [评估文档](docs/evaluation.md) |
 | 技术选型、路线图与待验证清单 | [架构决策](docs/architecture-decision.md) |
 | 数据来源、下载方式与许可边界 | [数据说明](DATA_LICENSE.md) |

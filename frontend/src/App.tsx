@@ -63,7 +63,7 @@ import {
 
 function Brand({ small = false }: { small?: boolean }) {
   return (
-    <span className={`brand-mark ${small ? 'small' : ''}`} aria-label="zhRAG">
+    <span className={`brand-mark ${small ? 'small' : ''}`} aria-label="RAG">
       <Layers2 size={small ? 15 : 22} strokeWidth={1.7} />
     </span>
   );
@@ -335,9 +335,9 @@ export default function App() {
         <div className="app-shell">
           <header className="topbar">
             <div className="wordmark">
-              <a href="/workbench/" className="brand-home" aria-label="zhRAG 工作台首页">
+              <a href="/workbench/" className="brand-home" aria-label="RAG 工作台首页">
                 <Brand />
-                <span>zhRAG</span>
+                <span>RAG</span>
               </a>
               <span className="wordmark-divider" />
               <span className="breadcrumb">
@@ -418,7 +418,7 @@ export default function App() {
               </Tip>
               <Dialog
                 title="让每一步调查，都有据可查"
-                description="zhRAG · 中文文档调查工作台"
+                description="RAG · 中文文档调查工作台"
                 trigger={
                   <Button variant="ghost" size="icon" aria-label="关于工作台">
                     <CircleHelp size={19} />
@@ -547,7 +547,7 @@ export default function App() {
                         <h2 className="submitted-query">{current.query}</h2>
                         <div className="answer-heading">
                           <Brand small />
-                          <span>zhRAG</span>
+                          <span>RAG</span>
                           <span className="answer-heading-line" />
                         </div>
                         <div className="answer-status" aria-live="polite">
@@ -1223,7 +1223,7 @@ export default function App() {
                 <span>
                   {mode === 'demo' ? 'DEMO / SYNTHETIC DATA' : 'LOCAL / CONNECTED SERVICE'}
                   <span className="footer-divider" />
-                  zhRAG Workbench
+                  RAG Workbench
                 </span>
               </footer>
             </main>
