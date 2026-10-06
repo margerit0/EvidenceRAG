@@ -15,9 +15,11 @@
 
 > **在线问答增补（2026-09-07）**：新增显式启用的 `/api/ask` 单轮证据问答，包含完整段落预算、结构化引用校验、拒答/故障分离和问答界面。详见 [问答合同](answering.md)。下文“HTTP 无生成阶段”的历史描述仅适用于原 `/api/search` 与已认证 M8 profile；M11 trace 仍仅覆盖检索子阶段，生成耗时单独返回。当前合成回归已验证功能合同，并完成小规模真实问答冒烟；观察到生成失败与引用支持不完整，尚无答案准确率或端到端性能基准；M9b known-context 评测状态不因此改变。
 
+> **调查工作台与交接更新（2026-10-07）**：受限文档调查、请求级 SSE 进度、React 工作台与服务端模型选择已实现。冰川流线、RAG 品牌、浅深主题和响应式交互已验收；生产预览与三条原创合成演示路径已复验，录制由用户自行完成。旧工作树的三个待判定文件已核对，无需迁移产品代码。当前状态见 §13；设计与接口见 [工作台说明](frontend.md)，演示入口见 [演示指南](workbench-demo.md)，分支证据见 [同步结论](branch-sync-handoff.md)。真实调查冒烟、独立质量验收、M9b 实验与公网部署分别记录，不相互替代。
+
 > **M9a 状态（2026-08-31）**：生成指标合同、RAGQuestEval answer-scoring 语义、aggregate-only Table 8 证据和独立同步器已完成；本阶段没有生成真实答案，也没有付费调用。M9b 才会在本地 gitignored 目录中运行 QG/QA/生成实验。
 
-**当前在线路径：窄 Protocol + 显式组合根；Milvus Lite；Qwen3-Embedding-8B dense-4096 + 客户端 char-bigram BM25 稀疏向量；客户端 exact RRF；Qwen3-Reranker-8B 请求 top-100 分数、应用前 top-50。可选 `/api/ask` 在检索后生成带引用的单轮答案。MRL 降维为独立离线实验，Standalone/Zilliz 公网部署和 TiDB Cloud 真机验证仍属于后续工作。检索评估与生成验证分开报告，默认 CI 使用合成数据且不调用付费模型。**
+**当前在线路径：窄 Protocol + 显式组合根；Milvus Lite；Qwen3-Embedding-8B dense-4096 + 客户端 char-bigram BM25 稀疏向量；客户端 exact RRF；Qwen3-Reranker-8B 请求 top-100 分数、应用前 top-50。可选 `/api/ask` 在检索后生成带引用的单轮答案；显式启用的 `/api/investigate` 与 `/api/investigate/stream` 在同一检索器上进行受限调查，React `/workbench/` 展示执行过程与引用。MRL 降维为独立离线实验，Standalone/Zilliz 公网部署和 TiDB Cloud 真机验证仍属于后续工作。检索评估与生成验证分开报告，默认 CI 使用合成数据且不调用付费模型。**
 
 ---
 
@@ -29,16 +31,16 @@
 | **检索框架** | **自研薄层**：窄 Protocol、frozen settings 与显式组合根 | 当前检索步骤固定，依赖注入足以隔离编码器、存储和重排器，便于单独测试 | 只有出现真实的编排需求时才引入框架；新增适配层需验证是否改变检索或评估合同 |
 | **embedding** | **Qwen/Qwen3-Embedding-8B** @ One Hub relay；本地保留 4096 维缓存，部署候选为 MRL 1024 维 | 已实测 4096→1024 的 R@1 仅 −0.50pp、Holm p=0.684，存储降 75%；中转站行为与 SiliconFlow 不能混用 | Qwen3-Embedding-4B。改选条件：有可用 endpoint 后，在相同语料与 query 上做配对检验，而不是引用 C-MTEB 的跨模型点估计 |
 | **rerank** | **Qwen/Qwen3-Reranker-8B** @ One Hub relay，传 `instruction`，部署窗口候选 **top-50** | 已在冻结的 dense-4096 hybrid 上完成 top-50/100 分层消融：arity=1 `hit@1` +6.06pp（Holm p=0.0003），arity=3 `ALL@10` +7.15pp（p=1.32e−09）；top-100 未显著优于 top-50 | 4B 对照取消：当前中转站不提供。若换 provider，必须新建独立 fingerprint/cache，不能与现有 8B 分数混用 |
-| **LLM（生成）** | 由 `LLM_*` 配置注入 OpenAI-compatible chat；真实冒烟模型为 `gpt-5.6-sol` | 严格校验返回模型、答案结构和引用编号，默认不启用生成；已观察到供应商错误和引用支持不完整 | 更换模型需单独验证；生成质量和含模型调用的延迟不能引用检索基准代替 |
+| **LLM（生成）** | 由 `LLM_*` 配置注入 OpenAI-compatible chat；调查可用 `--agent-model` 提供服务端白名单，本机已验证 DeepSeek / GLM 各一次完整调查 | 每次请求固定模型、不自动回退；模型身份仅忽略 ASCII 大小写，版本与命名空间仍严格区分；结构、引用及传输完整性持续校验 | 单次链路与引用核验不证明模型质量或稳定性；生成与调查均需显式启用，延迟不能引用检索基准代替 |
 | **LLM（评判）** | 当前 TiDB pooled qrels：与 QG 相同的 `gpt-5.6-sol`、`reasoning_effort=high`；未来生成侧对比实验仍要求独立 judge | 本轮可用配置只有同一请求模型，因此报告明确写 **self-agreement / synthetic labels**，不冒充独立复核；若要提升标签可信度，应在冻结 pool 上补不同模型复判或人工校准 | DeepSeek-V3 类或 Kimi 等非生成模型；切换后必须新建 provenance/cache，不与现有判断混用 |
 | **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,832，p50 371，p90 734，欠长块 5.0%，代码块破损 0；M7 已完成 256/400/800 source-level known-item sweep | 400 保留为 canonical reference；M7 两个相对 400 的主终点比较经 Holm 均未显著，不能声称 400 全局最优、等价或无损 |
 | **检索管线** | dense-4096（COSINE）+ sparse（char-bigram BM25，**IP**）两臂检索 → 客户端 exact RRF → 客户端 Qwen3-Reranker-8B 重排 top-50（请求窗口 top-100） | 三段式，每段可单独消融；top-50 由 top-100 未检出额外收益的实测决定 | **WeightedRanker 是必测项而非备选**：离线实测等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），加权 0.3/0.7 才显著（16 胜 4 负，p=0.047）。反过来 `RRFRanker` 的 **k 几乎不影响结果**（60→10 只动 0.1pp），不值得占消融表一列。Qdrant 的 dbsf 仍可作对照 |
 | **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | Milvus 内置 `chinese` analyzer 就是 jieba，且默认 `mode="search"` = `cut_for_search`——正是你实测最差的 73.4%，比 char bigram 的 75.9% 低 2.5 分。**开服务端分词器会让系统变差**。另外可绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的坑 | 无（这是本项目最有说服力的设计决策之一） |
-| **服务层** | FastAPI + 线程池中的同步 provider 调用；urllib transport 与独立生成重试策略 | 共享有限并发 admission，固定错误分类，检索和生成耗时分开报告 | 超时不是整个请求的严格墙钟上限，长重试不构成在线可用性保证 |
-| **前端** | FastAPI 挂一个单文件静态 HTML（检索框 + 结果卡片 + 命中 chunk 高亮 + 各阶段耗时条） | 界面优先展示**阶段耗时**和**检索证据**，便于检查系统行为 | Gradio / Streamlit（若你想 5 分钟部署到 HF Space）。改选条件：你决定公网 demo 放 HF Space 而非 Zilliz |
+| **服务层** | FastAPI + 线程池中的同步 provider 调用；在线生成使用直连传输与独立重试策略；调查另提供请求级 SSE 进度接口 | 多模型共享检索器与有限并发 admission，错误脱敏；进度观察不进入模型输入，供应商流式与网页 SSE 独立 | 取消为合作式，阻塞调用仍受自身 timeout 约束；不承诺即时停止计费、严格墙钟截止或断线恢复 |
+| **前端** | React + TypeScript + Vite；React Flow 流程图、Radix 交互组件与 Motion 动效；构建后由 FastAPI 挂载 `/workbench/`，原 `/` 静态页保留 | 用户选择 React 后，以逐次调用、证据阅读和异常终态支撑调查检查；默认原创合成演示可独立生产预览，无需后端与密钥 | 保持现有冰川流线和模型入口，不扩展为通用工作流编辑器；持久会话、跨会话历史和公网部署另行设计 |
 | **评估** | 检索侧：**已建成**（R@k / MRR / nDCG / ALL-gold / bootstrap CI / paired bootstrap）。生成侧：**M9a 已冻结独立指标合同**（逐样本 BLEU/ROUGE-L、可选真实 BERTScore、RAGQuestEval 评分语义），真实生成实验留给 M9b | 不安装或移植无授权的 CRUD_RAG 代码；Table 8 只保留 aggregate-only 来源证据 | RAGAS 只作为「我知道这个框架」的一行说明。**不要当主力**：最后一次 commit 2026-02-24，559 open issues，而竞品当天都在发版 |
 | **可观测性** | **provider-free retrieval trace contract**：默认 no-op sink，测试用 in-memory sink；可选 sink 只接收脱敏 span lifecycle、profile fingerprint、候选/输出计数与八阶段耗时 | 不把 Phoenix/OTEL 运行时或外部 UI 当作已验证交付；HTTP 检索 trace 不覆盖生成，生成状态固定为 `not_evaluated` | Phoenix / OpenTelemetry 可作为后续 exporter，但必须单独验证部署、许可与数据边界 |
-| **工程化/CI** | GitHub Actions：`ubuntu-latest`（全量快子集）+ `windows-latest`（**故意不设 PYTHONUTF8/PYTHONIOENCODING**）；ruff（含 PLW1514 禁裸 `open()`）+ mypy + pytest | Linux runner 是 UTF-8，会掩盖你本机 cp936 的裸 `open()` 崩溃；双系统 CI 验证不同默认编码下的行为 | — |
+| **工程化/CI** | Python：GitHub Actions ubuntu + windows 双 leg（**故意不设 PYTHONUTF8/PYTHONIOENCODING**），ruff + mypy + pytest；前端：独立 ubuntu job，Prettier、Vitest、TypeScript/Vite 构建与 Playwright Chromium | 双系统 Python 验证不同默认编码；前端浏览器回归使用原创合成场景和拦截的 API，不调用真实模型 | 本地 Chrome 验证与 CI Chromium 分别记录，不把本地通过写成远端 CI 已通过 |
 
 ---
 
@@ -341,7 +343,8 @@ uv run python scripts/run_crud_generation.py --dry-run
 
 ## 7. 里程碑路线图（业余时间，1 天 ≈ 3 小时有效工时）
 
-已建成：`io_utils.py`、`tokens.py`、`lexical/{analyzers,bm25}.py`、`chunking/markdown.py`、`eval/metrics.py` + 4 个测试文件（~559 行）。
+M0–M12 保留原检索与评估路线图及各阶段认证口径。后续增加的文档调查与 React 工作台见
+本节末尾和 §13；其功能验证不会改变既有 M8/M9 的性能与质量结论。
 
 | # | 里程碑 | 天 | 交付物（artifact） | 数字（number） |
 |---|---|---|---|---|
@@ -366,10 +369,10 @@ uv run python scripts/run_crud_generation.py --dry-run
 | **M9** | **生成侧评估（M9a ✅ / M9b1 编排合同 ✅；真实实验待授权）** | **2.0** | **M9a**：`eval/metrics_gen.py`、`eval/quest_eval.py`、合成测试、aggregate-only Table 8 evidence、独立文档同步；**M9b1**：纯内存合同、离线优先 CLI、QG/QA/生成 stage DAG（event_summary / questanswer_1doc）与 text-free finalizer | M9b1 已冻结 cache/provenance/privacy 合同；真实 provider 实验与结果数字不在本阶段发布 |
 <!-- END M9B-GENERATION-ROADMAP -->
 | **M10** | **TiDB 第二后端：离线合同已实现 / live smoke 待外部实例** | **1.0** | ✅ `store/tidb.py`：原生 VECTOR/HNSW dense、精确 sparse postings、alias registry 与合成合同测试；✅ README「为什么 TiDB 的文档没有跑在 TiDB 上」；⏳ TiDB Cloud schema/index、`EXPLAIN annIndex`、两臂排序、round-trip、publish/reconnect 真机验证 | 只有 live smoke 通过后才声称同一份 Protocol 双后端跑通 |
-| **M11** | **检索可观测性 + Bad Case 归因 ✅ 2026-09-02** | **1.0** | ✅ 脱敏 trace start/end 合同与 FastAPI 生命周期接入；✅ 离线认证 frozen TiDB runs/qrels 并发布 aggregate-only `bad_case_report.json`；不依赖 provider/Phoenix/OTEL。运维 trace 只保留脱敏计数、耗时与 fingerprint，不含 query 或文档内容 | 按系统汇总 recall failure / ranking failure / success；HTTP 无生成阶段，generation 固定 `not_evaluated` |
-| **M12** | 公网部署 + README 定稿 | **1.0** | Zilliz Cloud Free 集群 + 公网 demo 链接；README 首屏定稿 | 端到端在线可点 |
+| **M11** | **检索可观测性 + Bad Case 归因 ✅ 2026-09-02** | **1.0** | ✅ 脱敏 trace start/end 合同与 FastAPI 生命周期接入；✅ 离线认证 frozen TiDB runs/qrels 并发布 aggregate-only `bad_case_report.json`；不依赖 provider/Phoenix/OTEL。运维 trace 只保留脱敏计数、耗时与 fingerprint，不含 query 或文档内容 | 按系统汇总 recall failure / ranking failure / success；该检索 trace 不覆盖生成，generation 固定 `not_evaluated` |
+| **M12** | 公网部署待完成；README 工作台介绍已更新 | **1.0** | 待验证 Zilliz Cloud Free 集群与公网 demo；现有 README 提供本地合成演示入口 | 本地生产预览已验证，公网端到端访问仍待验证 |
 
-> M11 已完成 provider-free retrieval/ranking 可观测性与离线 aggregate-only 归因；不声称 Phoenix/OTEL UI 或公网部署已验证。报告数字只从 gitignored `indexes/tidb/eval/bad_case_report.json` 读取，未经专用同步器认证不写入 README。generation=`not_evaluated`（当前 HTTP 服务没有 generation stage）。
+> M11 已完成 provider-free retrieval/ranking 可观测性与离线 aggregate-only 归因；不声称 Phoenix/OTEL UI 或公网部署已验证。报告数字只从 gitignored `indexes/tidb/eval/bad_case_report.json` 读取，未经专用同步器认证不写入 README。generation=`not_evaluated` 仅限定该检索 trace；后续问答与调查接口的生成状态另行返回。
 
 <!-- BEGIN M8-STATUS -->
 > M8 在线 pipeline、FastAPI/静态前端与 HTTP benchmark 已完成。当前认证 headline 只绑定 `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`：p95 **228.3 ms** / **4.97 QPS**；provider-included 与 cache-backed profile 必须分表，不能混成一个性能数字。
@@ -383,6 +386,20 @@ uv run python scripts/run_crud_generation.py --dry-run
 
 **M0 优先完成**：可重复执行的测试、持续集成和数据许可说明是后续实验与发布的基础。
 
+### 后续扩展：受限调查与工作台
+
+调查复用现有检索器，以白名单动作执行搜索、读取、追问和回答，按预算终止；固定流程图
+用于观察执行，不是可编辑的工作流。`/api/investigate` 保留完整 JSON 响应，新增 SSE 接口
+以独立进度事件支持前端展示，不改变模型输入。网页进度流不要求供应商开启流式生成。
+
+React 替代早期“只做单文件前端”的范围选择，原静态页继续提供检索、问答与调查入口。
+主题和模型偏好可本地保存，问答和运行历史只在页面内存中；凭证、索引和模型地址留在服务端。
+生产预览可独立播放合成场景，真实调查仍依赖已配置的后端。
+
+当前界面与演示交付已完成，录制由用户负责。下一步是复用既有审核器补齐通用离线报告，
+随后建立失败回放；具体验收与顺序见 [精简交接](frontend-next-session.md)，不重做已完成的
+v2 任务审核，不自动扩大真实模型评测。
+
 ---
 
 ## 8. 仓库结构
@@ -390,14 +407,17 @@ uv run python scripts/run_crud_generation.py --dry-run
 ```
 zhrag/
 ├── .github/workflows/
-│   ├── ci.yml                      # ubuntu + windows（windows leg 不设 PYTHONUTF8）
-│   └── eval-nightly.yml            # LLM-judge 指标，仅 nightly / 手动触发
-├── README.md                       # 首屏：一句话定位 → 500/2000/5681 饱和表 → 3 行 quickstart → 诚实局限
+│   └── ci.yml                      # Python 双系统 + 前端构建/单测/浏览器回归
+├── README.md                       # 工作台入口、架构概览、认证结果与快速开始
 ├── DATA_LICENSE.md                 # 两个上游 + pinned commit 26f202bc + CC BY-SA 3.0 URI + CRUD-RAG 引用
 ├── pyproject.toml
 ├── src/zhrag/
 │   ├── io_utils.py                 # ✅ 已建成（UTF-8 端口）
 │   ├── tokens.py                   # ✅ 已建成（中英双分量估算）
+│   ├── answering.py                # ✅ 单轮证据问答与引用校验
+│   ├── agent.py                    # ✅ 受限文档调查、工具白名单与预算
+│   ├── agent_planning.py           # ✅ 可选需求规划与覆盖门禁
+│   ├── agent_answer_review.py      # ✅ 可选答案复核合同
 │   ├── lexical/
 │   │   ├── analyzers.py            # ✅ char_ngram / jieba_words / union
 │   │   ├── bm25.py                 # ✅ Okapi BM25，可插拔 analyzer
@@ -417,9 +437,15 @@ zhrag/
 │   │   ├── embedding.py            # ✅ embedding prompt / 批缓存 / provenance sidecar
 │   │   ├── rerank.py               # ✅ Qwen3 rerank 请求与严格响应校验
 │   │   ├── chat.py                 # ✅ LLM chat completion 与严格响应校验
+│   │   ├── answering.py            # ✅ 在线生成、重试与配置指纹
+│   │   ├── direct.py               # ✅ 直连传输，不自动重定向
+│   │   ├── streaming.py            # ✅ 可选供应商 SSE 与完整性校验
+│   │   ├── model_identity.py       # ✅ 仅忽略 ASCII 大小写的模型身份合同
 │   │   └── cache.py                # ✅ gitignored 配对分数缓存 + provenance sidecar
 │   ├── eval/
 │   │   ├── metrics.py              # ✅ R@k / MRR / nDCG / ALL-gold / bootstrap
+│   │   ├── agent_review.py         # ✅ 既有离线审核与证据校验
+│   │   ├── agent_comparison.py     # ✅ 调查与基线的配对比较合同
 │   │   ├── retrieval.py            # ✅ BM25/dense run 与共享逐查询指标
 │   │   ├── rerank.py               # ✅ 窗口语义 / 指纹 / 配对检验族
 │   │   ├── tidb_quality.py         # ✅ pair-aware TiDB 指标 / CI / bootstrap-Holm / 分层
@@ -430,15 +456,26 @@ zhrag/
 │   │   └── tidb_bad_cases.py       # ✅ M11 aggregate-only retrieval attribution
 │   ├── service/
 │   │   ├── app.py                  # ✅ FastAPI
+│   │   ├── agent_stream.py         # ✅ 请求级 SSE 进度、队列与合作取消
 │   │   ├── observability.py        # ✅ provider-free 脱敏 trace contract
 │   │   └── static/index.html       # ✅ 单文件静态前端 + 阶段耗时条
 │   └── ingest.py                   # ✅ 幂等：path 稳定键、sha256 变更检测、文档级 delta
+├── frontend/
+│   ├── src/App.tsx                 # ✅ React 调查工作台与模型选择
+│   ├── src/lib/demo.ts             # ✅ 原创合成演示，无 API 调用
+│   ├── src/glacier.css             # ✅ 冰川流线与浅深主题
+│   ├── e2e/                       # ✅ 合成场景与接口的浏览器回归
+│   └── package.json               # ✅ 构建、开发与独立生产预览命令
 ├── docs/
 │   ├── evidence/
 │   │   └── crud_rag_table8_v3.json # ✅ 仅含 Table 8 aggregate-only 历史证据
-│   ├── why-not-tidb.md             # 「为什么 TiDB 的文档没有跑在 TiDB 上」
-│   ├── why-not-pgvector.md         # 4096 > 4000 的 96 维之差
-│   └── bad-cases.md                # 归因表
+│   ├── evaluation.md               # ✅ 详细评估与证据边界
+│   ├── agent.md                    # ✅ 调查接口与离线运行合同
+│   ├── agent-iteration.md          # ✅ Agent 迭代与历史决策
+│   ├── frontend.md                 # ✅ 前端架构与接口
+│   ├── frontend-next-session.md    # ✅ 当前交接与后续顺序
+│   ├── workbench-demo.md           # ✅ 生产预览与手动演示指南
+│   └── branch-sync-handoff.md      # ✅ 旧工作树审查依据
 ├── scripts/                        # 评测、构建、服务与文档同步脚本
 │   ├── corpus_stats.py             # ✅
 │   ├── compare_dense_bm25.py       # ✅ dense/BM25/RRF 与 arity 分层
@@ -446,6 +483,8 @@ zhrag/
 │   ├── evaluate_tidb_retrieval.py  # ✅ 冻结 runs/qrels 的 pair-aware 离线质量报告
 │   ├── build_index.py              # ✅ manifest → chunk → index 发布
 │   ├── bench.py                    # ✅ p50/p95/p99 + QPS
+│   ├── review_agent.py             # ✅ 既有离线审核入口
+│   ├── compare_agent.py            # ✅ 基线与调查对照运行
 │   ├── sync_m9a_docs.py            # ✅ aggregate-only 证据与生成指标合同同步
 │   ├── run_crud_generation.py      # ✅ M9b1 known-context 生成/QG/QA/semantic 编排
 │   ├── sync_m9b_docs.py            # ✅ M9b1 合同状态与路线图同步
@@ -503,7 +542,7 @@ zhrag/
 | **不提交任何语料字节（含「小样本」）** | CRUD_RAG **根本没有 LICENSE 文件**（Apache badge 只是 README 里的 shields.io 图片，GitHub API 报 `license: None`），8 万篇新闻无出处无授权声明；TiDB 文档是 CC BY-SA 3.0，你的 chunk 输出属于 Adaptation |
 | **不用 Docker（本阶段）** | 本机没装；Milvus Lite 纯 Python；M11 只交付 provider-free trace contract 与离线归因，不把 Phoenix UI 作为已验证依赖。真需要 Standalone 时进 WSL2 |
 | **不做多租户 / RBAC / 审计** | 没有任何编排框架白送这些，它们来自数据库和应用层；且 Dify 的许可证明确禁止未授权的多租户运营 |
-| **不做移动端 / 复杂前端** | 优先展示阶段耗时和检索证据，控制前端维护成本 |
+| **不做原生移动应用、通用工作流编辑器或持久多轮会话** | 已交付响应式 React 工作台及窄屏阅读交互；继续聚焦调查、逐次调用与证据检查，跨会话存储和可编辑编排不在本版范围 |
 
 ---
 
@@ -571,6 +610,17 @@ zhrag/
 ---
 
 ## 13. 验证事项清单
+
+**工作台与后续离线工程（2026-10-07）**
+
+- [x] **受限调查与网页进度合同。** `/api/investigate` 与 `/api/investigate/stream` 已实现，覆盖白名单工具、证据读取、追问、预算与合作取消；网页 SSE 与供应商流式开关独立。规划和答案复核为各自默认关闭的可选能力，功能回归不替代完整链路的真实质量验收。见 [调查合同](agent.md)。
+- [x] **React 工作台与调查模型选择。** 冰川流线、RAG 品牌、浅深主题、响应式检查器、引用阅读、逐次调用导航和动效已完成。输入框右下角、发送按钮左侧的 DeepSeek / GLM 入口选择下一次调查模型；服务端白名单、共享并发、每次模型固定和 ASCII 模型身份合同均已验证。阶段交付与完整门禁见 [前端交接](frontend-next-session.md#验证与产物)。
+- [x] **可复现合成演示与生产预览。** [演示指南](workbench-demo.md)已进入 README；本机 TypeScript/Vite 构建与生产预览上的完整调查、需要补充信息、证据不足三条既有浏览器回归通过。演示不依赖后端、密钥或本地索引；按脚本播放，不证明模型效果。
+- [x] **旧工作树差异审查。** 基于本地 `main` / `9278053` 在 `codex/branch-sync-review` 完成三个旧文件的语义核对：有效能力已覆盖或被后续合同替代，无需迁移。旧工作树、HEAD 与未提交修改保留；证据见 [同步结论](branch-sync-handoff.md)，后续新修改需重新核对。
+- [ ] **手动短录屏（用户负责）。** 操作步骤已提供，用户明确自行录制；不由开发代理启动录制任务或安装录制组件，也不把视频记为已交付。
+- [ ] **离线审核与报告正式化。** 复用 `scripts/review_agent.py`、`eval/agent_review.py` 及既有本地报告器，只补通用认证与报告缺口；保持多来源统计合同，单来源仅作描述性报告。验收要求完全离线重算、缺档/指纹漂移失败、旧文件和评分不变，不重做已完成的 v2 任务审核。
+- [ ] **离线失败回放。** 复用已保存的最终响应与原创合成 SSE，分别回放解析、协议和预算失败；缺少正文或请求状态时标为不可回放，摘要漂移可检测，新结果使用独立目录。通用入口仍待交付。
+- [ ] **调查质量、稳定性与完整可选链路的系统验收。** DeepSeek 与 GLM 各一次真实调查及引用核验已完成，但不足以证明模型优劣、稳定性或规划/答案复核的全链路效果。新付费评测与公网发布另行安排；详细证据和下一步顺序见 [精简交接](frontend-next-session.md)。
 
 **🔴 阻塞级（做别的之前先做）**
 
