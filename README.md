@@ -1,13 +1,13 @@
 # EvidenceRAG：中文技术文档检索与问答
 
-用自然语言查找 TiDB 中文技术文档，返回相关段落、来源和检索耗时。结合**关键词检索、语义检索和模型重排**，并用可复现的实验检验效果。
+用自然语言查找 TiDB 中文技术文档，返回相关段落和来源；也可启用带引用的单轮问答，或让调查模型多次搜索、读取资料后回答。检索结合**关键词、语义和模型重排**，效果由可复现的实验检验。
 
-**默认返回检索证据；显式启用问答后，可根据证据生成带引用的答案。** 引用可以跳转到本次选入的段落；格式或引用不合法时不发布答案，证据不足时返回拒答。
+**后端默认只启用检索，问答与文档调查需分别开启；工作台默认提供无 API 调用的合成演示。** 真实回答的引用可定位到本次证据，格式或引用不合法时不发布答案。
 
-[调查工作台](#调查工作台) · [检索流程](#检索流程) · [实测效果](#实测效果) · [关键取舍](#关键取舍) · [核心工程](#核心工程) · [快速开始](#快速开始) · [详细评估](docs/evaluation.md)
+[调查工作台](#调查工作台) · [调查与检索流程](#调查与检索流程) · [实测效果](#实测效果) · [关键取舍](#关键取舍) · [核心工程](#核心工程) · [快速开始](#快速开始) · [详细评估](docs/evaluation.md)
 
 **实验性文档调查**：在现有检索之上增加受限工具动作、补充搜索、追问、执行预算和调查记录。
-可显式启用 `/api/investigate`；实现与离线控制逻辑已验证，真实模型任务效果仍待评测。
+提供 `/api/investigate` 与实时进度接口 `/api/investigate/stream`。已有真实链路与引用核验记录，系统质量和稳定性仍待评测；模拟演示不代表模型效果。
 运行方式和单轮 RAG / 固定流程 / Agent 对照入口见[文档调查说明](docs/agent.md)，
 阶段进度见[迭代计划](docs/agent-iteration.md)。
 
@@ -27,33 +27,72 @@
 
 无需密钥即可[体验模拟演示](#体验调查工作台)；[演示指南](docs/workbench-demo.md)提供生产预览与三条路径的操作步骤。真实连接与模型配置见[工作台说明](docs/frontend.md)。
 
-## 检索流程
+## 调查与检索流程
 
-技术文档中，命令和参数名需要精确匹配，同一个问题又可能有不同说法。系统分别按关键词和含义查找，再合并候选，用重排模型判断哪些段落更相关。
+### 文档调查：搜索、读取，再决定下一步
+
+连接服务后，工作台将问题和选定的模型交给后端。一次调查固定使用该模型；模型提出动作，程序验证后执行。搜索先返回候选编号与摘要，只有读取过的完整段落才能作为答案引用。
 
 ```mermaid
 flowchart LR
-    Q([用户提问]) --> D[语义检索<br/>按含义查找]
+    Q([问题与调查模型]) --> D{决定下一步}
+    D -->|搜索| S[搜索或补充搜索<br/>返回候选编号与摘要]
+    S --> D
+    D -->|读取候选| E[读取完整段落<br/>加入本次证据]
+    E --> D
+    D -->|提出答案| V[校验答案格式与引用]
+    V -->|通过| A([返回带引用的答案])
+    D -->|关键信息不全| C([追问补充信息])
+    D -->|证据仍不足| N([结束并说明证据不足])
+    V -->|不通过| X([结束并报告原因])
+    D -.->|预算耗尽、取消或故障终止| X
+
+    classDef input fill:#eff6ff,stroke:#2563eb,color:#172554
+    classDef tool fill:#ecfdf5,stroke:#059669,color:#064e3b
+    classDef answer fill:#f0fdfa,stroke:#0f766e,color:#134e4a
+    classDef waiting fill:#fffbeb,stroke:#d97706,color:#78350f
+    classDef stopped fill:#fff1f2,stroke:#be123c,color:#881337
+    class Q,D input
+    class S,E tool
+    class V,A answer
+    class C,N waiting
+    class X stopped
+```
+
+工作台通过 SSE 展示执行进度，最终呈现答案、追问或终止原因；网页进度流与供应商是否流式生成无关。补充信息需与原问题一起发起新调查，当前不保存多轮会话。
+
+图中展示基本调查流程。需求规划和答案复核是独立、默认关闭的可选能力，见[调查合同](docs/agent.md)。格式和引用校验通过不代表结论已通过独立质量验收；预算与取消在调用边界检查，不保证立即停止正在进行的模型调用。
+
+### 共用检索流程
+
+技术文档中，命令和参数名需要精确匹配，同一个问题又可能有不同说法。系统分别按关键词和含义查找，再合并候选，用重排模型判断哪些段落更相关。独立检索、单轮问答和调查中的每次搜索都复用这条路径。
+
+```mermaid
+flowchart LR
+    Q([一次检索请求]) --> D[语义检索<br/>按含义查找]
     Q --> K[关键词检索<br/>匹配命令与参数]
     D --> F[合并结果<br/>综合两路排名]
     K --> F
     F --> R[模型重排<br/>相关段落优先]
-    R --> O([返回证据段落<br/>附来源与耗时])
-    O -->|启用问答| A[按证据生成<br/>校验引用后返回答案]
+    R --> O([返回候选段落<br/>附来源与耗时])
 
     classDef input fill:#eff6ff,stroke:#2563eb,color:#172554
     classDef search fill:#ecfdf5,stroke:#059669,color:#064e3b
     classDef rank fill:#fffbeb,stroke:#d97706,color:#78350f
     classDef output fill:#f0fdfa,stroke:#0f766e,color:#134e4a
-    classDef answer fill:#eff6ff,stroke:#2563eb,color:#172554
     class Q input
     class D,K search
     class F,R rank
     class O output
-    class A answer
 ```
 
 知识库来自本地下载的 TiDB 文档，提前完成分块与索引；查询时只检索相关段落，不把整套文档交给模型。图中两条检索分支表示不同信号，当前实现按顺序执行。
+
+| 使用方式 | 接口 | 检索之后 |
+|---|---|---|
+| 独立检索 | `/api/search` | 返回段落、来源和耗时 |
+| 单轮问答 | `/api/ask` | 在上下文预算内选入完整段落，生成并校验带引用答案；证据不足时拒答 |
+| 文档调查 | `/api/investigate`、`/api/investigate/stream` | 先查看候选摘要，再按需读取完整段落；可补充搜索、追问或结束，过程受预算约束 |
 
 ## 实测效果
 
@@ -165,10 +204,11 @@ TiDB 文档没有上游人工标注。980 条问题由模型按主题分层抽�
 | 增量与缓存 | 内容哈希识别变化，复用未变化的文档向量；模型结果缓存可断点续跑 |
 | 索引发布 | 先构建新版本、校验后切换别名；词表与索引状态校验不一致时拒绝启动 |
 | 接口解耦 | Python Protocol 隔离模型和存储，Milvus Lite 已验证；TiDB 适配器仍待真实实例验证 |
-| HTTP 与追踪 | `/api/search` 保留独立检索；`/api/ask` 返回答案与引用，分别记录检索和生成耗时 |
+| HTTP 与进度 | 独立检索、单轮问答与文档调查各有接口；调查提供 SSE 动作进度，检索 trace 与生成耗时分别记录 |
 | 问答边界 | 完整段落上下文预算、结构化引用校验、拒答与故障分离；答案不自动落盘 |
+| 受限调查 | 搜索与读取动作经过白名单验证；每次请求固定模型，支持追问、补充检索、预算与合作取消 |
 | 调查工作台 | 展示逐次搜索与读取记录，点击答案引用对照原文；支持模型选择和模拟演示 |
-| 质量门禁 | pytest、ruff、严格类型检查；GitHub Actions 配置 Ubuntu / Windows 双系统测试 |
+| 质量门禁 | Python 使用 pytest、ruff、严格类型检查及 Ubuntu / Windows 双系统 CI；前端使用单测、构建与合成浏览器回归 |
 
 <details>
 <summary>模块地图：想看某一层的代码从哪里进</summary>
@@ -179,9 +219,10 @@ TiDB 文档没有上游人工标注。980 条问题由模型按主题分层抽�
 | `src/zhrag/lexical/` | 字符 n-gram 分析器、Okapi BM25、客户端稀疏向量 | `analyzers.py`、`bm25.py`、`sparse.py` |
 | `src/zhrag/retrieval/` | RRF 融合、在线编排（两路各 100 → 本地融合 → 请求 100 / 应用 50 的重排）、Protocol 接缝 | `fusion.py`、`online.py`、`adapters.py` |
 | `src/zhrag/store/` | 与厂商无关的 VectorStore Protocol；Milvus 与 TiDB 两个惰性导入的适配器 | `base.py`、`milvus.py`、`tidb.py` |
-| `src/zhrag/providers/` | HTTP 传输（显式 UA、长退避、Retry-After）、embedding / rerank / chat 客户端、断点续跑缓存与 provenance sidecar | `http.py`、`embedding.py`、`rerank.py`、`chat.py`、`cache.py` |
+| `src/zhrag/providers/` | embedding / rerank / chat 客户端、缓存与 provenance；在线生成另有直连传输、可选流式、独立重试和模型身份校验 | `http.py`、`cache.py`、`answering.py`、`direct.py`、`streaming.py`、`model_identity.py` |
 | `src/zhrag/answering.py` | 单轮证据问答：上下文预算、结构化引用校验、拒答与故障分离 | 合同见 [docs/answering.md](docs/answering.md) |
-| `src/zhrag/service/` | FastAPI 应用、脱敏 trace 合同、HTTP 基准 | `app.py`、`observability.py`、`bench.py`、`static/index.html` |
+| `src/zhrag/agent.py` | 受限调查循环、证据读取与执行预算；可选需求规划、覆盖门禁和答案复核 | `agent_planning.py`、`agent_answer_review.py`；合同见 [docs/agent.md](docs/agent.md) |
+| `src/zhrag/service/` | FastAPI 应用、调查 SSE、脱敏检索 trace 合同、HTTP 基准 | `app.py`、`agent_stream.py`、`observability.py`、`bench.py`、`static/index.html` |
 | `frontend/` | React 调查工作台：执行流程、调用记录、引用阅读与模型选择 | 使用方式见 [docs/frontend.md](docs/frontend.md) |
 | `src/zhrag/eval/` | 指标（R@k / MRR / nDCG / bootstrap CI / 精确 McNemar / Holm）、CRUD-RAG 语料重建、TiDB 合成评测集生成、pooling、qrels 与质量报告 | `metrics.py`、`crud.py`、`qgen.py`、`pool.py`、`tidb_quality.py` |
 | `src/zhrag/ingest.py` | manifest 校验、内容哈希变更检测、文档级增量 | — |
