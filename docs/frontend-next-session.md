@@ -28,6 +28,10 @@
 
 ## 下一步计划
 
+新会话若要先同步各分支，先读 [分支同步盘点](branch-sync-handoff.md)。旧工作树中
+有三个文件尚需判断是否包含主线缺失改动；其余已核对一致的内容不重复迁移。
+先完成该盘点中的差异审查，再按以下顺序继续开发。
+
 1. **先完成可复现演示交付。** 建议分支 `codex/workbench-demo-guide`。复用现有
    `answered`、`clarification_needed`、`insufficient_evidence` 合成场景及已通过的
    浏览器回归，整理“完整调查、需要补充信息、证据不足”的演示步骤和短录屏。
