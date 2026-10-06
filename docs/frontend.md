@@ -23,11 +23,16 @@ npm run dev
 打开 `http://127.0.0.1:5173/workbench/`。Vite 将 `/api` 转发到
 `http://127.0.0.1:8000`。先选“模拟演示”即可使用，不需要凭证、语料、Milvus 或后端。
 
-生产构建：
+生产构建与独立本地预览（无需后端）：
 
 ```powershell
 npm run build
+npm run preview -- --port 4173 --strictPort
 ```
+
+打开 `http://127.0.0.1:4173/workbench/`，保持“模拟演示”模式即可运行仓库内的合成场景。
+预览仅用于本地检查构建结果；三条路径的操作与预期状态见
+[演示指南](workbench-demo.md)。短录屏由用户自行完成。
 
 从源码仓库启动现有 FastAPI 服务后，自动在 `/workbench/` 挂载 `frontend/dist`。
 原 `/` 静态页面保留。构建目录未提交；部署应先构建，再启动后端。
