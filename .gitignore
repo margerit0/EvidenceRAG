@@ -81,6 +81,7 @@ results/qa_cache*
 
 # React workbench
 node_modules/
+frontend/.vite/
 frontend/test-results/
 frontend/playwright-report/
 *.tsbuildinfo
