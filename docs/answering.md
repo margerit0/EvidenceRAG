@@ -46,12 +46,20 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
 |---|---:|---|
 | `--context-passages` | 6 | 最多选入的完整证据段落 |
 | `--context-tokens` | 12000 | 含 system、问题和包装的估算 prompt 预算 |
-| `--generation-max-tokens` | 2048 | `max_completion_tokens`，上限 8192 |
-| `--generation-timeout` | 60 | 每次生成尝试的 urllib I/O 超时秒数，上限 300 |
+| `--generation-max-tokens` | 2048 | `max_completion_tokens`，上限 8192；与无上限选项互斥 |
+| `--generation-no-token-limit` | 关闭 | 不发送 `max_completion_tokens` 或 `max_tokens`；仍受超时、响应大小和答案校验约束 |
+| `--generation-timeout` | 60 | 每次生成尝试的传输 I/O 超时秒数，上限 300；不是整个请求的墙钟截止时间 |
+| `--generation-stream` | 关闭 | 通过供应商 SSE 接收并组装完整响应，再交给答案校验；不会向 `/api/ask` 客户端逐 token 输出 |
 | `--generation-retries` | 15 | 首次失败后的重试次数，范围 0..15；0 表示仅尝试一次 |
 | `--generation-reasoning-effort` | 不发送 | 可选 minimal / low / medium / high |
 
 响应体最多 256 KiB。`max_completion_tokens` 对部分模型还包含 reasoning token；输出截断会报失败，不把不完整内容当答案。端点不支持参数时不自动降级。
+
+`scripts/serve.py` 的非流式组合根使用 `DirectTransport`，开启流式时使用供应商 SSE 传输；
+两条路径均绕过环境代理，并把传输合同纳入配置指纹。流式还限制事件行与线缆总字节数，
+只有完整结束且模型身份有效的响应才会继续处理；它与调查工作台的进度 SSE 是两层独立能力。
+模型身份通过 `model_names_match` 比较，仅忽略 ASCII 大小写；命名空间、版本、空格及其他字符
+仍须匹配。该身份合同同样进入指纹。
 
 估算器按 Qwen3 中英文比例标定，不是任意 chat 模型的精确 tokenizer。核心另外约束 prompt 字符数和 UTF-8 字节数；按排名尝试完整段落，过大段落跳过，不截断代码块。使用最终检索结果中的完整文本，不使用 HTTP 展示截断文本。
 

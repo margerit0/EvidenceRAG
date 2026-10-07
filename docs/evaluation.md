@@ -201,7 +201,7 @@ R@1 按任务分层（不可跨行比较），ALL-gold@10 汇总（任意 arity 
 | jieba + char bigram | 393,862 | **76.4%** | 35.6% | 22.8% | 85.3% | 8.9s | 15.4ms |
 
 字符 bigram 胜过两种 jieba 模式，建索引快 3.8 倍，且**零依赖**。
-并集方案在 1doc 上多 0.5pp，但汇总的 ALL@10 反而略低（85.3% vs 85.4%）—— 这 0.5pp 要靠翻倍的词表和一个 2020 年后再未发版的依赖来换。→ **jieba 被移出主依赖**（仅作为可选 extra 保留对照行）。
+并集方案在 1doc 上多 0.5pp，但汇总的 ALL@10 反而略低（85.3% vs 85.4%）；词表从 351,779 增至 393,862，约增加 12%，还引入一个 2020 年后再未发版的依赖。这些是描述性点估计，未做词法方案间的配对显著性检验。**jieba 被移出主依赖**（仅作为可选 extra 保留对照行）。
 
 > **分层汇报立刻还了债。** 只看 1doc 的 R@1，char unigram 与 bigram 相差 1.7pp，看起来无关紧要；换成汇总的 ALL-gold@10，差距是 **7.9pp**。单证据任务把 analyzer 之间的差异压缩了约 4 倍 —— 只在 1doc 上做选型，会让人以为分词方案根本不重要。
 
@@ -421,26 +421,27 @@ Qwen3 的技术报告没有发布任何维度-质量曲线（arXiv v3 全文里 
 | 128 | 77.0% [74.1%, 79.9%] | 0.853 | −1.00pp | 0.521 | 2.9 MB |
 | **64** | 73.8% [70.8%, 76.9%] | 0.833 | **−4.25pp** | **0.001†** ✱ | 1.5 MB |
 
-**只有 64 维显著变差。128 维往上全部不可区分。**
+**本轮仅检出 64 维相对 4096 维显著退化；其余维度未检出显著退化。** 这不证明等价，也不证明对较小效应有足够功效。
 
 > 两处 p 值的读法，都是统计层审计的产物：
 > **`†` 表示蒙特卡洛分辨率，而不是 `<` 上界。** 64 维那格的原始 add-one 估计触到
 > 10,000 次重采样的地板（`1/(10001)` ≈ 1.0e−04；0/10,000 个零分布样本达到观测值），
 > 经 6 项 Holm 校正后显示为 0.001†。这一轮只能说估计停在地板；**不能据此证明真实尾概率
-> 小于该值**。要提高分辨率需增加重采样次数；这里的 R@1 在不同维度间并非二元配对结局，不能
-> 像单证据系统间 hit/miss 比较那样直接换成 McNemar。
+> 小于该值**。这 800 条 `questanswer_1doc` 查询均只有一个 gold，因此 R@1 是二元配对结局，
+> 也可采用精确 McNemar。历史脚本 `probe_mrl_quality.py` 实际使用的是上述单尾配对 bootstrap；
+> 本表保留该方法与原结果，不能换用另一种检验后沿用原 p 值。增加重采样只提高蒙特卡洛分辨率，
+> 不会增加独立查询数量。
 > **2048 / 1024 / 512 三行的 0.684 也不是三个相同的发现**：Holm 强制校正后的 p 单调不减，
 > 于是 −0.50pp 的回退和 +0.37pp 的改进被压到同一个数上。方向看 delta 列，不要看 p 列。
 
 三点必须一起读，否则容易过度解读：
 
-1. **检验是有分辨力的。** 它抓到了 64 维（Holm p=0.001†），所以「128–2048 不显著」不是检验太钝。
-2. **512 维比 4096 高 0.37pp —— 这是噪声，而且是有用的噪声。** 曲线非单调（256 的 76.6%
-   低于 128 的 77.0%）本身就说明这一段全落在测量误差内。n=800、R@1≈78% 时标准误约 1.46pp。
-3. **机制不是「MRL 前置聚集」。** 跨文档逐维方差首尾比 **1.047**，是平的 —— 信息并没有按下标
-   排序。更可能的解释是向量内在维度远低于 4096，前缀截断近似随机投影；Johnson–Lindenstrauss
-   在 n=5,681 时给出约 200 维的保距下界，与实测「128–256 是拐点」吻合。
-   **报告行为，不宣称机制。**
+1. **功效取决于效应大小。** 检出 64 维较大的退化，不证明能可靠检出 1024 维较小的退化。
+2. **512 维比 4096 高 0.37pp 是本次点估计。** 曲线非单调本身不能证明差异全是噪声；
+   应结合配对差值区间和检验解释，不把单个系统的标准误当作配对差值的标准误。
+3. **方差探针不能确定机制。** 跨文档逐维方差首尾比 **1.047**，没有呈现明显前置方差集中；
+   这不等于判别信息均匀，也不能证明前缀截断是随机投影。Johnson–Lindenstrauss 界还依赖
+   失真容限与投影假设，不能仅从文档数推出本实验的保距维数。报告观察到的质量曲线，机制留待验证。
 
 <details>
 <summary>饱和第二次咬人：同一配置，语料一扩，效应量增大 1.6 倍并跨过显著线</summary>
@@ -851,10 +852,11 @@ UnicodeDecodeError: 'gbk' codec can't decode byte 0xad in position 9
 
 ```bash
 uv venv --python 3.13
-uv pip install -e ".[dev]"
+uv pip install -e ".[dev,service]"
 
 uv run pytest          # 单元测试
 uv run ruff check src tests scripts  # 含 PLW1514：禁止裸 open()
+uv run ruff format --check src tests scripts
 uv run mypy            # strict
 ```
 
@@ -875,8 +877,9 @@ uv run python scripts/corpus_stats.py
 uv run python scripts/power_analysis.py
 ```
 
-以上四步**不需要 API key**，也不下载任何东西 —— 全部六个 CRUD 任务本来就在你已有的
-`raw/split_merged.json` 里。输出目录 `crud-rag-subset/eval-expanded/` 是派生数据，已 gitignore。
+安装依赖后，以上四个脚本**不需要 API key，也不联网下载语料**；安装 jieba 本身可能联网。
+CRUD 输入须已下载到 `raw/split_merged.json`，语料统计还要求本地 TiDB 文档。
+输出目录 `crud-rag-subset/eval-expanded/` 是派生数据，已 gitignore。
 
 向量部分需要一个 OpenAI 兼容的嵌入端点，在 `.env` 里配置
 `Embedding_BASE_URL` / `Embedding_API_KEY` / `Embedding_MODEL_NAME`：
@@ -945,6 +948,56 @@ uv run python scripts/sync_h_hybrid_mrl1024_docs.py --check
 
 ## 缓存演示与文档同步
 
+### 消融摘要的离线重算
+
+`sync_ablation_docs.py` 将以下同一聚合区块写入本页和根 README，替代旧手抄摘要。
+它复用检索和 MRL 的原始排名合同、重排缓存的候选/文本指纹校验，以及 M7 的完整确定性认证。
+输入必须已在本地：CRUD manifest、corpus、qrels、两份带 sidecar 的完整 embedding cache、
+完整 top-100 rerank cache，以及 TiDB M7 的 canonical/profile 缓存、numeric samples 和 report。
+不读取 `.env`，不实例化供应商客户端；缺档、混入额外评分或认证不符即失败，不补调用。
+原始缓存和历史详细表不改写；新摘要补充配对差值区间，并明确原任务与实际 gold 数分层的区别。
+词法实验无配对统计支持，因此保留在对应章节作描述性比较。
+
+```bash
+uv run python scripts/sync_ablation_docs.py
+uv run python scripts/sync_ablation_docs.py --check
+```
+
+两次执行都会重算并认证，`--check` 只比较，不改文档；共享仓库根 `.docs.lock` 与既有产物锁。
+摘要中的 CI 固定使用 10,000 次重采样、基准 seed=0；TiDB 沿用现有来源簇报告的派生种子。
+历史详细报告保留各自的重采样设置，末位可能不同；例如旧 dense 对 BM25 区间使用更多重采样，
+不将新摘要末位的变化解释为模型质量变化。
+同步只发布聚合数值，不将问句、证据、候选编号、模型响应或向量写入仓库。
+
+本机本轮长时独立重算已用 Python 3.13.5 和原项目依赖验证。旧 `.venv` 的 Python 3.13.3
+曾在复验中发生解释器级 `Executing a cache` 崩溃；遇到该错误时应更换 Python 补丁版本后
+复验，不能跳过认证或改写缓存来消除报错。详细过程见[修正记录](documentation-consistency.md)。
+
+<!-- BEGIN ABLATION-SUMMARY -->
+由 `scripts/sync_ablation_docs.py` 从完整本地缓存离线重算；差值均为前者减后者。
+CRUD 使用 5,681 篇文档；原单证据任务为 800 条，重排按实际 gold 数对全部 2,394 条分层。
+TiDB 分块是独立的 source-level known-item 实验，不与 CRUD 文档级结果混合。
+
+| 比较 | 指标与范围 | 差值 | 配对 95% 置信区间 | p 值 | 检验口径 |
+|---|---|---:|---:|---:|---|
+| 语义检索 vs 关键词检索 | R@1（原单证据任务） | +2.12pp | [-1.00, +5.25]pp | 0.1986 | 双尾精确 McNemar；原始 p |
+| 两路融合 vs 关键词检索 | R@1（原单证据任务） | +4.00pp | [+1.62, +6.50]pp | 0.0016 | 双尾精确 McNemar；探索性原始 p |
+| 融合 + 重排前 50 vs 仅融合 | hit@1（实际 1 个 gold） | +6.06pp | [+3.34, +8.78]pp | 0.0003 | 双尾精确 McNemar；效益十二项 Holm |
+| 重排前 100 vs 前 50（arity=1） | hit@1（实际 1 个 gold） | +0.00pp | [+0.00, +0.00]pp | 1.0000 | 双尾精确 McNemar；深度六项 Holm |
+| 重排前 100 vs 前 50（arity=2） | hit@1（实际 2 个 gold） | +0.00pp | [+0.00, +0.00]pp | 1.0000 | 双尾精确 McNemar；深度六项 Holm |
+| 重排前 100 vs 前 50（arity=3） | hit@1（实际 3 个 gold） | +0.00pp | [+0.00, +0.00]pp | 1.0000 | 双尾精确 McNemar；深度六项 Holm |
+| 向量 1024 维 vs 4096 维 | R@1（原单证据任务） | -0.50pp | [-1.62, +0.62]pp | 0.6839 | 单尾配对 bootstrap；六项 Holm |
+| 向量 64 维 vs 4096 维 | R@1（原单证据任务） | -4.25pp | [-6.38, -2.00]pp | 0.0006† | 单尾配对 bootstrap；六项 Holm |
+| TiDB 分块 tidb-chunk-t256-h384-v1-vs-tidb-chunk-t400-h600-v1 | origin-source MRR@10 | +0.0080 | [-0.0049, +0.0206] | 0.2239 | 双尾来源簇配对 bootstrap；两项 Holm |
+| TiDB 分块 tidb-chunk-t800-h1200-v1-vs-tidb-chunk-t400-h600-v1 | origin-source MRR@10 | -0.0125 | [-0.0262, +0.0009] | 0.1406 | 双尾来源簇配对 bootstrap；两项 Holm |
+
+差值区间使用 10,000 次重采样、seed=0；TiDB 按来源簇重采样，其余按查询配对。
+MRL 保留历史的单尾退化检验及完整六项比较族；R@1 在这组单证据任务上仍是二元指标。
+† 表示 Holm 结果继承蒙特卡洛分辨率下限。未检出差异不证明等价或对小效应有足够功效。
+融合对 BM25 的历史比较来自同批数据上的融合选型，原始 p 未校正该选择，按探索性结果解释。
+词法 analyzer 只保留描述性比较；其原始表、重排完整族和历史报告见详细评估文档。
+<!-- END ABLATION-SUMMARY -->
+
 已完成 TiDB 评估构建、持有匹配的 query fixture 和 embedding cache 时，可启动限定查询的无模型调用服务：
 
 ```bash
@@ -962,6 +1015,7 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
 | `sync_tidb_eval_docs.py` | `TIDB-EVAL-SUMMARY` | TiDB 状态、质量与配对检验 |
 | `sync_m8_docs.py` | `M8-README-HEADLINE` | HTTP 性能表与测量边界 |
 | `sync_quality_gate_docs.py` | `QUALITY-GATE-STATUS` | 不写本页 |
+| `sync_ablation_docs.py` | `ABLATION-SUMMARY` | 同一消融摘要及统计边界 |
 | `sync_h_hybrid_mrl1024_docs.py` | 不写首页 | H 基线 |
 | `sync_tidb_chunk_sweep_docs.py` | 不写首页 | M7 分块消融 |
 | `sync_m9a_docs.py` / `sync_m9b_docs.py` | 不写首页 | 生成指标与编排合同 |

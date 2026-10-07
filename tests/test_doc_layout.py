@@ -17,7 +17,13 @@ DETAIL_ONLY = (
     "sync_m9b_docs",
     "sync_m9b_results_docs",
 )
-SYNCHRONIZERS = (*DETAIL_ONLY, "sync_tidb_eval_docs", "sync_m8_docs", "sync_quality_gate_docs")
+SYNCHRONIZERS = (
+    *DETAIL_ONLY,
+    "sync_tidb_eval_docs",
+    "sync_m8_docs",
+    "sync_quality_gate_docs",
+    "sync_ablation_docs",
+)
 
 
 def _runner(name: str) -> ModuleType:
@@ -59,7 +65,7 @@ def test_legacy_argument_alias_selects_only_the_detailed_doc(name: str, tmp_path
     assert not hasattr(args, "readme")
 
 
-def test_readme_keeps_only_summary_regions_and_a_balanced_diagram() -> None:
+def test_readme_keeps_summary_regions_and_two_balanced_diagrams() -> None:
     readme = read_text(ROOT / "README.md")
     evaluation = read_text(ROOT / "docs" / "evaluation.md")
     for marker in ("TIDB-EVAL-SUMMARY", "M8-README-HEADLINE", "QUALITY-GATE-STATUS"):
@@ -78,9 +84,12 @@ def test_readme_keeps_only_summary_regions_and_a_balanced_diagram() -> None:
         assert f"<!-- BEGIN {marker} -->" not in readme
         assert evaluation.count(f"<!-- BEGIN {marker} -->") == 1
         assert evaluation.count(f"<!-- END {marker} -->") == 1
-    assert readme.count("```mermaid\n") == 1
+    assert readme.count("```mermaid\n") == 2
     assert sum(line.startswith("```") for line in readme.splitlines()) % 2 == 0
     assert "docs/README.legacy.md" not in readme
+    for doc in (readme, evaluation):
+        assert doc.count("<!-- BEGIN ABLATION-SUMMARY -->") == 1
+        assert doc.count("<!-- END ABLATION-SUMMARY -->") == 1
 
 
 def test_local_snapshot_has_an_explicit_ignore_rule() -> None:

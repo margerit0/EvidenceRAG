@@ -17,6 +17,12 @@
 
 > **调查工作台与交接更新（2026-10-07）**：受限文档调查、请求级 SSE 进度、React 工作台与服务端模型选择已实现。冰川流线、RAG 品牌、浅深主题和响应式交互已验收；生产预览与三条原创合成演示路径已复验，录制由用户自行完成。旧工作树的三个待判定文件已核对，无需迁移产品代码。当前状态见 §13；设计与接口见 [工作台说明](frontend.md)，演示入口见 [演示指南](workbench-demo.md)，分支证据见 [同步结论](branch-sync-handoff.md)。真实调查冒烟、独立质量验收、M9b 实验与公网部署分别记录，不相互替代。
 
+> **统计解释修正（2026-10-07）**：详细结果保留历史方法。MRL 的单证据 R@1 虽是二元指标，
+> 原实验仍采用单尾配对 bootstrap；不能将其他实验的 McNemar 方法概括为本项目所有二元检验。
+> 同批数据选出融合配置后再与 BM25 比较的原始 p 未校正选型，属于探索性证据；
+> 检出较大退化不证明能可靠检出较小退化。新生成的配对区间与检验口径见
+> [消融摘要](evaluation.md#消融摘要的离线重算)，修正清单见[一致性记录](documentation-consistency.md)。
+
 > **M9a 状态（2026-08-31）**：生成指标合同、RAGQuestEval answer-scoring 语义、aggregate-only Table 8 证据和独立同步器已完成；本阶段没有生成真实答案，也没有付费调用。M9b 才会在本地 gitignored 目录中运行 QG/QA/生成实验。
 
 **当前在线路径：窄 Protocol + 显式组合根；Milvus Lite；Qwen3-Embedding-8B dense-4096 + 客户端 char-bigram BM25 稀疏向量；客户端 exact RRF；Qwen3-Reranker-8B 请求 top-100 分数、应用前 top-50。可选 `/api/ask` 在检索后生成带引用的单轮答案；显式启用的 `/api/investigate` 与 `/api/investigate/stream` 在同一检索器上进行受限调查，React `/workbench/` 展示执行过程与引用。MRL 降维为独立离线实验，Standalone/Zilliz 公网部署和 TiDB Cloud 真机验证仍属于后续工作。检索评估与生成验证分开报告，默认 CI 使用合成数据且不调用付费模型。**
@@ -34,8 +40,8 @@
 | **LLM（生成）** | 由 `LLM_*` 配置注入 OpenAI-compatible chat；调查可用 `--agent-model` 提供服务端白名单，本机已验证 DeepSeek / GLM 各一次完整调查 | 每次请求固定模型、不自动回退；模型身份仅忽略 ASCII 大小写，版本与命名空间仍严格区分；结构、引用及传输完整性持续校验 | 单次链路与引用核验不证明模型质量或稳定性；生成与调查均需显式启用，延迟不能引用检索基准代替 |
 | **LLM（评判）** | 当前 TiDB pooled qrels：与 QG 相同的 `gpt-5.6-sol`、`reasoning_effort=high`；未来生成侧对比实验仍要求独立 judge | 本轮可用配置只有同一请求模型，因此报告明确写 **self-agreement / synthetic labels**，不冒充独立复核；若要提升标签可信度，应在冻结 pool 上补不同模型复判或人工校准 | DeepSeek-V3 类或 Kimi 等非生成模型；切换后必须新建 provenance/cache，不与现有判断混用 |
 | **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,832，p50 371，p90 734，欠长块 5.0%，代码块破损 0；M7 已完成 256/400/800 source-level known-item sweep | 400 保留为 canonical reference；M7 两个相对 400 的主终点比较经 Holm 均未显著，不能声称 400 全局最优、等价或无损 |
-| **检索管线** | dense-4096（COSINE）+ sparse（char-bigram BM25，**IP**）两臂检索 → 客户端 exact RRF → 客户端 Qwen3-Reranker-8B 重排 top-50（请求窗口 top-100） | 三段式，每段可单独消融；top-50 由 top-100 未检出额外收益的实测决定 | **WeightedRanker 是必测项而非备选**：离线实测等权 RRF 相对 dense 单臂不显著（39 胜 24 负，Holm p=0.231），加权 0.3/0.7 才显著（16 胜 4 负，p=0.047）。反过来 `RRFRanker` 的 **k 几乎不影响结果**（60→10 只动 0.1pp），不值得占消融表一列。Qdrant 的 dbsf 仍可作对照 |
-| **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | Milvus 内置 `chinese` analyzer 就是 jieba，且默认 `mode="search"` = `cut_for_search`——正是你实测最差的 73.4%，比 char bigram 的 75.9% 低 2.5 分。**开服务端分词器会让系统变差**。另外可绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的坑 | 无（这是本项目最有说服力的设计决策之一） |
+| **检索管线** | dense-4096（COSINE）+ sparse（char-bigram BM25，**IP**）两臂检索 → 客户端 exact RRF → 客户端 Qwen3-Reranker-8B 重排 top-50（请求窗口 top-100） | 三段式，每段可单独消融；top-50 由 top-100 未检出额外收益的实测决定 | `compare_dense_bm25.py` 实测的是**客户端加权 RRF**：0.3/0.7 相对 dense 单臂 16 胜 4 负，Holm p=0.047；不能作为 Milvus `WeightedRanker` 分数融合的实测证据。后者若比较，须独立冻结配置和运行；客户端 RRF 的 k 对照也不能直接归于服务端 `RRFRanker` |
+| **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | `run_lexical_sweep.py` 的客户端词法实验中，jieba 搜索模式 R@1 73.4%，char bigram 75.9%；属于描述性比较。数据库内置 `chinese` 使用 jieba 搜索模式及过滤器是实现配置依据，并非数据库端到端质量实测 | 保持客户端 BM25 可复现合同，避免数据库分词、过滤器与 IDF 范围同时改变；服务端 analyzer 的质量需另做对照 |
 | **服务层** | FastAPI + 线程池中的同步 provider 调用；在线生成使用直连传输与独立重试策略；调查另提供请求级 SSE 进度接口 | 多模型共享检索器与有限并发 admission，错误脱敏；进度观察不进入模型输入，供应商流式与网页 SSE 独立 | 取消为合作式，阻塞调用仍受自身 timeout 约束；不承诺即时停止计费、严格墙钟截止或断线恢复 |
 | **前端** | React + TypeScript + Vite；React Flow 流程图、Radix 交互组件与 Motion 动效；构建后由 FastAPI 挂载 `/workbench/`，原 `/` 静态页保留 | 用户选择 React 后，以逐次调用、证据阅读和异常终态支撑调查检查；默认原创合成演示可独立生产预览，无需后端与密钥 | 保持现有冰川流线和模型入口，不扩展为通用工作流编辑器；持久会话、跨会话历史和公网部署另行设计 |
 | **评估** | 检索侧：**已建成**（R@k / MRR / nDCG / ALL-gold / bootstrap CI / paired bootstrap）。生成侧：**M9a 已冻结独立指标合同**（逐样本 BLEU/ROUGE-L、可选真实 BERTScore、RAGQuestEval 评分语义），真实生成实验留给 M9b | 不安装或移植无授权的 CRUD_RAG 代码；Table 8 只保留 aggregate-only 来源证据 | RAGAS 只作为「我知道这个框架」的一行说明。**不要当主力**：最后一次 commit 2026-02-24，559 open issues，而竞品当天都在发版 |
@@ -67,14 +73,14 @@ pgvector README 的 FAQ 只给三条出路：half-precision（≤4000，还是�
 
 ### 3.3 关键设计决策：**不要用数据库的中文分词器**
 
-Milvus 内置 `chinese` analyzer 等价于 `{"tokenizer": "jieba", "filter": ["cnalphanumonly"]}`，而简写 `{"tokenizer": "jieba"}` 的默认是 `mode="search"`，即 jieba 的 `cut_for_search`——你实测 **73.4% R@1**，比 char bigram 的 **75.9%** 低 2.5 分。**开这个开关会让系统变差。**
+Milvus 内置 `chinese` analyzer 的配置为 `{"tokenizer": "jieba", "filter": ["cnalphanumonly"]}`，简写 `{"tokenizer": "jieba"}` 默认 `mode="search"`。本项目 `run_lexical_sweep.py` 比较的是客户端 jieba `cut_for_search` 与 char bigram：R@1 点估计分别为 **73.4%** 与 **75.9%**，未做配对显著性检验。数据库的过滤器、BM25 实现和 IDF 统计范围并未包含在该实验中，不能据此声称实测数据库开关会降低质量。
 
 正确做法：进程内算 char-bigram BM25 权重 → 作为 `SPARSE_FLOAT_VECTOR` 写入 → `SPARSE_INVERTED_INDEX` + `metric_type="IP"`。数据库负责两臂检索，默认在线路径在客户端执行 exact RRF。
 
 三个副产品：
 1. 绕开 Milvus Lite「BM25 IDF 按 segment 局部统计」的限制，否则 Lite 的分数与 Standalone/Zilliz 对不上，会**悄悄污染你上报的指标**；
-2. 数据库选型变得基本可逆（只委托了 ANN + fusion）；
-3. 选型依据：**「实测数据库内置 jieba analyzer 与客户端 char-bigram BM25 臂，后者高 2.5 pt R@1，遂将词法臂移出数据库、以预计算稀疏向量喂入」**——这是量化的设计决策，不是框架默认值。
+2. 数据库选型变得基本可逆（委托两臂检索，默认融合仍在客户端）；
+3. 选型依据：客户端词法实验支持选用 char bigram；将相同 BM25 权重写成稀疏向量，能保持已评测的词法合同。数据库内置 analyzer 的端到端质量仍待独立验证。
 
 ### 3.4 对「用 TiDB 向量检索服务 TiDB 文档」这个叙事的直接裁决
 
@@ -110,12 +116,19 @@ Milvus 内置 `chinese` analyzer 等价于 `{"tokenizer": "jieba", "filter": ["c
 
 **非对称**：document 侧 prompt 是空字符串，**文档不加任何前缀**。两边都加前缀会静默掉几个点的 R@1 且不报错。
 
-本项目直接抄这段：
+项目按语料使用两份不同的查询合同；以下是实际常量，不能互换或改写后复用旧查询缓存：
 
 ```python
-QUERY_PROMPT = ("Instruct: Given a Chinese technical question about TiDB documentation, "
-                "retrieve the most relevant documentation passage\nQuery:")
-query_text = QUERY_PROMPT + q      # documents: 原文，无前缀
+# TiDB：scripts/serve.py 的 QUERY_PROMPT
+TIDB_QUERY_PROMPT = (
+    "Instruct: Given a Chinese question about TiDB, retrieve the documentation "
+    "passage that answers it\nQuery:"
+)
+# CRUD 新闻：src/zhrag/embedding_contract.py 的 QUERY_PROMPT
+CRUD_QUERY_PROMPT = (
+    "Instruct: Given a Chinese question, retrieve the news passage that answers it\nQuery:"
+)
+# query_text = 对应的前缀 + q；两种语料的 document 侧均为原文、无前缀。
 ```
 
 **指令写英文**，即使语料是中文。Qwen 明说：「In multilingual contexts, we also advise users to write their instructions in English, as most instructions utilized during the model training process were originally written in English.」不加 instruct 掉 1%–5%。（⚠️ 这是通用建议，不是在 TiDB 文档上的实测——顺手做个中英 instruction 的 A/B，两次跑，又是一行诚实消融。）
@@ -247,9 +260,13 @@ H. hybrid-rrf (A+E)      @5681, unit=document, chunk=N/A, rerank=none      ← �
 I. G + rerank-8b@50      @5681, unit=document, chunk=N/A                   ← ✅ 已测：按 arity 报告；当前部署候选
 J. G + rerank-8b@100     @5681, unit=document, chunk=N/A                   ← ✅ 已测：未显著优于 I
 K. ~~4B vs 8B~~                                             ← ❌ 取消：中转站没有 4B（见 §4.5）
-L. H + rerank-8b@50      @5681, chunk=256 / 800             ← 待跑；先完成独立 H baseline 与 chunk sweep
+L. H + rerank-8b@50      @5681, unit=document, chunk=N/A    ← 未运行；需基于 H 新冻结候选与重排缓存
 M. bm25-bigram           @500,  unit=document, chunk=N/A, rerank=none      ← 饱和对照行，98.0 / 0.990
 ```
+
+H baseline 已完成；L 是 CRUD 新闻的文档级重排实验，不能复用 G 的候选评分。
+TiDB 的 256/400/800 分块 sweep 已独立完成，属于另一语料的 source-level、无重排实验。
+若继续测试 TiDB 分块加重排，须另立语料范围、维度、候选深度与重排合同，不能混入 L 行。
 
 <!-- BEGIN H-HYBRID-MRL1024-STATUS -->
 H（A+dense-1024）已独立离线完成：1doc R@1 **79.6% [76.8%, 82.4%]**、MRR@10 **0.878 [0.860, 0.894]**；同次重建的 G R@1 **79.9% [77.0%, 82.6%]**。efficacy / binary 5/12 reject；efficacy / continuous 7/12 reject；retention / binary 1/6 reject；retention / continuous 1/6 reject。H−G 是双尾 difference test，不是 non-inferiority/equivalence；I/J 仍绑定 dense-4096 的 G 与原 rerank cache。
@@ -500,6 +517,11 @@ zhrag/
 
 ## 9. 成本预估
 
+以下保留初版规划的**历史预算假设**，不是当前报价、实付账单或下一次运行预算。
+旧 embedding 单价、QG/QA 数量和“四个生成任务”均未按当前 One Hub 账户重新认证；
+现行 M9b 实现仅支持 `questanswer_1doc` 与 `event_summary` 两个任务，具体运行规模由计划决定。
+新的运行应以实际 dry-run 缺口、缓存、配置和供应商价格重新估算，不能引用本表总计批准费用。
+
 | 项目 | 用量 | 单价 | 成本 |
 |---|---|---|---|
 | Embedding 全量一遍（两个语料） | 4.88M tokens | ¥0.28/M | **¥1.37**（≈ $0.19） |
@@ -552,9 +574,9 @@ zhrag/
 
 **① 中文 RAG 评估框架与语料重建。** 发现 CRUD-RAG 官方 500 篇子集已饱和——40 行纯标准库字符 bigram BM25 即达 **R@1 98.0%、MRR@10 0.990**，任何检索配置均近满分、消融表无区分度；定位根因为语料规模不足与问句-证据表层重叠。从原始数据去重扩展至 **5,681 篇**干扰语料后 R@1 降至 **75.9%**、MRR@10 **0.857**，释放 **22 个百分点**可优化空间，并将主指标由已饱和的 R@5 改为 **R@1 / MRR@10 / nDCG@10**；全部指标附 95% bootstrap 置信区间，配置间比较对连续指标用**配对 bootstrap**、对二元指标用**精确 McNemar 检验**，全表经 **Holm-Bonferroni** 多重比较校正，并同时报逐查询**胜/负/平**计数。
 
-**② 中文词法检索方案实测选型。** 对比 jieba 精确模式（R@1 **74.8%**）、jieba 搜索模式（**73.4%**）与字符 bigram（**75.9%**）；jieba+bigram 并集在 1doc 上达 76.4% 但汇总的 ALL-gold@10 反而略低（85.3% vs 85.4%）、索引构建耗时 **3.1 倍**，最终选定字符 bigram。进一步实测**向量数据库内置 jieba analyzer 默认即为搜索模式**，遂将词法臂移出数据库，以客户端预计算 BM25 权重作为 SPARSE_FLOAT_VECTOR（`metric_type=IP`）喂入，数据库承担两臂检索，当前在线路径在客户端执行 exact RRF。
+**② 中文词法检索方案实测选型。** 客户端比较 jieba 精确模式（R@1 **74.8%**）、jieba 搜索模式（**73.4%**）与字符 bigram（**75.9%**）；jieba+bigram 并集在 1doc 上达 76.4% 但汇总的 ALL-gold@10 略低（85.3% vs 85.4%）、索引构建耗时 **3.1 倍**，最终选定字符 bigram。这些是描述性结果，未做配对显著性检验；数据库 analyzer 的配置检查不等于端到端质量实测。以客户端预计算 BM25 权重作为 SPARSE_FLOAT_VECTOR（`metric_type=IP`）写入，数据库承担两臂检索，当前在线路径在客户端执行 exact RRF。
 
-**③ 面向技术文档的两阶段分块策略。** 针对 500 篇 TiDB 中文文档（**3,309** 个代码块 / **5,262** 行表格），纯标题切分导致 **63.5%** 分块 <100 tokens、最大块 **16,111** tokens；改为「标题切分 → 掩码代码块与表格 → 按 target=400 合并小块 / 拆分大块」，得 **1,832** 块，p50 **371** / p90 **734**，欠长块降至 **5.0%**，代码块破损 **0** 例；并给出 256/400/800 的分块尺寸-召回曲线。
+**③ 面向技术文档的两阶段分块策略。** 完整 TiDB manifest 有 500 篇；`corpus_stats.py` 的以下统计排除 `temporal_releases`，对应 **450 篇**。纯标题切分导致 **63.5%** 分块 <100 tokens、最大块 **16,111** tokens；改为「标题切分 → 掩码代码块与表格 → 按 target=400 合并小块 / 拆分大块」，得 **1,832** 块，p50 **371** / p90 **734**，欠长块降至 **5.0%**，代码块破损 **0** 例；256/400/800 的质量对照见独立 M7 实验。
 
 **④ 检索栈与成本/性能工程。** 基于 Qwen3-Embedding-8B 构建 dense + 字符 bigram BM25 双臂检索与 RRF 融合，在 5,681 篇语料 / 800 条单证据查询上 **R@1 由 BM25 基线 75.9% 提升至 79.9%（+4.00pp，65 胜 33 负，McNemar 精确检验 p = 1.6e-03）**；在全部 2,394 条查询上对冻结 hybrid 的 top-100 候选统一调用 Qwen3-Reranker-8B，离线消融显示 top-50 已使单证据 `hit@1` **+6.06pp**（95% CI [+3.34,+8.78]，Holm p=0.0003）、三证据 `ALL@10` **+7.15pp**（[+4.98,+9.32]，p=1.32e-09），而 top-100 无显著额外收益，因此部署候选选 top-50；<!-- BEGIN M8-RESUME-PERFORMANCE -->当前认证的 cache-backed HTTP profile `tidb-docs-exact-rrf10-cached-query-no-rerank-v1`（并发 1，不含 provider 墙钟）端到端 **p95 228.3 ms / 4.97 QPS**。<!-- END M8-RESUME-PERFORMANCE -->本项目记录 Qwen3-Embedding-8B 的 **MRL 降维质量曲线**：4096→1024 维存储由 **93.1 MB 降至 23.3 MB（−75%）**，R@1 **78.0%→77.5%（−0.50pp，配对 bootstrap p=0.684，Holm 校正后不显著）**；降至 128 维（−97% 存储）仍无显著损失，**64 维起显著劣化（−4.25pp，Holm p=0.001†；蒙特卡洛地板标记）**——官方技术报告未发布此数据。
 
@@ -568,8 +590,8 @@ zhrag/
 >
 > ⚠️ **不要把降维无损归因于 MRL 训练。** 实测跨文档逐维方差首尾比 1.047（平的），
 > 没有信息前置聚集的证据。可写的是行为（掉多少 pp），不是机制。机制解释应作为待验证假设，而不是实测结论：
-> 「更可能是向量内在维度远低于 4096，前缀截断近似随机投影；JL 界在 n=5,681 时约 200 维，
-> 与实测 128–256 的拐点吻合。」
+> 方差近似平坦不等于判别信息均匀；前缀截断也未被证明是随机投影。JL 界还依赖失真容限
+> 与投影假设，不能只由文档数推出本实验的保距维数。
 
 
 ---
@@ -588,7 +610,7 @@ zhrag/
 | **`Query:` 后面那个空格** | 模型卡自相矛盾（Python helper 无空格 / TEI curl 有空格）。选错 = 全库向量与线上查询前缀不一致，**索引完之后改不了，只能重嵌入** | 以 `config_sentence_transformers.json` 为准（**无空格**），定义成常量，永不改 |
 | **文档侧误加 instruct 前缀** | 模型是非对称的，document prompt 是空串。两边都加会静默掉几个点 R@1，**不报错** | 文档原文入库 |
 | **`padding_side` 不是 `'left'`（自建推理时）** | 右 padding + `hidden[:, -1]` → 短样本拿到 pad token 向量，全错且无异常 | 用模型卡的 `last_token_pool()`（按 attention_mask 分支） |
-| **DeepInfra `normalize` 默认 false** | 未归一化的 4096 维向量进 cosine 索引 = 排序错误、无报错。SiliconFlow 干脆没文档说归一化默认值 | 第一次响应就 `np.linalg.norm()` 自检 |
+| **混淆 COSINE 与 IP 的归一化要求** | COSINE 本身消除非零向量模长，不会仅因未预归一化而改变排序；IP 则受模长影响，不能直接把它当作 cosine | 校验有限值与非零范数；使用 IP 模拟 cosine 时双侧 L2 归一化，MRL 前缀截断后重新归一化。当前 Milvus dense 索引使用 COSINE |
 | **只发布集合、不发布词表** | 查询向量的 term index 只在建库那份词表下有意义；换一份就打到恰好占位的词上，**排序静默出错**。而词表默认只活在构建进程的内存里 | 发布路径把 vocabulary+IDF 写成 `sparse_index.json`，查询端先比对 `state.json` 的 fingerprint 再启动；**只有发布成功才写**，否则查询端会加载到没有在线集合与之对应的词表 |
 | **把多个 `os.replace()` 当成 bundle transaction，或检查 writer lock 后无锁读取** | 第二个文件替换失败会留下新旧混合 bundle；检查与读取之间也可能被另一个 publisher 换包，使报告认证基于不同版本的输入 | canonical writer 先拿各自 operation lock，再只在最终发布阶段拿 `eval/.artifacts.lock`；evaluator / docs sync 在 load → 重算认证 → publish 全程持有共享锁。`replace_files()` 遇 Python 异常会逆序回滚，report/state marker 最后发布；这只是 exception safety，**不声称进程强杀下的 crash-atomic transaction** |
 | **给稀疏字段挂 `FunctionType.BM25`** | Milvus 会重新分词并**覆盖你预计算的向量** | 用 `SPARSE_INVERTED_INDEX` + `metric_type="IP"`，**不挂** BM25 function。Qdrant 上的对称坑：权重里已含 IDF 就别开 `idf` modifier，否则双重计算 |
