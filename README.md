@@ -101,13 +101,14 @@ flowchart LR
 | 使用方式 | 接口 | 检索之后 |
 |---|---|---|
 | 独立检索 | `/api/search` | 返回段落、来源和耗时 |
-| 单轮问答 | `/api/ask` | 在上下文预算内选入完整段落，生成并校验带引用答案；证据不足时拒答 |
+| 单轮问答 | `/api/ask` | 在长度预算内选入完整段落，生成答案并检查引用是否来自本次证据；证据不足时拒答 |
 | 文档调查 | `/api/investigate`、`/api/investigate/stream` | 先查看候选摘要，再按需读取完整段落；可补充搜索、追问或结束，过程受预算约束 |
 
 ## 项目亮点
 
 - **用实验支撑检索选型**：对比关键词检索、语义检索、融合与重排，结合配对检验和置信区间评估收益，并通过扩展干扰语料改善小语料评测的区分度。
 - **实现可追溯的文档调查 Agent**：模型按需搜索与读取证据，程序约束工具动作、执行预算和引用来源，工作台支持逐次查看调用记录与原文。
+- **用对照评测检验调查的收益**：使用同一组问题，比较普通单轮问答、预先规划的固定流程和动态调查 Agent。结合逐条审核，衡量任务完成情况、答案是否有原文依据、追问或拒答是否合理，以及耗时和模型调用次数。评测工具已实现，Agent 的整体收益仍待系统性验证。见[对照与审核说明](docs/agent.md#三种方法的对照入口)。
 - **维护离线评测与在线行为的一致性**：显式控制词法权重、融合排序和截断规则，结合增量索引、缓存复用及跨平台 CI，让实验结果能够对应实际实现。
 
 ## 实测效果
@@ -233,6 +234,19 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
 
 页面可切换“问答 / 检索”。问答会额外调用 chat API，产生费用；`--enable-generation` 不能和 `--query-cache` 一起使用。模型端点须支持 JSON mode 与 `max_completion_tokens`，不支持时直接报错，不会自动改成无输出上限请求。生成阶段的指定 HTTP 错误（含 401）和网络瞬态故障默认阶梯重试，可能长时间等待并重复计费；用 `--generation-retries 0` 关闭，详见[重试策略](docs/answering.md#生成重试)。
 
+### 启用文档调查
+
+完成上面的文档索引和 embedding/rerank 配置，并在本地 `.env` 配置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_NAME` 后，使用以下命令启动后端：
+
+```bash
+uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
+  python scripts/serve.py --enable-agent --generation-reasoning-effort low --generation-max-tokens 4096
+```
+
+再按[体验调查工作台](#体验调查工作台)启动前端，打开[工作台](http://127.0.0.1:5173/workbench/)，将“运行模式”切换为“连接服务”，输入问题后点击“开始调查”。
+
+每次调查可能产生多轮模型与检索调用及相应费用。需要同时提供单轮问答时，在启动命令后增加 `--enable-generation`；调查不能与 `--query-cache` 同用。模型选择见[配置调查模型](docs/frontend.md#选择调查模型)，执行预算和可选规划、答案复核见[调查说明](docs/agent.md)。
+
 ## 核心工程
 
 | 能力 | 实现 |
@@ -241,10 +255,11 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
 | 检索与重排 | 字符 bigram BM25 + Qwen3-Embedding-8B；RRF 合并排名，Qwen3-Reranker-8B 重排 |
 | 增量与缓存 | 内容哈希识别变化，复用未变化的文档向量；模型结果缓存可断点续跑 |
 | 索引发布 | 先构建新版本、校验后切换别名；词表与索引状态校验不一致时拒绝启动 |
-| 接口解耦 | Python Protocol 隔离模型和存储，Milvus Lite 已验证；TiDB 适配器仍待真实实例验证 |
-| HTTP 与进度 | 独立检索、单轮问答与文档调查各有接口；调查提供 SSE 动作进度，检索 trace 与生成耗时分别记录 |
-| 问答边界 | 完整段落上下文预算、结构化引用校验、拒答与故障分离；答案不自动落盘 |
-| 受限调查 | 搜索与读取动作经过白名单验证；每次请求固定模型，支持追问、补充检索、预算与合作取消 |
+| 接口解耦 | 通过统一接口替换模型服务和数据库；Milvus Lite 已验证，TiDB 适配器仍待真实实例验证 |
+| HTTP 与进度 | 独立检索、单轮问答与文档调查各有接口；调查实时推送执行进度，检索各阶段与生成耗时分别记录 |
+| 检索失败定位 | 离线检查相关资料未进入候选，还是已找到但排名过低；分类汇总，帮助判断应改进资料检索还是结果排序 |
+| 问答边界 | 在长度预算内选入完整段落，检查答案引用是否来自本次证据；区分证据不足与运行故障，答案不自动落盘 |
+| 受限调查 | 只允许搜索和读取文档；每次请求固定模型，支持追问、补充检索和执行预算，取消后在调用边界停止后续执行 |
 | 调查工作台 | 展示逐次搜索与读取记录，点击答案引用对照原文；支持模型选择和模拟演示 |
 | 质量门禁 | Python 使用 pytest、ruff、严格类型检查及 Ubuntu / Windows 双系统 CI；前端使用单测、构建与合成浏览器回归 |
 
@@ -257,12 +272,14 @@ uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
 | `src/zhrag/lexical/` | 字符 n-gram 分析器、Okapi BM25、客户端稀疏向量 | `analyzers.py`、`bm25.py`、`sparse.py` |
 | `src/zhrag/retrieval/` | RRF 融合、在线编排（两路各 100 → 本地融合 → 请求 100 / 应用 50 的重排）、Protocol 接缝 | `fusion.py`、`online.py`、`adapters.py` |
 | `src/zhrag/store/` | 与厂商无关的 VectorStore Protocol；Milvus 与 TiDB 两个惰性导入的适配器 | `base.py`、`milvus.py`、`tidb.py` |
-| `src/zhrag/providers/` | embedding / rerank / chat 客户端、缓存与 provenance；在线生成另有直连传输、可选流式、独立重试和模型身份校验 | `http.py`、`cache.py`、`answering.py`、`direct.py`、`streaming.py`、`model_identity.py` |
-| `src/zhrag/answering.py` | 单轮证据问答：上下文预算、结构化引用校验、拒答与故障分离 | 合同见 [docs/answering.md](docs/answering.md) |
+| `src/zhrag/providers/` | embedding / rerank / chat 客户端、缓存与数据和配置版本校验；在线生成另有直连传输、可选流式、独立重试和模型身份校验 | `http.py`、`cache.py`、`answering.py`、`direct.py`、`streaming.py`、`model_identity.py` |
+| `src/zhrag/answering.py` | 单轮证据问答：完整段落预算、引用来源校验、拒答与故障分离 | 合同见 [docs/answering.md](docs/answering.md) |
 | `src/zhrag/agent.py` | 受限调查循环、证据读取与执行预算；可选需求规划、覆盖门禁和答案复核 | `agent_planning.py`、`agent_answer_review.py`；合同见 [docs/agent.md](docs/agent.md) |
 | `src/zhrag/service/` | FastAPI 应用、调查 SSE、脱敏检索 trace 合同、HTTP 基准 | `app.py`、`agent_stream.py`、`observability.py`、`bench.py`、`static/index.html` |
 | `frontend/` | React 调查工作台：执行流程、调用记录、引用阅读与模型选择 | 使用方式见 [docs/frontend.md](docs/frontend.md) |
 | `src/zhrag/eval/` | 指标（R@k / MRR / nDCG / bootstrap CI / 精确 McNemar / Holm）、CRUD-RAG 语料重建、TiDB 合成评测集生成、pooling、qrels 与质量报告 | `metrics.py`、`crud.py`、`qgen.py`、`pool.py`、`tidb_quality.py` |
+| `src/zhrag/eval/agent_*.py` | 任务草稿与引文核验、单轮问答 / 固定流程 / Agent 对照、审核后生成质量报告 | `agent_task_drafts.py`、`agent_comparison.py`、`agent_review.py` |
+| `src/zhrag/eval/tidb_bad_cases.py` | 根据固定的检索结果与相关性标注，区分未召回和排序失败，输出聚合报告 | 命令入口：`scripts/evaluate_tidb_bad_cases.py` |
 | `src/zhrag/ingest.py` | manifest 校验、内容哈希变更检测、文档级增量 | — |
 | `src/zhrag/io_utils.py`、`tokens.py` | 唯一的 UTF-8 文件出入口；按 Qwen3 tokenizer 标定的 token 估算 | — |
 | `scripts/` | 构建、评测、基准、文档同步的命令行入口，付费步骤全部需显式开启 | `build_index.py`、`serve.py`、`evaluate_*.py`、`sync_*_docs.py` |
@@ -328,7 +345,7 @@ CRUD-RAG 新闻基准用于可重复的方案对照，TiDB 评测则检查最终
 <details>
 <summary><b>为什么不用 LangChain / LlamaIndex？</b></summary>
 
-项目需要明确控制候选排序、缓存身份、生成重试和调查预算。当前用窄 Protocol 连接检索、存储与模型，用显式循环编排文档调查，让这些行为能够独立测试，并纳入配置与运行记录。模型、存储和时钟都可替换为测试实现，默认 CI 无需 API key、语料或真实数据库。
+项目需要明确控制候选排序、缓存对应的数据和配置、生成重试和调查预算。当前用统一接口（Python Protocol）连接检索、存储与模型，用显式循环编排文档调查，让这些行为能够独立测试，并纳入配置与运行记录。模型、存储和时钟都可替换为测试实现，默认 CI 无需 API key、语料或真实数据库。
 
 代价是自行维护流程编排和适配代码。现有固定检索流程与受限调查循环可以由这层代码覆盖，因此暂未引入通用框架。后续增加工具或复杂工作流时，会根据维护成本重新评估框架，同时保留已有的排序、预算和评测合同。详见[架构决策](docs/architecture-decision.md)。
 
