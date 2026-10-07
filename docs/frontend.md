@@ -179,10 +179,12 @@ cd frontend
 npm test
 npm run build
 npm run format:check
+npx playwright install chromium
 npm run test:e2e
 ```
 
-本机 E2E 使用已安装的 Chrome；CI 使用 Playwright Chromium。浏览器测试仅使用原创
+本机与 CI 的 E2E 均使用项目锁定的 Playwright Chromium，避免浏览器版本不同掩盖问题。
+默认自动构建并在 4173 端口启动生产预览，不复用日常开发服务；设置 `PLAYWRIGHT_BASE_URL` 时使用指定服务。浏览器测试仅使用原创
 合成脚本和拦截后的合成 API 响应，不调用真实模型。后端的事件顺序、取消、溢出、
 共享并发和原有输出兼容性由离线 pytest 验证。
 

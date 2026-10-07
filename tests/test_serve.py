@@ -134,14 +134,17 @@ def test_agent_retries_are_explicit_bounded_and_fingerprinted(tmp_path: Path, re
 def test_direct_loopback_extends_no_proxy_without_dropping_entries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # os.environ is case-insensitive on Windows, so both spellings may share one key.
+    # Linux keeps these variables separate; Windows aliases the spellings.
+    # Preserve each variable's effective input instead of assuming they are aliases.
     monkeypatch.setenv("no_proxy", "internal.example, localhost")
+    monkeypatch.setenv("NO_PROXY", "upper.example, 127.0.0.1")
+    original_hosts = {name: os.environ[name].split(",")[0] for name in ("no_proxy", "NO_PROXY")}
     monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
     serve._direct_loopback()
     for name in ("no_proxy", "NO_PROXY"):
         entries = os.environ[name].split(",")
         assert len(entries) == len(set(entries))
-        assert entries[0] == "internal.example" and " " not in os.environ[name]
+        assert entries[0] == original_hosts[name] and " " not in os.environ[name]
         assert {"localhost", "127.0.0.1", "::1"} <= set(entries)
     assert os.environ["HTTPS_PROXY"] == "http://127.0.0.1:9"  # not our decision to unset
 

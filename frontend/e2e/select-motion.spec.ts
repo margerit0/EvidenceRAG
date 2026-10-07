@@ -58,8 +58,13 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
           await expect(popup).toHaveCount(0);
           await expect(trigger).toHaveText('模拟演示');
         } else {
+          // Radix schedules keyboard focus; wait for each move before the next key.
           await page.keyboard.press('Home');
+          await expect(page.getByRole('option', { name: '完整调查', exact: true })).toBeFocused();
           await page.keyboard.press('ArrowDown');
+          await expect(
+            page.getByRole('option', { name: '需要补充信息', exact: true }),
+          ).toBeFocused();
           await page.keyboard.press('Enter');
           await expect(popup).toHaveCount(0);
           await expect(trigger).toHaveText('需要补充信息');

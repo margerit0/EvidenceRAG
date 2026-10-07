@@ -18,6 +18,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
       if (viewport.width === 1366) await page.getByRole('button', { name: '切换深色' }).click();
       await expect(page.locator('.flow-node')).toHaveCount(4);
       const samples = await page.evaluate(async () => {
+        await document.fonts.ready;
         const track = document.querySelector('.inspector-slot')!;
         const pane = document.querySelector<HTMLElement>('.inspector-desktop')!;
         const toggle = document.querySelector<HTMLButtonElement>('.inspector-toggle')!;
@@ -30,26 +31,25 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
           sameNode: boolean;
           inert: boolean;
           open: boolean;
+          turn: number;
         }[] = [];
-        // Start at the first painted frame. A cold browser/font load must not
-        // collapse all four scheduled interactions into consecutive frames.
+        // Sample after layout/ResizeObserver work. Reverse at observed positions
+        // so a slow CI frame cannot collapse scheduled clicks into one render.
         let start: number | undefined;
-        const turns = [40, 130, 220, 330];
         let turn = 0;
-        await new Promise<void>((resolve) => {
-          const frame = (now: number) => {
+        await new Promise<void>((resolve, reject) => {
+          const nextFrame = () => requestAnimationFrame(() => setTimeout(frame, 0));
+          const frame = () => {
+            const now = performance.now();
             start ??= now;
             const t = now - start;
-            if (turn < turns.length && t >= turns[turn]) {
-              toggle.click();
-              turn++;
-            }
             const canvas = document.querySelector('.graph-canvas')!.getBoundingClientRect();
             const shapes = [
               ...document.querySelectorAll('.flow-node, .graph-edge .react-flow__edge-path'),
             ];
             samples.push({
               t,
+              turn,
               width: track.getBoundingClientRect().width,
               inner: pane.getBoundingClientRect().width,
               sameNode: node === document.querySelector('.flow-node'),
@@ -67,10 +67,21 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
                 );
               }),
             });
-            if (t < 950) requestAnimationFrame(frame);
-            else resolve();
+            const sample = samples.at(-1)!;
+            if (
+              turn === 0 ||
+              (turn === 1 && sample.width >= sample.inner * 0.35) ||
+              (turn === 2 && sample.width <= sample.inner * 0.1) ||
+              (turn === 3 && sample.width >= sample.inner * 0.45)
+            ) {
+              toggle.click();
+              turn++;
+            }
+            if (turn === 4 && !sample.open && sample.width === 0) resolve();
+            else if (t > 5000) reject(new Error('Inspector did not complete all four reversals'));
+            else nextFrame();
           };
-          requestAnimationFrame(frame);
+          nextFrame();
         });
         return samples;
       });
@@ -83,10 +94,10 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
         Math.max(...samples.map((s) => s.inner)) - Math.min(...samples.map((s) => s.inner)),
       ).toBeLessThan(0.1);
       expect(samples.at(-1)!.width).toBe(0);
+      expect(samples.at(-1)!.turn).toBe(4);
       if (reducedMotion === 'no-preference') {
-        expect(samples.filter((s) => s.width > 5 && s.width < s.inner - 5).length).toBeGreaterThan(
-          5,
-        );
+        // Prove interpolation, without requiring a particular CI frame rate.
+        expect(samples.some((s) => s.width > 5 && s.width < s.inner - 5)).toBe(true);
         for (let i = 1; i < samples.length; i++) {
           const a = samples[i - 1],
             b = samples[i];
@@ -155,6 +166,13 @@ for (const viewport of [
     await toggle.click();
     await expect(drawer).toBeInViewport({ ratio: 1 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
+    // Allow the media-query event and React update to reach the exiting surface.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
     await page.keyboard.press('Escape');
     await expect(drawer).toHaveCount(0, { timeout: 250 });
     await expect(toggle).toBeFocused();
@@ -167,7 +185,8 @@ test('history inspection preserves a manual graph zoom and execution signals sto
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.goto('/workbench/');
   await page.getByRole('button', { name: '运行演示', exact: true }).click();
-  await expect(page.locator('.graph-edge-signal')).toHaveCount(1);
+  // Started events are transient; the default backoff can skip their whole lifetime.
+  await expect.poll(() => page.locator('.graph-edge-signal').count(), { intervals: [50] }).toBe(1);
   await page.locator('.timeline-row').first().click();
   await expect(page.locator('.answer-status')).toContainText('已生成答案');
   await expect(page.locator('.flow-node.running, .graph-edge-signal')).toHaveCount(0);
@@ -180,6 +199,8 @@ test('history inspection preserves a manual graph zoom and execution signals sto
   await page.getByRole('button', { name: '下一次同类调用' }).click();
   await expect(viewport).toHaveAttribute('style', transform!);
   await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('.inspector-drawer')).toBeVisible();
+  await expect(page.locator('.inspector-drawer [aria-label="收起检查器"]')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.locator('.inspector-drawer')).toHaveCount(0);
   await page.getByRole('button', { name: '适应画布', exact: true }).click();

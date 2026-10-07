@@ -140,7 +140,12 @@ test('same-action navigation stays on history as calls arrive and supports adjac
   }
   await decisions.first().click();
   await page.setViewportSize({ width: 390, height: 844 });
-  await navigation.scrollIntoViewIfNeeded();
+  // The responsive inspector replaces the desktop subtree with a modal.
+  const mobileNavigation = page
+    .locator('.inspector-drawer')
+    .getByRole('navigation', { name: '同类调用导航' });
+  await expect(mobileNavigation).toBeVisible();
+  await mobileNavigation.scrollIntoViewIfNeeded();
   await next.click();
   await expect(page.locator('.step-detail h2')).toHaveText('Agent 决策 · 第 2 次');
   await expect(navigation).toBeInViewport({ ratio: 1 });
@@ -317,18 +322,17 @@ test('inspector collapse frees space and preserves the selected call and tab', a
   await page.locator('.timeline-row').filter({ hasText: 'Agent 决策' }).first().click();
   await expect(pane).toBeVisible();
   await expectGraphFits();
-  expect((await page.locator('.execution-pane').boundingBox())!.width).toBeLessThan(
-    collapsedWidth - 100,
-  );
+  await expect
+    .poll(async () => (await page.locator('.execution-pane').boundingBox())!.width)
+    .toBeLessThan(collapsedWidth - 100);
   await page.getByRole('button', { name: '下一次同类调用' }).click();
   await page.getByRole('tab', { name: '运行', exact: true }).click();
   await page.getByRole('button', { name: '收起检查器', exact: true }).click();
   await expect(pane).toBeHidden();
   await expectGraphFits();
-  expect((await page.locator('.execution-pane').boundingBox())!.width).toBeCloseTo(
-    collapsedWidth,
-    0,
-  );
+  await expect
+    .poll(async () => (await page.locator('.execution-pane').boundingBox())!.width)
+    .toBeCloseTo(collapsedWidth, 0);
   const expand = page.getByRole('button', { name: '展开检查器', exact: true });
   await expect(expand).toBeFocused();
   await page.keyboard.press('Enter');
