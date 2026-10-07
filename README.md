@@ -1,33 +1,36 @@
-# EvidenceRAG：中文技术文档检索与问答
+# EvidenceRAG：中文技术文档 RAG 与可追溯 Agent 工作台
 
-用自然语言查找 TiDB 中文技术文档，返回相关段落和来源；也可启用带引用的单轮问答，或让调查模型多次搜索、读取资料后回答。检索结合**关键词、语义和模型重排**，效果由可复现的实验检验。
+面向 TiDB 中文技术文档的检索与问答系统，结合 **BM25、Qwen3 向量检索、RRF 融合与模型重排**，支持带引用的单轮问答，以及按需搜索、读取证据的文档调查 Agent。
 
-**后端默认只启用检索，问答与文档调查需分别开启；工作台默认提供无 API 调用的合成演示。** 真实回答的引用可定位到本次证据，格式或引用不合法时不发布答案。
+提供 React 可视化工作台，展示工具调用、执行进度与引用原文；通过 CRUD-RAG 与 TiDB 领域评测，对检索策略、向量维度和重排窗口进行可复现的实验验证。
 
-[调查工作台](#调查工作台) · [调查与检索流程](#调查与检索流程) · [实测效果](#实测效果) · [关键取舍](#关键取舍) · [核心工程](#核心工程) · [快速开始](#快速开始) · [详细评估](docs/evaluation.md)
+[调查工作台](#调查工作台) · [调查与检索流程](#调查与检索流程) · [项目亮点](#项目亮点) · [实测效果](#实测效果) · [快速开始](#快速开始) · [核心工程](#核心工程) · [关键取舍](#关键取舍) · [详细评估](docs/evaluation.md)
+
+## 调查工作台
+
+从问题到带引用的答案，工作台展示每次搜索、证据读取与执行状态。点击引用对照原文，选择流程节点或时间线记录查看单次调用详情。
+
+![模拟调查完成态：左侧展示带引用的答案，中间展示执行流程与时间线，右侧查看单次调用详情](docs/images/workbench-investigation-detail.png)
+
+*原创合成演示：展示带引用的答案、执行流程与调用详情；无需密钥，不调用模型。*
+
+<details>
+<summary>查看服务连接与模型选择</summary>
+
+![连接服务后的调查工作台：左侧输入问题与选择模型，中间展示执行流程，右侧为检查器](docs/images/workbench-connected.png)
+
+连接已配置的后端服务后，可选择 DeepSeek 或 GLM；每次调查固定使用所选模型，历史记录保留当次模型。
+
+</details>
+
+[体验模拟演示](#体验调查工作台) · [演示指南](docs/workbench-demo.md) · [连接服务与模型配置](docs/frontend.md)
+
+## 调查与检索流程
 
 **实验性文档调查**：在现有检索之上增加受限工具动作、补充搜索、追问、执行预算和调查记录。
 提供 `/api/investigate` 与实时进度接口 `/api/investigate/stream`。已有真实链路与引用核验记录，系统质量和稳定性仍待评测；模拟演示不代表模型效果。
 运行方式和单轮 RAG / 固定流程 / Agent 对照入口见[文档调查说明](docs/agent.md)，
 阶段进度见[迭代计划](docs/agent-iteration.md)。
-
-## 调查工作台
-
-在工作台中提出问题，可以查看每次搜索、读取资料和生成答案的进展。点击答案中的引用，即可在右侧对照原文；同一步骤执行多次时，也能逐次查看记录，了解系统补充了哪些资料、在哪一步中断。
-
-![连接服务后的调查工作台：左侧输入问题与选择模型，中间展示执行流程，右侧为检查器](docs/images/workbench-connected.png)
-
-*连接服务后的工作台：在发送问题前选择调查模型，执行过程中可查看搜索、读取与回答的进展。*
-
-界面支持浅色与深色主题。连接已配置的后端服务后，可在输入框右下角、发送按钮左侧选择 DeepSeek 或 GLM；选择作用于下一次调查，历史记录保留当次使用的模型。
-
-![调查效果详情：左侧展示带引用的答案，中间展示执行流程与时间线，右侧查看单次调用记录](docs/images/workbench-investigation-detail.png)
-
-*模拟演示完成后的详情：答案引用、执行时间线与单次调用记录相互关联，可逐次回看调查过程。图中使用原创合成数据，无 API 调用。*
-
-无需密钥即可[体验模拟演示](#体验调查工作台)；[演示指南](docs/workbench-demo.md)提供生产预览与三条路径的操作步骤。真实连接与模型配置见[工作台说明](docs/frontend.md)。
-
-## 调查与检索流程
 
 ### 文档调查：搜索、读取，再决定下一步
 
@@ -101,6 +104,12 @@ flowchart LR
 | 单轮问答 | `/api/ask` | 在上下文预算内选入完整段落，生成并校验带引用答案；证据不足时拒答 |
 | 文档调查 | `/api/investigate`、`/api/investigate/stream` | 先查看候选摘要，再按需读取完整段落；可补充搜索、追问或结束，过程受预算约束 |
 
+## 项目亮点
+
+- **用实验支撑检索选型**：对比关键词检索、语义检索、融合与重排，结合配对检验和置信区间评估收益，并通过扩展干扰语料改善小语料评测的区分度。
+- **实现可追溯的文档调查 Agent**：模型按需搜索与读取证据，程序约束工具动作、执行预算和引用来源，工作台支持逐次查看调用记录与原文。
+- **维护离线评测与在线行为的一致性**：显式控制词法权重、融合排序和截断规则，结合增量索引、缓存复用及跨平台 CI，让实验结果能够对应实际实现。
+
 ## 实测效果
 
 <!-- BEGIN TIDB-EVAL-SUMMARY -->
@@ -127,6 +136,9 @@ flowchart LR
 
 本项目不假设“模型更大就一定更好”或“融合一定胜过单路检索”。除上面的领域内评测，还用带上游证据标注的 CRUD-RAG 新闻基准做消融实验，区分观察到的改进与抽样不确定性。
 
+<details>
+<summary>查看完整消融表与统计口径</summary>
+
 <!-- BEGIN ABLATION-SUMMARY -->
 由 `scripts/sync_ablation_docs.py` 从完整本地缓存离线重算；差值均为前者减后者。
 CRUD 使用 5,681 篇文档；原单证据任务为 800 条，重排按实际 gold 数对全部 2,394 条分层。
@@ -152,67 +164,74 @@ MRL 保留历史的单尾退化检验及完整六项比较族；R@1 在这组单
 词法 analyzer 只保留描述性比较；其原始表、重排完整族和历史报告见详细评估文档。
 <!-- END ABLATION-SUMMARY -->
 
+</details>
+
 完整结果与同步命令见[评估文档](docs/evaluation.md#消融摘要的离线重算)。
 
-## 关键取舍
+## 快速开始
 
-这些决定都有数据支撑，展开可以看到为什么。
+以下命令均在仓库根目录运行。模拟演示需要 Node.js 22.12+ 和 npm；后端服务与 Python 测试需要 Python 3.13 和 [uv](https://docs.astral.sh/uv/)。
 
-<details>
-<summary><b>为什么关键词检索用字符 bigram，而不是 jieba 分词</b></summary>
+**后端默认只启用检索，问答与文档调查需分别开启；** 真实回答的引用可定位到本次证据，格式或引用不合法时不发布答案。
 
-客户端词法实验中，字符 bigram 的单证据首条命中率点估计高于 jieba 精确与搜索模式，构建也更快。这些是描述性结果，未做配对显著性检验。选择 bigram 还减少了依赖；在客户端算好 BM25 权重并写成稀疏向量，可保持已评测的词法合同。Milvus 内置 `chinese` 的 jieba 配置与该客户端实验不同，尚无数据库 analyzer 的端到端质量对照。详见评估文档[「中文 BM25」](docs/evaluation.md#中文-bm25字符-bigram-优于-jieba-分词)与架构文档 §3.3。
+### 体验调查工作台
 
-</details>
+```bash
+npm --prefix frontend ci
+npm --prefix frontend run dev
+```
 
-<details>
-<summary><b>为什么融合在客户端做，而不是用数据库的 RRFRanker</b></summary>
+打开 [调查工作台](http://127.0.0.1:5173/workbench/)，点击“运行演示”。默认按预设场景展示调查过程，不调用模型，不需要密钥、语料或后端服务。
 
-公式相同，但并列名次的处理不同：本地实现用文档 id 打破并列并用精确求和，服务端按到达顺序；服务端的最终 `limit` 还会在并列边界上直接截断，事后补不回来。离线评估的数字全部来自本地精确 RRF，在线路径如果换成服务端融合，就不再是同一个系统。所以默认路径是两路各取 100 条、本地融合；服务端融合保留为通过对齐测试后的优化项。详见评估文档[「在线链路」](docs/evaluation.md#在线链路把离线证据原样搬上去而不是搬一个像它的东西)。
+本地生产构建预览及“完整调查、需要补充信息、证据不足”的操作见[演示指南](docs/workbench-demo.md)。连接自己的服务与模型配置见[工作台说明](docs/frontend.md)。
 
-</details>
+### 运行测试
 
-<details>
-<summary><b>为什么融合单独没有超过语义检索，却仍保留在流程里</b></summary>
+```bash
+uv sync --extra dev --extra service --python 3.13
+uv run pytest
+uv run ruff check src tests scripts
+uv run ruff format --check src tests scripts
+uv run mypy
+```
 
-领域内评测中，融合的首条命中率低于语义检索；在预声明主指标上未检出显著差异，不能据此证明等价。保留融合是为了向重排提供两路候选：CRUD-RAG 的逐查询对照观察到了互补命中，TiDB 的重排结果也显示候选排序可以改进。但融合对 BM25 的历史原始 p 值有同批选型的限制，不能作为独立确认性证据；当前实验也不能证明融合候选必然胜过单路候选加重排。
+测试使用合成数据，不需要 API key、真实语料或数据库。`service` 安装 HTTP 层依赖，不会调用外部模型。
 
-</details>
+### 启动检索服务
 
-<details>
-<summary><b>为什么重排窗口是 50，不是 100</b></summary>
+首次运行需要获取语料并建立索引，这不是开箱即用的离线演示。
 
-对每条问题的前 100 个候选统一打分一次，再离线比较只用前 50 个分数和用全部 100 个。摘要中的分层 hit@1 逐位相同，完整证据召回的深度比较也未检出显著差异。当前选用较小的应用窗口，但不把「没检出差异」写成「两者等价」。在线实现把请求深度 100 和应用深度 50 分成两个字段，因为「发 100 篇取前 50 个分数」和「只发 50 篇」是两个不同的输入。
+1. 按[数据准备说明](DATA_LICENSE.md#3-如何在本地获得数据)下载 TiDB 文档。下载脚本使用 PowerShell；Linux/macOS 需安装 `pwsh`。
+2. 在本地 `.env` 配置服务商提供的 `Embedding_BASE_URL`、`Embedding_API_KEY`、`Embedding_MODEL_NAME`，以及 `ReRank_BASE_URL`、`ReRank_API_KEY`、`ReRank_MODEL_NAME`。当前验证过的模型为[核心工程](#核心工程)中列出的 Qwen3 模型，其他端点需单独验证。
+3. 安装本地存储依赖，先预览构建计划，再显式开启付费嵌入和索引发布：
 
-</details>
+```bash
+# 显式安装 Lite，覆盖 Windows 上 pymilvus 不自动安装它的情况
+uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
+  python scripts/build_index.py --dry-run
 
-<details>
-<summary><b>为什么评测问题由模型生成，而不是人工标注</b></summary>
+# 新增向量会调用付费 embedding API
+uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
+  python scripts/build_index.py --embed --publish
 
-TiDB 文档没有上游人工标注。问题由模型按主题分层抽样后生成「直接提问」和「换种说法」两种表面形式，再经独立验证轮次过滤，相关性由同一模型在打乱排名、固定顺序的条件下判定。这是同模型自我一致的合成标签，不是独立人工复核。为了不让同源问题把置信区间做窄，置信区间与检验按来源文档簇重采样。CRUD-RAG 一侧则刻意不用模型扩充问题，避免重新引入让官方小语料子集饱和的表层重叠问题。详见评估文档[「评测集够大吗」](docs/evaluation.md#评测集够大吗)。
+uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
+  python scripts/serve.py
+```
 
-</details>
+打开 **http://127.0.0.1:8000** 进入检索页面。默认每次查询调用 embedding 和 rerank API，可能产生费用。已有完整评估缓存时，可用 `--query-cache` 启动不调用模型的限定查询服务，见[缓存演示说明](docs/evaluation.md#缓存演示与文档同步)。
 
-<details>
-<summary><b>为什么存 4096 维，1024 维只做离线实验</b></summary>
+本地代理可能干扰 Milvus Lite 连接；请把 `127.0.0.1,localhost` 加入 `NO_PROXY` / `no_proxy`。
 
-供应商行为探针支持客户端前缀切片后重归一化，因此各维度档复用同一份完整缓存，无需额外 API 调用。摘要给出缩减维度后的配对差值与区间；检出较低维度的较大退化，不证明对较小退化也有足够功效。已完成的付费重排实验建立在完整维度的融合候选上，不能事后改名成降维结果，所以在线路径继续使用原配置。详见评估文档[「MRL 降维」](docs/evaluation.md#mrl-降维存储降-75r1-无显著损失)。
+### 启用单轮问答
 
-</details>
+另在 `.env` 配置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_NAME`，并显式启用：
 
-<details>
-<summary><b>为什么不用 LangChain / LlamaIndex</b></summary>
+```bash
+uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
+  python scripts/serve.py --enable-generation
+```
 
-当前检索流程是固定的三段：两路检索、融合、重排，外加可选生成。几个窄 Protocol 加显式组合根就能表达，编码器、存储、重排器和时钟都可注入，默认 CI 不需要 API key、语料或原生依赖就能验证请求形状、融合顺序和失败边界。引入框架会带来评估中不可控的隐式行为。等真的出现编排需求再引入，而不是先引入再找需求。
-
-</details>
-
-<details>
-<summary><b>为什么 TiDB 的文档没有跑在 TiDB 上</b></summary>
-
-仓库里有 TiDB 适配器：原生 VECTOR 列加 HNSW 做向量检索，配套 postings 表做精确稀疏内积，与 Milvus 适配器共用同一个 Protocol。但 TiDB 向量检索仍是 public preview，HNSW 依赖 TiFlash 副本，全文检索限于部分区域且使用自己的分词器。仓库尚无真实 TiDB 实例，因此它是离线认证的合同，不是已验证的生产后端。在真机通过建表、两臂排序、完整行回读、别名切换和重连之前，不声称「双后端跑通」。详见评估文档[对应章节](docs/evaluation.md#为什么-tidb-的文档没有跑在-tidb-上)。
-
-</details>
+页面可切换“问答 / 检索”。问答会额外调用 chat API，产生费用；`--enable-generation` 不能和 `--query-cache` 一起使用。模型端点须支持 JSON mode 与 `max_completion_tokens`，不支持时直接报错，不会自动改成无输出上限请求。生成阶段的指定 HTTP 错误（含 401）和网络瞬态故障默认阶梯重试，可能长时间等待并重复计费；用 `--generation-retries 0` 关闭，详见[重试策略](docs/answering.md#生成重试)。
 
 ## 核心工程
 
@@ -257,68 +276,63 @@ TiDB 文档没有上游人工标注。问题由模型按主题分层抽样后生
 
 p95 表示约 95% 请求不超过该耗时。这是本机基准，不是公网服务承诺；**检索质量实验启用了重排，当前性能基准未启用，两者不是同一配置**。
 
-## 快速开始
+## 关键取舍
 
-以下命令均在仓库根目录运行。模拟演示需要 Node.js 22.12+ 和 npm；后端服务与 Python 测试需要 Python 3.13 和 [uv](https://docs.astral.sh/uv/)。
+以下选择来自检索实验和实际工程约束，分别说明选择依据、维护代价与适用范围。实验数值、置信区间和配对检验见上方[实测效果](#实测效果)。
 
-### 体验调查工作台
+<details>
+<summary><b>为什么重建评测集，并保留新闻与 TiDB 两套基准？</b></summary>
 
-```bash
-npm --prefix frontend ci
-npm --prefix frontend run dev
-```
+早期的小语料评测中，简单 BM25 已接近满分，难以区分检索方案。因此先扩展干扰语料，保留上游证据标注，再比较首条命中率和排序质量；评测集本身能否暴露差异，也是需要验证的对象。
 
-打开 [调查工作台](http://127.0.0.1:5173/workbench/)，点击“运行演示”。默认按预设场景展示调查过程，不调用模型，不需要密钥、语料或后端服务。
+CRUD-RAG 新闻基准用于可重复的方案对照，TiDB 评测则检查最终技术文档场景中的术语与提问改写。代价是维护两套数据和评测流程，但可以分别观察基准表现与领域表现。TiDB 的问题和相关性标签由同一模型生成、验证和判断，按合成评测报告，并按来源文档簇统计不确定性。详见[评测设计与数据边界](docs/evaluation.md)。
 
-本地生产构建预览及“完整调查、需要补充信息、证据不足”的操作见[演示指南](docs/workbench-demo.md)。连接自己的服务与模型配置见[工作台说明](docs/frontend.md)。
+</details>
 
-### 运行测试
+<details>
+<summary><b>为什么保留关键词检索，并在融合后加入重排？</b></summary>
 
-```bash
-uv sync --extra dev --extra service --python 3.13
-uv run pytest
-uv run ruff check src tests scripts
-uv run ruff format --check src tests scripts
-uv run mypy
-```
+技术文档既有需要精确匹配的命令、参数名，也有表达不同但含义相近的问题。关键词与语义检索提供不同线索，融合先合并两路候选，再由重排模型判断哪些段落更相关。词法臂选择字符 bigram：已有客户端对照中，它相对 jieba 精确与搜索模式的首条命中率点估计更高，构建更快，也省去了分词依赖。
 
-测试使用合成数据，不需要 API key、真实语料或数据库。`service` 安装 HTTP 层依赖，不会调用外部模型。
+本次 TiDB 合成评测中，重排相对仅融合的提升有配对区间和检验支持，见上方结果；融合本身并不自动优于语义单臂。增加词法臂和重排会带来维护与调用成本，因此单臂、融合和重排结果分别保留，用来检查每一步的实际贡献。详见[词法对照](docs/evaluation.md#中文-bm25字符-bigram-优于-jieba-分词)与[检索消融](docs/evaluation.md#消融摘要的离线重算)。
 
-### 启动检索服务
+</details>
 
-首次运行需要获取语料并建立索引，这不是开箱即用的离线演示。
+<details>
+<summary><b>为什么在客户端计算 BM25 和融合排名？</b></summary>
 
-1. 按[数据准备说明](DATA_LICENSE.md#3-如何在本地获得数据)下载 TiDB 文档。下载脚本使用 PowerShell；Linux/macOS 需安装 `pwsh`。
-2. 在本地 `.env` 配置服务商提供的 `Embedding_BASE_URL`、`Embedding_API_KEY`、`Embedding_MODEL_NAME`，以及 `ReRank_BASE_URL`、`ReRank_API_KEY`、`ReRank_MODEL_NAME`。当前验证过的模型为上表的 Qwen3 模型，其他端点需单独验证。
-3. 安装本地存储依赖，先预览构建计划，再显式开启付费嵌入和索引发布：
+为了让线上执行对应离线评测，项目在客户端生成 BM25 权重，将词表与索引状态一起发布，再把稀疏向量交给数据库检索。两路排名返回后，由客户端执行 RRF，并固定并列排序和截断规则。数据库的分词器、IDF 统计范围或排名处理一旦改变，都可能让线上结果偏离已评测的方案。
 
-```bash
-# 显式安装 Lite，覆盖 Windows 上 pymilvus 不自动安装它的情况
-uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
-  python scripts/build_index.py --dry-run
+代价是自己维护词法索引元数据与融合代码；收益是这些规则可以独立测试，也能在不同存储适配器之间复用。更换后端时仍需验证两臂检索与完整段落回读，不能仅凭接口相同就认定结果一致。详见[线上检索合同](docs/evaluation.md#在线链路把离线证据原样搬上去而不是搬一个像它的东西)。
 
-# 新增向量会调用付费 embedding API
-uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
-  python scripts/build_index.py --embed --publish
+</details>
 
-uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
-  python scripts/serve.py
-```
+<details>
+<summary><b>为什么同时提供单轮问答和受限文档调查？</b></summary>
 
-打开 **http://127.0.0.1:8000** 进入检索页面。默认每次查询调用 embedding 和 rerank API，可能产生费用。已有完整评估缓存时，可用 `--query-cache` 启动不调用模型的限定查询服务，见[缓存演示说明](docs/evaluation.md#缓存演示与文档同步)。
+单轮问答直接基于一次检索组织答案；跨文档问题则可能需要补充搜索，或先确认用户的环境信息。因此保留单轮问答入口，同时提供独立启用的调查循环。调查会产生多轮模型和工具调用，需要付出额外的时间与费用。
 
-本地代理可能干扰 Milvus Lite 连接；请把 `127.0.0.1,localhost` 加入 `NO_PROXY` / `no_proxy`。
+模型选择搜索、读取、追问或结束，程序校验动作白名单、证据引用和执行预算。当前只开放文档搜索与读取，答案只能引用本次实际读取的段落，工作台可逐次检查调用记录。程序负责执行约束和出处校验；引用是否支持结论，以及调查是否整体优于单轮问答，仍需单独质量评测。详见[调查合同与对照入口](docs/agent.md)。
 
-### 启用单轮问答
+</details>
 
-另在 `.env` 配置 `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL_NAME`，并显式启用：
+<details>
+<summary><b>如何选择向量维度和重排窗口？</b></summary>
 
-```bash
-uv run --extra service --extra milvus --with milvus-lite==3.2.0 \
-  python scripts/serve.py --enable-generation
-```
+先复用已有缓存做配对实验，再决定是否更改线上配置。MRL 降维从完整向量取前缀并重新归一化，无需新增嵌入请求；各维度的差值区间见上方摘要。服务仍保留 4096 维，因为已完成的重排实验绑定这套融合候选；切换到 1024 维，需要对新的候选与重排结果独立验证。
 
-页面可切换“问答 / 检索”。问答会额外调用 chat API，产生费用；`--enable-generation` 不能和 `--query-cache` 一起使用。模型端点须支持 JSON mode 与 `max_completion_tokens`，不支持时直接报错，不会自动改成无输出上限请求。生成阶段的指定 HTTP 错误（含 401）和网络瞬态故障默认阶梯重试，可能长时间等待并重复计费；用 `--generation-retries 0` 关闭，详见[重试策略](docs/answering.md#生成重试)。
+重排实验对前 100 个候选统一打分，再比较应用前 50 个分数与应用全部分数。本次分层比较未检出扩大应用窗口的额外收益，当前应用前 50 条。详见[维度与重排窗口对照](docs/evaluation.md#消融摘要的离线重算)。
+
+</details>
+
+<details>
+<summary><b>为什么不用 LangChain / LlamaIndex？</b></summary>
+
+项目需要明确控制候选排序、缓存身份、生成重试和调查预算。当前用窄 Protocol 连接检索、存储与模型，用显式循环编排文档调查，让这些行为能够独立测试，并纳入配置与运行记录。模型、存储和时钟都可替换为测试实现，默认 CI 无需 API key、语料或真实数据库。
+
+代价是自行维护流程编排和适配代码。现有固定检索流程与受限调查循环可以由这层代码覆盖，因此暂未引入通用框架。后续增加工具或复杂工作流时，会根据维护成本重新评估框架，同时保留已有的排序、预算和评测合同。详见[架构决策](docs/architecture-decision.md)。
+
+</details>
 
 ## 文档与许可
 
