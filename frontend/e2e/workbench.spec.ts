@@ -173,6 +173,8 @@ for (const scenario of [
       await page.getByRole('button', { name: '查看已读取证据' }).click();
       await expect(page.locator('.evidence-text')).toContainText('原创合成演示文档');
     }
+    await expect(page.getByRole('textbox', { name: '调查问题' })).toHaveValue('');
+    await page.getByRole('textbox', { name: '调查问题' }).fill('请调查示例集群的升级条件。');
     await expect(page.getByRole('button', { name: '运行演示', exact: true })).toBeEnabled();
   });
 }
@@ -185,6 +187,8 @@ test('stopping a demo retains steps and permits a new run', async ({ page }) => 
   await expect(page.locator('.answer-status')).toContainText('调查已停止');
   await expect(page.locator('.flow-node.running, .graph-edge-signal')).toHaveCount(0);
   await expect(page.locator('.timeline-row').first()).toBeVisible();
+  await expect(page.getByRole('textbox', { name: '调查问题' })).toHaveValue('');
+  await page.getByRole('textbox', { name: '调查问题' }).fill('请调查示例集群的升级条件。');
   await expect(page.getByRole('button', { name: '运行演示', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: '运行历史' }).click();
   await expect(page.locator('.history-item')).toHaveCount(1);

@@ -1334,6 +1334,45 @@ main {
   line-height: 1.95;
   margin-top: 11px;
 }
+.decision-detail {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--brand-soft);
+  font-size: 12px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.decision-detail h3 {
+  font-size: 11px;
+  font-weight: 550;
+  margin-bottom: 10px;
+}
+.decision-detail dl {
+  margin: 0;
+}
+.decision-detail dl > div + div {
+  margin-top: 12px;
+}
+.decision-detail dt {
+  color: var(--muted);
+  font-size: 10px;
+}
+.decision-detail dd {
+  margin: 3px 0 0;
+  white-space: pre-wrap;
+}
+.decision-action dd {
+  color: var(--brand);
+  font-weight: 550;
+}
+.decision-detail p {
+  color: var(--secondary);
+}
+.decision-detail dl + p {
+  margin-top: 10px;
+}
 .detail-properties {
   margin: 21px 0 0;
   font-size: 12px;

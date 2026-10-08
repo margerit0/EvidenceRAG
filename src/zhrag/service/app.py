@@ -635,10 +635,27 @@ def create_app(  # noqa: PLR0915
         observe: Callable[[AgentProgress], None] | None = None,
         model: str | None = None,
     ) -> JSONResponse:
+        decisions: dict[int, AgentProgress] = {}
+
+        def record_progress(event: AgentProgress) -> None:
+            if event.action == "decide" and event.phase == "completed":
+                decisions[event.step] = event
+            if observe is not None:
+                observe(event)
+
         try:
             outcome = await run_in_threadpool(
-                active_agent.run, payload.query, cancelled=stop.is_set, observe=observe
+                active_agent.run, payload.query, cancelled=stop.is_set, observe=record_progress
             )
+            events = []
+            for event in outcome.events:
+                row = asdict(event)
+                decision = decisions.get(event.step) if event.action == "decide" else None
+                if decision is not None:
+                    row["outcome"] = decision.outcome
+                    if decision.decision is not None:
+                        row["decision"] = asdict(decision.decision)
+                events.append(row)
             content = {
                 "status": outcome.status,
                 "message": AGENT_MESSAGES[outcome.status],
@@ -654,7 +671,7 @@ def create_app(  # noqa: PLR0915
                     for row in outcome.evidence
                 ],
                 "clarification": outcome.clarification,
-                "events": [asdict(event) for event in outcome.events],
+                "events": events,
                 "usage": {
                     "model_calls": outcome.model_calls,
                     "search_calls": outcome.search_calls,

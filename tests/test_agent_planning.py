@@ -21,6 +21,7 @@ from zhrag.agent_planning import (
     parse_assessment,
     parse_plan,
 )
+from zhrag.agent_progress import AgentProgress
 from zhrag.answering import AnswerBlock, Evidence
 from zhrag.retrieval.online import OnlineRetrievalResult
 from zhrag.service.app import create_app
@@ -152,7 +153,8 @@ def test_declared_missing_environment_routes_to_clarify_before_action(
         settings=AgentSettings(plan_investigation=True, review_answers=True),
         fake=PlanningRetriever(),
     )
-    result = agent.run(question)
+    progress: list[AgentProgress] = []
+    result = agent.run(question, observe=progress.append)
     assert (
         result.status == "clarification_needed" and result.clarification == dependency["question"]
     )
@@ -161,6 +163,13 @@ def test_declared_missing_environment_routes_to_clarify_before_action(
     assert [e for e in result.events if isinstance(e, PlanningEvent)][
         -1
     ].proposed_action == ignored_action["action"]
+    decisions = [e.decision for e in progress if e.action == "decide" and e.phase == "completed"]
+    assert [item.action for item in decisions if item is not None] == [
+        "search_docs",
+        "read_passage",
+        "clarify",
+    ]
+    assert decisions[-1] is not None and decisions[-1].question == dependency["question"]
 
 
 def test_known_dependency_uses_anchored_fact_and_does_not_ask_again() -> None:

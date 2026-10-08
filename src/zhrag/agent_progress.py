@@ -9,6 +9,16 @@ from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
+class AgentDecision:
+    """Validated action parameters for the requesting UI, without raw model output."""
+
+    action: str
+    query: str | None = None
+    evidence_id: int | None = None
+    question: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AgentProgress:
     seq: int
     invocation_id: str
@@ -18,6 +28,7 @@ class AgentProgress:
     elapsed_seconds: float
     outcome: str | None = None
     evidence_ids: tuple[int, ...] = ()
+    decision: AgentDecision | None = None
 
 
 class ProgressRecorder:
@@ -37,10 +48,20 @@ class ProgressRecorder:
         phase: Literal["started", "completed"],
         outcome: str | None = None,
         ids: tuple[int, ...] = (),
+        *,
+        decision: AgentDecision | None = None,
     ) -> None:
         self.seq += 1
         event = AgentProgress(
-            self.seq, f"call-{self.invocation}", step, action, phase, self.clock(), outcome, ids
+            self.seq,
+            f"call-{self.invocation}",
+            step,
+            action,
+            phase,
+            self.clock(),
+            outcome,
+            ids,
+            decision,
         )
         # The optional display sink must not turn a valid answer into a model failure.
         with suppress(Exception):
@@ -51,10 +72,16 @@ class ProgressRecorder:
         self.active = (action, step)
         self._emit(action, step, "started")
 
-    def complete(self, outcome: str, ids: tuple[int, ...] = ()) -> None:
+    def complete(
+        self,
+        outcome: str,
+        ids: tuple[int, ...] = (),
+        *,
+        decision: AgentDecision | None = None,
+    ) -> None:
         if self.active is not None:
             action, step = self.active
-            self._emit(action, step, "completed", outcome, ids)
+            self._emit(action, step, "completed", outcome, ids, decision=decision)
             self.active = None
 
     def record(self, action: str, step: int, outcome: str, ids: tuple[int, ...] = ()) -> None:

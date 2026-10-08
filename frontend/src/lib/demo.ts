@@ -1,4 +1,4 @@
-import type { Progress, Result } from './model';
+import type { Decision, Progress, Result } from './model';
 
 export const scenarios = [
   {
@@ -54,7 +54,14 @@ export function demoScript(id: ScenarioId, runId: string): { events: Progress[];
   let elapsed = 0;
   let call = 0;
   let step = 0;
-  const invoke = (action: string, outcome = 'ok', ids: number[] = [], duration = 1.1) => {
+  const clarification = '请补充示例集群的当前版本和目标版本，并与原问题一起重新提交。';
+  const invoke = (
+    action: string,
+    outcome = 'ok',
+    ids: number[] = [],
+    duration = 1.1,
+    decision?: Decision,
+  ) => {
     if (action === 'decide') step++;
     const invocation_id = `demo-${++call}`;
     events.push({
@@ -79,25 +86,33 @@ export function demoScript(id: ScenarioId, runId: string): { events: Progress[];
       elapsed_seconds: elapsed,
       outcome,
       evidence_ids: ids,
+      ...(decision ? { decision } : {}),
     });
   };
-  invoke('decide');
-  if (id !== 'clarification_needed') {
+  const decide = (decision: Decision, duration = 1.1) =>
+    invoke('decide', 'ok', [], duration, decision);
+  if (id === 'clarification_needed') {
+    decide({ action: 'clarify', question: clarification });
+  } else {
+    decide({
+      action: 'search_docs',
+      query:
+        id === 'insufficient_evidence' ? '示例集群 升级 停机 保证' : '示例集群 升级前 配置 兼容性',
+    });
     invoke('search_docs', 'ok', [1], 1.8);
-    invoke('decide');
+    decide({ action: 'read_passage', evidence_id: 1 });
     invoke('read_passage', 'ok', [1], 0.3);
     if (id === 'answered') {
-      invoke('decide');
+      decide({ action: 'search_docs', query: '示例集群 升级演练 回退条件' });
       invoke('search_docs', 'ok', [2], 1.5);
-      invoke('decide');
+      decide({ action: 'read_passage', evidence_id: 2 });
       invoke('read_passage', 'ok', [2], 0.3);
     }
-    invoke(
-      'decide',
-      id === 'generation_timeout' ? id : 'ok',
-      [],
-      id === 'generation_timeout' ? 3 : 1.2,
-    );
+    if (id === 'generation_timeout' || id === 'budget_exhausted') {
+      invoke('decide', id, [], id === 'generation_timeout' ? 3 : 1.2);
+    } else {
+      decide({ action: id === 'answered' ? 'answer' : 'abstain' }, 1.2);
+    }
   }
   if (id === 'answered') invoke('validate_answer', 'ok', [1, 2], 0.2);
   invoke('finish', id, [], 0.01);
@@ -115,10 +130,7 @@ export function demoScript(id: ScenarioId, runId: string): { events: Progress[];
               : id === 'budget_exhausted'
                 ? '已达到调查预算，未发布未完成的答案。'
                 : '模型调用超时，调查已结束。',
-      clarification:
-        id === 'clarification_needed'
-          ? '请补充示例集群的当前版本和目标版本，并与原问题一起重新提交。'
-          : '',
+      clarification: id === 'clarification_needed' ? clarification : '',
       blocks:
         id === 'answered'
           ? [
@@ -142,6 +154,7 @@ export function demoScript(id: ScenarioId, runId: string): { events: Progress[];
           outcome: e.outcome!,
           elapsed_seconds: e.elapsed_seconds,
           evidence_ids: e.evidence_ids,
+          ...(e.decision ? { decision: e.decision } : {}),
         })),
       usage: {
         model_calls: step,

@@ -1,8 +1,9 @@
 # 下一会话开发交接
 
-更新：2026-10-07。工作区 `D:\rag`，本阶段交付基线为 `main`。
-`feat/frontend-design` 保留为已完成的阶段分支；本轮已从 `main` / `9278053`
-创建 `codex/branch-sync-review`，后续先核对实际分支，不重复创建。
+更新：2026-10-08。工作区 `D:\rag`，本轮修复分支为 `codex/clear-submitted-query`；
+实际分支与远端同步状态以 Git 为准。
+`feat/frontend-design` 保留为已完成的阶段分支；此前文档与分支审查使用
+`codex/branch-sync-review`。后续先核对实际分支，不重复创建。
 
 新会话先读取 `CLAUDE.md` 和本文，再核对 `git status --short --branch`、
 `git log -3 --oneline`。以实际代码和最新验证记录为准，保留新出现的未提交修改。
@@ -14,6 +15,12 @@
 补齐消融摘要的离线生成入口，校正统计解释、查询前缀、生成参数和历史状态。
 修正范围与本轮验证见[文档一致性记录](documentation-consistency.md)。
 README 原有暂存修改作为基线保留，新增修正留在工作区；Git 状态以实际检查为准。
+
+2026-10-08 决策详情修复：检查器在每次“Agent 决策”标题下显示已解析的动作与参数，
+覆盖搜索词、读取的证据编号、追问、提交答案和停止作答。SSE 与最终响应均保留详情；
+等待、失败和旧服务缺字段有明确说明。模型输入、提示词与配置指纹保持原合同。
+本轮提交一并包含输入框清空逻辑及对应 E2E 修正，下面的完整验证已覆盖这些改动。
+后端已按当前进程原有参数重启，两个模型均可用；未发起真实模型调用。
 
 ## 当前已完成
 
@@ -67,18 +74,27 @@ README 原有暂存修改作为基线保留，新增修正留在工作区；Git 
 - 后端恢复命令见 `docs/frontend.md` 的“选择调查模型”；也可从仓库根运行：
 
 ```powershell
-.venv/Scripts/python.exe .research_tmp/frontend-model-selector-20261006/serve_live.py
+.venv/Scripts/python.exe scripts/serve.py --env .research_tmp/frontend-model-selector-20261006/service.env --enable-generation --enable-agent --agent-model z-ai/glm-5.3 --generation-reasoning-effort high --generation-max-tokens 4096 --generation-timeout 90 --agent-max-seconds 600 --agent-generation-retries 5
 ```
 
 恢复前先检查端口与对应进程，不重复启动或停止其他任务的服务。上述本地启动器、配置、
 索引和运行产物均被 Git 忽略，新机器不会随代码获得。不要打印或复制凭证到文档、日志、
 提交或新会话提示词。
 
-当前模型请求使用非流式、低推理强度、4096 输出上限、90 秒单次超时、600 秒调查预算，
-最多 1 次瞬态重试；前端执行进度仍为 SSE。DeepSeek 流式曾出现缺少正常 `stop` 的响应，
+2026-10-08 重启保留本轮开始时的实际参数：非流式、high 推理强度、4096 输出上限、
+90 秒单次超时、600 秒调查预算，最多 5 次瞬态重试；前端执行进度仍为 SSE。
+旧 `serve_live.py` 启动器使用 low / 1 次重试，不能用它代替上面的当前配置。
+DeepSeek 流式曾出现缺少正常 `stop` 的响应，
 不能为了跑通而取消完整性校验；放宽大小写并不等于放宽结束条件。
 
 ## 验证与产物
+
+2026-10-08 决策详情：Python 全套 1,789 项、前端单测 22 项、生产构建上的浏览器回归
+40 项通过；ruff check / format、mypy、Prettier 与 diff 空白检查通过。浏览器验证覆盖
+实时与批量响应、多轮动作切换、追问、停止作答、失败、旧服务兼容以及长文本安全显示，
+已查看浅色桌面与深色手机截图。JUnit 与本轮后端日志位于
+`.research_tmp/agent-decision-details-20261008/`；截图位于 `frontend/test-results/`。
+本地 `/healthz`、能力接口和 `5173/workbench/` 已恢复，未调用付费 API。
 
 2026-10-07 分支核对后续：生产构建（TypeScript / Vite）通过，独立生产预览上的
 三条既有浏览器回归通过（完整调查及引用/同类调用导航、需要补充信息、证据不足）。

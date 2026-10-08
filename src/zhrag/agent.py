@@ -28,7 +28,7 @@ from zhrag.agent_planning import (
     parse_assessment,
     parse_plan,
 )
-from zhrag.agent_progress import AgentProgress, ProgressRecorder
+from zhrag.agent_progress import AgentDecision, AgentProgress, ProgressRecorder
 from zhrag.answering import (
     ANSWER_CONTRACT,
     AnswerBlock,
@@ -407,6 +407,8 @@ class DocumentAgent:
         outcome: str,
         ids: tuple[int, ...] = (),
         validation_error: AnswerValidationReason | None = None,
+        *,
+        observe: bool = True,
     ) -> None:
         state.events.append(
             AgentEvent(
@@ -418,8 +420,24 @@ class DocumentAgent:
                 validation_error.value if validation_error is not None else None,
             )
         )
-        if state.progress is not None:
+        if state.progress is not None and observe:
             state.progress.record(action, state.model_calls, outcome, ids)
+
+    @staticmethod
+    def _observe_decision(state: _Run, action: dict[str, object]) -> None:
+        if state.progress is None:
+            return
+        name = str(action["action"])
+        key = action.get("evidence_id")
+        state.progress.complete(
+            "ok",
+            decision=AgentDecision(
+                action=name,
+                query=str(action["query"]) if name == "search_docs" else None,
+                evidence_id=key if name == "read_passage" and type(key) is int else None,
+                question=str(action["question"]) if name == "clarify" else None,
+            ),
+        )
 
     def _outcome(
         self,
@@ -552,7 +570,9 @@ class DocumentAgent:
                 return self._outcome(state, exc.code)
             except (Exception, SystemExit):
                 return self._outcome(state, "generation_failed")
-            self._event(state, stage, "ok")
+            # Keep model history unchanged; complete the UI decision after parsing
+            # so its chosen action and parameters arrive in the same observation.
+            self._event(state, stage, "ok", observe=stage != "decide")
             stopped = self._stop(state, cancelled)
             if stopped:
                 return self._outcome(state, stopped)
@@ -579,6 +599,7 @@ class DocumentAgent:
             action = parse_action(raw)
         except ValueError:
             return self._outcome(state, "invalid_action")
+        self._observe_decision(state, action)
         return self._dispatch(state, action)
 
     def _planned_reply(self, state: _Run, raw: str) -> AgentOutcome | None:
@@ -599,6 +620,12 @@ class DocumentAgent:
             return self._outcome(state, "invalid_action")
         state.assessment = assessment
         state.planning_feedback = None
+        self._observe_decision(
+            state,
+            {"action": "clarify", "question": assessment.clarification}
+            if assessment.clarification
+            else action,
+        )
         self._planning_event(state, "checked", proposed_action=str(action["action"]))
         if assessment.clarification:
             self._event(state, "assess", "clarification_required")

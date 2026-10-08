@@ -43,6 +43,7 @@ import {
   TooltipProvider,
 } from './components/ui';
 import { Inspector } from './components/Inspector';
+import { DecisionDetails } from './components/DecisionDetails';
 import { ExecutionGraph } from './components/ExecutionGraph';
 import { ApiError, capabilities, investigate } from './lib/api';
 import { playDemo, scenarios, type ScenarioId } from './lib/demo';
@@ -240,6 +241,7 @@ export default function App() {
       transport: demo ? 'demo' : streaming ? 'stream' : 'batch',
     };
     setRuns((previous) => [run, ...previous].slice(0, 10));
+    setQuery('');
     setSelectedRun(id);
     setSelectedCall(undefined);
     setSourceId(undefined);
@@ -959,6 +961,10 @@ export default function App() {
                                 {actionNames[selected.action] ?? selected.action} · 第{' '}
                                 {invocationOrdinal(calls, selected)} 次
                               </h2>
+                              <DecisionDetails
+                                call={selected}
+                                running={current?.state === 'running'}
+                              />
                               <nav className="invocation-navigation" aria-label="同类调用导航">
                                 <div className="invocation-navigation-heading">
                                   <span>同类调用</span>

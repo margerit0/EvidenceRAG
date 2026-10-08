@@ -7,6 +7,13 @@ export const sourceSchema = z.object({
   text: z.string(),
   source_url: z.string().nullable(),
 });
+export const decisionSchema = z.discriminatedUnion('action', [
+  z.object({ action: z.literal('search_docs'), query: z.string().min(1) }),
+  z.object({ action: z.literal('read_passage'), evidence_id: z.number().int().positive() }),
+  z.object({ action: z.literal('answer') }),
+  z.object({ action: z.literal('clarify'), question: z.string().min(1) }),
+  z.object({ action: z.literal('abstain') }),
+]);
 export const eventSchema = z.object({
   step: z.number(),
   action: z.string(),
@@ -14,6 +21,7 @@ export const eventSchema = z.object({
   elapsed_seconds: z.number().nonnegative(),
   evidence_ids: z.array(z.number()).default([]),
   validation_error: z.string().nullable().optional(),
+  decision: decisionSchema.nullish(),
 });
 export const resultSchema = z.object({
   status: z.string(),
@@ -42,6 +50,7 @@ export const progressSchema = z.object({
   elapsed_seconds: z.number().nonnegative(),
   outcome: z.string().nullable(),
   evidence_ids: z.array(z.number()),
+  decision: decisionSchema.nullish(),
 });
 export const capabilitiesSchema = z.object({
   agent_enabled: z.boolean(),
@@ -54,6 +63,7 @@ export type Result = z.infer<typeof resultSchema>;
 export type Source = z.infer<typeof sourceSchema>;
 export type Progress = z.infer<typeof progressSchema>;
 export type Capabilities = z.infer<typeof capabilitiesSchema>;
+export type Decision = z.infer<typeof decisionSchema>;
 export type NodeKey = 'agent' | 'search' | 'read' | 'finish';
 export type Run = {
   id: string;
@@ -77,6 +87,7 @@ export type Invocation = {
   end?: number;
   outcome?: string;
   evidenceIds: number[];
+  decision?: Decision;
 };
 
 export function nodeFor(action: string): NodeKey {
@@ -158,6 +169,7 @@ export function invocations(events: Progress[]): Invocation[] {
       item.end = e.elapsed_seconds;
       item.outcome = e.outcome ?? undefined;
       item.evidenceIds = e.evidence_ids;
+      item.decision = e.decision ?? undefined;
     }
     items.set(e.invocation_id, item);
   }
