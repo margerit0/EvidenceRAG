@@ -1,4 +1,12 @@
-import { memo, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import {
   Background,
   BackgroundVariant,
@@ -15,6 +23,7 @@ import {
   useReactFlow,
   type Node,
   type NodeProps,
+  type OnNodesChange,
   type Edge,
   type EdgeProps,
   type Rect,
@@ -225,6 +234,26 @@ export function ExecutionGraph({
 }) {
   const container = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
+  const [measurements, setMeasurements] = useState<Record<string, FlowNode['measured']>>({});
+  const onNodesChange = useCallback<OnNodesChange<FlowNode>>((changes) => {
+    // Controlled nodes must retain measured dimensions; dropping them clears
+    // React Flow's handle bounds even when the node's fixed size has not changed.
+    const dimensions = changes.filter((change) => change.type === 'dimensions');
+    if (!dimensions.length) return;
+    setMeasurements((current) => {
+      let next = current;
+      for (const change of dimensions) {
+        if (
+          change.dimensions &&
+          (current[change.id]?.width !== change.dimensions.width ||
+            current[change.id]?.height !== change.dimensions.height)
+        ) {
+          next = { ...next, [change.id]: change.dimensions };
+        }
+      }
+      return next;
+    });
+  }, []);
   useLayoutEffect(() => {
     if (!container.current) return;
     const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 380));
@@ -272,6 +301,7 @@ export function ExecutionGraph({
       // Supplying them also lets viewport fitting run without a measurement round trip.
       width: nodeWidth,
       height: nodeHeight,
+      measured: measurements[stage.id],
       position: layout[index].position,
       selected: !!inspected,
       data: {
@@ -337,6 +367,7 @@ export function ExecutionGraph({
       >
         <ReactFlow
           nodes={nodes}
+          onNodesChange={onNodesChange}
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}

@@ -17,6 +17,7 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
       await page.goto('/workbench/');
       if (viewport.width === 1366) await page.getByRole('button', { name: '切换深色' }).click();
       await expect(page.locator('.flow-node')).toHaveCount(4);
+      await expect(page.locator('.graph-edge .react-flow__edge-path')).toHaveCount(5);
       const samples = await page.evaluate(async () => {
         await document.fonts.ready;
         const track = document.querySelector('.inspector-slot')!;
@@ -55,17 +56,19 @@ for (const reducedMotion of ['no-preference', 'reduce'] as const) {
               sameNode: node === document.querySelector('.flow-node'),
               inert: pane.inert,
               open: toggle.getAttribute('aria-expanded') === 'true',
-              fits: shapes.every((shape) => {
-                const r = shape.getBoundingClientRect();
-                return (
-                  r.height > 0 &&
-                  (!shape.classList.contains('flow-node') || r.width > 0) &&
-                  r.left >= canvas.left - 1 &&
-                  r.right <= canvas.right + 1 &&
-                  r.top >= canvas.top - 1 &&
-                  r.bottom <= canvas.bottom + 1
-                );
-              }),
+              fits:
+                shapes.length === 9 &&
+                shapes.every((shape) => {
+                  const r = shape.getBoundingClientRect();
+                  return (
+                    r.height > 0 &&
+                    (!shape.classList.contains('flow-node') || r.width > 0) &&
+                    r.left >= canvas.left - 1 &&
+                    r.right <= canvas.right + 1 &&
+                    r.top >= canvas.top - 1 &&
+                    r.bottom <= canvas.bottom + 1
+                  );
+                }),
             });
             const sample = samples.at(-1)!;
             if (
@@ -204,6 +207,7 @@ test('history inspection preserves a manual graph zoom and execution signals sto
   await page.keyboard.press('Escape');
   await expect(page.locator('.inspector-drawer')).toHaveCount(0);
   await page.getByRole('button', { name: '适应画布', exact: true }).click();
+  await expect(page.locator('.graph-edge .react-flow__edge-path')).toHaveCount(5);
   expect(
     await page.locator('.graph-canvas').evaluate((el) => {
       const canvas = el.getBoundingClientRect();
@@ -220,3 +224,77 @@ test('history inspection preserves a manual graph zoom and execution signals sto
     }),
   ).toBe(true);
 });
+
+for (const reducedMotion of ['no-preference', 'reduce'] as const) {
+  test(`decision inspection keeps every graph connection during execution: ${reducedMotion}`, async ({
+    page,
+  }, info) => {
+    await page.emulateMedia({ reducedMotion });
+    await page.goto('/workbench/');
+    const graph = page.getByTestId('execution-graph');
+    const paths = graph.locator('.graph-edge .react-flow__edge-path');
+    await expect(paths).toHaveCount(5);
+    await page.evaluate(() => document.fonts.ready);
+    const monitor = await page.evaluateHandle(() => {
+      let active = true;
+      let frames = 0;
+      let runningFrames = 0;
+      let missingFrames = 0;
+      const failures: { frame: number; paths: number; running: boolean }[] = [];
+      const sample = () => {
+        if (!active) return;
+        frames++;
+        const paths = [...document.querySelectorAll('.graph-edge .react-flow__edge-path')];
+        const running = !!document.querySelector('.flow-node.running');
+        if (running) runningFrames++;
+        if (
+          paths.length !== 5 ||
+          paths.some(
+            (path) => !path.getAttribute('d') || /NaN|Infinity/.test(path.getAttribute('d')!),
+          )
+        ) {
+          missingFrames++;
+          if (failures.length < 10) failures.push({ frame: frames, paths: paths.length, running });
+        }
+        requestAnimationFrame(() => setTimeout(sample, 0));
+      };
+      requestAnimationFrame(() => setTimeout(sample, 0));
+      return {
+        stop: () => {
+          active = false;
+          return { frames, runningFrames, missingFrames, failures };
+        },
+      };
+    });
+    await page.getByRole('button', { name: '运行演示', exact: true }).click();
+    const decisions = page.locator('.timeline-row').filter({ hasText: 'Agent 决策' });
+    for (let index = 0; index < 5; index++) {
+      await decisions.nth(index).click();
+      await expect(page.locator('.step-detail h2')).toHaveText(`Agent 决策 · 第 ${index + 1} 次`);
+      if (index > 0) {
+        await page.getByRole('button', { name: '上一次同类调用' }).click();
+        await expect(page.locator('.step-detail h2')).toHaveText(`Agent 决策 · 第 ${index} 次`);
+        await page.getByRole('button', { name: '下一次同类调用' }).click();
+        await expect(page.locator('.step-detail h2')).toHaveText(`Agent 决策 · 第 ${index + 1} 次`);
+      }
+      await page.locator('.inspector-toggle').click();
+    }
+    await expect(page.locator('.answer-status')).toContainText('已生成答案');
+    await decisions.first().click();
+    await expect(page.locator('.step-detail h2')).toHaveText('Agent 决策 · 第 1 次');
+    await expect(paths).toHaveCount(5);
+    await expect(graph.locator('.graph-edge.is-traversed')).toHaveCount(5);
+    await expect(graph.locator('.graph-edge-signal')).toHaveCount(0);
+    const samples = await monitor.evaluate((monitor) => monitor.stop());
+    await monitor.dispose();
+    await info.attach('graph-connections', {
+      body: JSON.stringify(samples),
+      contentType: 'application/json',
+    });
+    await page
+      .locator('.execution-pane')
+      .screenshot({ path: info.outputPath('decision-graph.png') });
+    expect(samples.runningFrames).toBeGreaterThan(0);
+    expect(samples.missingFrames, JSON.stringify(samples.failures)).toBe(0);
+  });
+}
