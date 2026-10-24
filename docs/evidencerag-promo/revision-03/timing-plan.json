@@ -1,0 +1,93 @@
+{
+  "beats": 24,
+  "bpm": 120,
+  "events": [
+    {
+      "action": "点击运行演示",
+      "frame": 45,
+      "seconds": 1.5
+    },
+    {
+      "action": "第一次搜索",
+      "frame": 60,
+      "seconds": 2.0
+    },
+    {
+      "action": "第一次读取",
+      "frame": 75,
+      "seconds": 2.5
+    },
+    {
+      "action": "返回 Agent 准备补充搜索",
+      "frame": 90,
+      "seconds": 3.0
+    },
+    {
+      "action": "补充搜索",
+      "frame": 105,
+      "seconds": 3.5
+    },
+    {
+      "action": "第二次读取",
+      "frame": 120,
+      "seconds": 4.0
+    },
+    {
+      "action": "点击第二次读取记录，展开步骤检查器",
+      "frame": 135,
+      "seconds": 4.5
+    },
+    {
+      "action": "第一条答案",
+      "frame": 150,
+      "seconds": 5.0
+    },
+    {
+      "action": "第二条答案",
+      "frame": 165,
+      "seconds": 5.5
+    },
+    {
+      "action": "点击引用 [2]，切到证据检查器",
+      "frame": 210,
+      "seconds": 7.0
+    },
+    {
+      "action": "开始原文稳定阅读",
+      "frame": 225,
+      "seconds": 7.5
+    },
+    {
+      "action": "工作台收拢为产品卡片",
+      "frame": 300,
+      "seconds": 10.0
+    },
+    {
+      "action": "品牌文字进入",
+      "frame": 315,
+      "seconds": 10.5
+    },
+    {
+      "action": "品牌稳定停留",
+      "frame": 330,
+      "seconds": 11.0
+    }
+  ],
+  "fps": 30,
+  "frame_count": 360,
+  "holds": {
+    "brand_frames": [
+      330,
+      359
+    ],
+    "brand_seconds": 1.0,
+    "source_frames": [
+      225,
+      299
+    ],
+    "source_seconds": 2.5
+  },
+  "question": "示例集群升级前，需要检查哪些配置与回退条件？",
+  "seconds": 12,
+  "source2": "升级演练 / 回退条件"
+}

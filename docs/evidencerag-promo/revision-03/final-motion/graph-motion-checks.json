@@ -1,0 +1,53 @@
+{
+  "encoded_motion": {
+    "signals": {
+      "changed_pixels_over_8": 110,
+      "crop": [
+        1331,
+        496,
+        123,
+        28
+      ],
+      "frames": [
+        84,
+        89
+      ],
+      "maximum_channel_difference": 100
+    },
+    "spinners": {
+      "changed_pixels_over_8": 45,
+      "crop": [
+        1513,
+        529,
+        24,
+        24
+      ],
+      "frames": [
+        84,
+        89
+      ],
+      "maximum_channel_difference": 84
+    }
+  },
+  "native_timing_ms": {
+    "edge_transition": 200,
+    "node_transition": 220,
+    "signal": 1400,
+    "spinner": 1300,
+    "status_enter": 180
+  },
+  "note": "The existing frontend signal path and CSS keyframes are paused and sought from integer frame time; no wall-clock effects are relied on.",
+  "observed_flowing_edges": [
+    "agent-finish",
+    "agent-read",
+    "agent-search",
+    "read-agent"
+  ],
+  "signal_frames": 90,
+  "source_sha256": {
+    "frontend\\src\\components\\ExecutionGraph.tsx": "cfcfc47c7949a5d23a5f493cd5fbb6d1956838ad8e9f3260cfd9f525b32f02be",
+    "frontend\\src\\styles.css": "1edbef5047ec530311f46484a81b51be1998fa87b2bb0d8031ea0572bd341714"
+  },
+  "spinner_frames": 105,
+  "status": "passed"
+}

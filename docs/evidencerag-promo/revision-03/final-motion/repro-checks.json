@@ -1,0 +1,57 @@
+{
+  "checks": [
+    {
+      "changed_pixel_fraction": 8.439429012345679e-05,
+      "frame": 255,
+      "maximum_channel_difference": 7,
+      "mean_absolute_channel_difference": 5.4333847736625516e-05
+    },
+    {
+      "changed_pixel_fraction": 0.0,
+      "frame": 65,
+      "maximum_channel_difference": 0,
+      "mean_absolute_channel_difference": 0.0
+    },
+    {
+      "changed_pixel_fraction": 0.0010218942901234567,
+      "frame": 345,
+      "maximum_channel_difference": 1,
+      "mean_absolute_channel_difference": 0.00036747685185185185
+    },
+    {
+      "changed_pixel_fraction": 5.160108024691358e-05,
+      "frame": 95,
+      "maximum_channel_difference": 10,
+      "mean_absolute_channel_difference": 3.5525977366255144e-05
+    },
+    {
+      "changed_pixel_fraction": 0.00028404706790123455,
+      "frame": 85,
+      "maximum_channel_difference": 19,
+      "mean_absolute_channel_difference": 0.000376318158436214
+    },
+    {
+      "changed_pixel_fraction": 4.822530864197531e-06,
+      "frame": 140,
+      "maximum_channel_difference": 2,
+      "mean_absolute_channel_difference": 3.054269547325103e-06
+    },
+    {
+      "changed_pixel_fraction": 0.0002160493827160494,
+      "frame": 195,
+      "maximum_channel_difference": 20,
+      "mean_absolute_channel_difference": 0.00043724279835390947
+    }
+  ],
+  "comparison": "Independent native-motion render with exact Chinese text checks. Small browser antialiasing differences are tolerated.",
+  "direct_seek_order": [
+    255,
+    65,
+    345,
+    95,
+    85,
+    140,
+    195
+  ],
+  "status": "passed"
+}

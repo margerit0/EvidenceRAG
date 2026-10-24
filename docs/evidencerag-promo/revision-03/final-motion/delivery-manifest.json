@@ -1,0 +1,20 @@
+{
+  "approved": true,
+  "files": {
+    "EvidenceRAG-12s.mp4": {
+      "bytes": 1674958,
+      "sha256": "35c6f78ab15dbeee11b41782d0bce18f1f4c340b1143fd97e29eb149ea66f6c4"
+    },
+    "EvidenceRAG-source.zip": {
+      "bytes": 5457547,
+      "sha256": "347637bb65fb8be4da67fb9cb65fd003a48d0244552c526d7e2a6ad2ec800586"
+    },
+    "check-sheet.png": {
+      "bytes": 859813,
+      "sha256": "4609ba19ee845fb382a88acc77b9d22d223f74d9363f8854eb9c2d618068171d"
+    }
+  },
+  "revision": "03-native-motion",
+  "source_archive_entries": 48,
+  "technical_checks": "passed"
+}

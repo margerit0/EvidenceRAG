@@ -1,0 +1,600 @@
+{
+  "beats": 24,
+  "bpm": 120,
+  "channels": 2,
+  "duration_seconds": 12,
+  "events": [
+    {
+      "frame": 0,
+      "kind": "chord",
+      "sample": 0,
+      "time": 0
+    },
+    {
+      "frame": 0,
+      "kind": "chord",
+      "sample": 0,
+      "time": 0
+    },
+    {
+      "frame": 0,
+      "kind": "chord",
+      "sample": 0,
+      "time": 0
+    },
+    {
+      "frame": 0,
+      "kind": "chord",
+      "sample": 0,
+      "time": 0
+    },
+    {
+      "frame": 0,
+      "kind": "chord",
+      "sample": 0,
+      "time": 0
+    },
+    {
+      "frame": 0,
+      "kind": "bass",
+      "sample": 0,
+      "time": 0
+    },
+    {
+      "frame": 60,
+      "kind": "chord",
+      "sample": 96000,
+      "time": 2
+    },
+    {
+      "frame": 60,
+      "kind": "chord",
+      "sample": 96000,
+      "time": 2
+    },
+    {
+      "frame": 60,
+      "kind": "chord",
+      "sample": 96000,
+      "time": 2
+    },
+    {
+      "frame": 60,
+      "kind": "chord",
+      "sample": 96000,
+      "time": 2
+    },
+    {
+      "frame": 60,
+      "kind": "bass",
+      "sample": 96000,
+      "time": 2
+    },
+    {
+      "frame": 120,
+      "kind": "chord",
+      "sample": 192000,
+      "time": 4
+    },
+    {
+      "frame": 120,
+      "kind": "chord",
+      "sample": 192000,
+      "time": 4
+    },
+    {
+      "frame": 120,
+      "kind": "chord",
+      "sample": 192000,
+      "time": 4
+    },
+    {
+      "frame": 120,
+      "kind": "chord",
+      "sample": 192000,
+      "time": 4
+    },
+    {
+      "frame": 120,
+      "kind": "chord",
+      "sample": 192000,
+      "time": 4
+    },
+    {
+      "frame": 120,
+      "kind": "bass",
+      "sample": 192000,
+      "time": 4
+    },
+    {
+      "frame": 180,
+      "kind": "chord",
+      "sample": 288000,
+      "time": 6
+    },
+    {
+      "frame": 180,
+      "kind": "chord",
+      "sample": 288000,
+      "time": 6
+    },
+    {
+      "frame": 180,
+      "kind": "chord",
+      "sample": 288000,
+      "time": 6
+    },
+    {
+      "frame": 180,
+      "kind": "chord",
+      "sample": 288000,
+      "time": 6
+    },
+    {
+      "frame": 180,
+      "kind": "bass",
+      "sample": 288000,
+      "time": 6
+    },
+    {
+      "frame": 240,
+      "kind": "chord",
+      "sample": 384000,
+      "time": 8
+    },
+    {
+      "frame": 240,
+      "kind": "chord",
+      "sample": 384000,
+      "time": 8
+    },
+    {
+      "frame": 240,
+      "kind": "chord",
+      "sample": 384000,
+      "time": 8
+    },
+    {
+      "frame": 240,
+      "kind": "chord",
+      "sample": 384000,
+      "time": 8
+    },
+    {
+      "frame": 240,
+      "kind": "chord",
+      "sample": 384000,
+      "time": 8
+    },
+    {
+      "frame": 240,
+      "kind": "bass",
+      "sample": 384000,
+      "time": 8
+    },
+    {
+      "frame": 300,
+      "kind": "chord",
+      "sample": 480000,
+      "time": 10
+    },
+    {
+      "frame": 300,
+      "kind": "chord",
+      "sample": 480000,
+      "time": 10
+    },
+    {
+      "frame": 300,
+      "kind": "chord",
+      "sample": 480000,
+      "time": 10
+    },
+    {
+      "frame": 300,
+      "kind": "chord",
+      "sample": 480000,
+      "time": 10
+    },
+    {
+      "frame": 300,
+      "kind": "chord",
+      "sample": 480000,
+      "time": 10
+    },
+    {
+      "frame": 300,
+      "kind": "bass",
+      "sample": 480000,
+      "time": 10
+    },
+    {
+      "frame": 0,
+      "kind": "beat",
+      "sample": 0,
+      "time": 0.0
+    },
+    {
+      "frame": 0,
+      "kind": "key",
+      "sample": 0,
+      "time": 0.0
+    },
+    {
+      "frame": 15,
+      "kind": "beat",
+      "sample": 24000,
+      "time": 0.5
+    },
+    {
+      "frame": 30,
+      "kind": "beat",
+      "sample": 48000,
+      "time": 1.0
+    },
+    {
+      "frame": 30,
+      "kind": "key",
+      "sample": 48000,
+      "time": 1.0
+    },
+    {
+      "frame": 45,
+      "kind": "beat",
+      "sample": 72000,
+      "time": 1.5
+    },
+    {
+      "frame": 60,
+      "kind": "beat",
+      "sample": 96000,
+      "time": 2.0
+    },
+    {
+      "frame": 60,
+      "kind": "key",
+      "sample": 96000,
+      "time": 2.0
+    },
+    {
+      "frame": 75,
+      "kind": "beat",
+      "sample": 120000,
+      "time": 2.5
+    },
+    {
+      "frame": 90,
+      "kind": "beat",
+      "sample": 144000,
+      "time": 3.0
+    },
+    {
+      "frame": 90,
+      "kind": "key",
+      "sample": 144000,
+      "time": 3.0
+    },
+    {
+      "frame": 105,
+      "kind": "beat",
+      "sample": 168000,
+      "time": 3.5
+    },
+    {
+      "frame": 105,
+      "kind": "key",
+      "sample": 168000,
+      "time": 3.5
+    },
+    {
+      "frame": 120,
+      "kind": "beat",
+      "sample": 192000,
+      "time": 4.0
+    },
+    {
+      "frame": 120,
+      "kind": "key",
+      "sample": 192000,
+      "time": 4.0
+    },
+    {
+      "frame": 135,
+      "kind": "beat",
+      "sample": 216000,
+      "time": 4.5
+    },
+    {
+      "frame": 150,
+      "kind": "beat",
+      "sample": 240000,
+      "time": 5.0
+    },
+    {
+      "frame": 150,
+      "kind": "key",
+      "sample": 240000,
+      "time": 5.0
+    },
+    {
+      "frame": 165,
+      "kind": "beat",
+      "sample": 264000,
+      "time": 5.5
+    },
+    {
+      "frame": 165,
+      "kind": "key",
+      "sample": 264000,
+      "time": 5.5
+    },
+    {
+      "frame": 180,
+      "kind": "beat",
+      "sample": 288000,
+      "time": 6.0
+    },
+    {
+      "frame": 180,
+      "kind": "key",
+      "sample": 288000,
+      "time": 6.0
+    },
+    {
+      "frame": 195,
+      "kind": "beat",
+      "sample": 312000,
+      "time": 6.5
+    },
+    {
+      "frame": 210,
+      "kind": "beat",
+      "sample": 336000,
+      "time": 7.0
+    },
+    {
+      "frame": 210,
+      "kind": "key",
+      "sample": 336000,
+      "time": 7.0
+    },
+    {
+      "frame": 225,
+      "kind": "beat",
+      "sample": 360000,
+      "time": 7.5
+    },
+    {
+      "frame": 225,
+      "kind": "key",
+      "sample": 360000,
+      "time": 7.5
+    },
+    {
+      "frame": 240,
+      "kind": "beat",
+      "sample": 384000,
+      "time": 8.0
+    },
+    {
+      "frame": 240,
+      "kind": "key",
+      "sample": 384000,
+      "time": 8.0
+    },
+    {
+      "frame": 255,
+      "kind": "beat",
+      "sample": 408000,
+      "time": 8.5
+    },
+    {
+      "frame": 270,
+      "kind": "beat",
+      "sample": 432000,
+      "time": 9.0
+    },
+    {
+      "frame": 270,
+      "kind": "key",
+      "sample": 432000,
+      "time": 9.0
+    },
+    {
+      "frame": 285,
+      "kind": "beat",
+      "sample": 456000,
+      "time": 9.5
+    },
+    {
+      "frame": 300,
+      "kind": "beat",
+      "sample": 480000,
+      "time": 10.0
+    },
+    {
+      "frame": 300,
+      "kind": "key",
+      "sample": 480000,
+      "time": 10.0
+    },
+    {
+      "frame": 315,
+      "kind": "beat",
+      "sample": 504000,
+      "time": 10.5
+    },
+    {
+      "frame": 315,
+      "kind": "key",
+      "sample": 504000,
+      "time": 10.5
+    },
+    {
+      "frame": 330,
+      "kind": "beat",
+      "sample": 528000,
+      "time": 11.0
+    },
+    {
+      "frame": 330,
+      "kind": "key",
+      "sample": 528000,
+      "time": 11.0
+    },
+    {
+      "frame": 345,
+      "kind": "beat",
+      "sample": 552000,
+      "time": 11.5
+    },
+    {
+      "frame": 45,
+      "kind": "pointer-click",
+      "sample": 72000,
+      "time": 1.5
+    },
+    {
+      "frame": 135,
+      "kind": "pointer-click",
+      "sample": 216000,
+      "time": 4.5
+    },
+    {
+      "frame": 210,
+      "kind": "pointer-click",
+      "sample": 336000,
+      "time": 7.0
+    },
+    {
+      "frame": 60,
+      "kind": "flow-state",
+      "sample": 96000,
+      "time": 2
+    },
+    {
+      "frame": 75,
+      "kind": "flow-state",
+      "sample": 120000,
+      "time": 2.5
+    },
+    {
+      "frame": 105,
+      "kind": "flow-state",
+      "sample": 168000,
+      "time": 3.5
+    },
+    {
+      "frame": 120,
+      "kind": "flow-state",
+      "sample": 192000,
+      "time": 4
+    },
+    {
+      "frame": 135,
+      "kind": "flow-state",
+      "sample": 216000,
+      "time": 4.5
+    },
+    {
+      "frame": 150,
+      "kind": "panel-land",
+      "sample": 240000,
+      "time": 5
+    },
+    {
+      "frame": 225,
+      "kind": "panel-land",
+      "sample": 360000,
+      "time": 7.5
+    },
+    {
+      "frame": 315,
+      "kind": "panel-land",
+      "sample": 504000,
+      "time": 10.5
+    }
+  ],
+  "first_sample": [
+    0.0,
+    0.0
+  ],
+  "last_sample": [
+    -0.0,
+    0.0
+  ],
+  "path": "D:\\rag\\docs\\evidencerag-promo\\revision-03\\final-motion\\soundtrack.wav",
+  "peak_dbfs": -5.679933127304016,
+  "rms_dbfs": -19.061041009950287,
+  "sample_rate": 48000,
+  "samples": 576000,
+  "score_chords_midi": [
+    [
+      50,
+      57,
+      61,
+      64,
+      66
+    ],
+    [
+      47,
+      54,
+      57,
+      62
+    ],
+    [
+      43,
+      50,
+      54,
+      57,
+      59
+    ],
+    [
+      45,
+      52,
+      59,
+      61
+    ],
+    [
+      40,
+      47,
+      55,
+      59,
+      62
+    ],
+    [
+      50,
+      57,
+      59,
+      64,
+      66
+    ]
+  ],
+  "score_melody_midi": [
+    74,
+    null,
+    78,
+    null,
+    73,
+    null,
+    74,
+    78,
+    71,
+    null,
+    74,
+    78,
+    73,
+    null,
+    76,
+    81,
+    71,
+    null,
+    74,
+    null,
+    74,
+    78,
+    81,
+    null
+  ],
+  "seed": 10232026
+}

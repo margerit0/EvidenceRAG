@@ -1,0 +1,25 @@
+# Keep the approved native-scale video; earlier video drafts stay local.
+/*
+!/.gitignore
+!/README.md
+!/licenses/
+!/revision-03/
+
+# Reproducible intermediates and local reference captures.
+__pycache__/
+**/chromium-debug.log
+/revision-03/rendered-frames*/
+/revision-03/*-checks/
+/revision-03/final/
+/revision-03/preview.html
+/revision-03/reference/*.png
+/revision-03/preview/*
+!/revision-03/preview/storyboard-overview.png
+
+# The source archive, PCM score and individual checks are generated locally.
+/revision-03/final-motion/*.zip
+/revision-03/final-motion/*.wav
+/revision-03/final-motion/*.html
+/revision-03/final-motion/check-??.png
+/revision-03/final-motion/playback-contact.png
+/revision-03/final-motion/audio-loudness.txt

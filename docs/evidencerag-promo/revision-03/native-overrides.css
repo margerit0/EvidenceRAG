@@ -1,0 +1,53 @@
+/* Native frontend typography and column tracks are retained at CSS scale 1. */
+html,body {width:1920px;height:1000px;overflow:hidden;}
+/* No wall-clock animation: graph_motion.js seeks the native CSS effects by frame. */
+*,*::before,*::after {animation:none!important;transition:none!important;caret-color:transparent!important;}
+.button-primary {background:var(--action-bg);}
+.app-shell {margin:32px auto;}
+.workbench {height:670px;min-height:670px;}
+.conversation-scroll {min-height:0;max-height:none;}
+.promo-demo-note {font-size:12px;white-space:nowrap;}
+.page-heading h1 {font-size:29px;}
+.brand-home {gap:10px;}
+.query-meta > span:nth-child(2), .action-elapsed, .timeline-duration, .graph-selection-note {display:none!important;}
+.graph-view-label {font-size:11px;}
+.graph-canvas {height:350px!important;min-height:350px!important;position:relative;}
+.promo-dot {width:6px;height:6px;border-radius:50%;background:currentColor;}
+.graph-caption {font-size:11px;min-height:24px;}
+.timeline {min-height:0;max-height:none;margin-bottom:12px;overflow:hidden;}
+.promo-timeline-row {display:flex;align-items:center;width:calc(100% - 20px);height:35px;padding:0 12px;margin:0 10px;border:0;background:transparent;border-radius:10px;gap:10px;text-align:left;font-size:12px;color:var(--secondary);}
+.promo-timeline-row .ordinal {font-size:10px;color:var(--muted);min-width:20px;}
+.promo-timeline-row svg {color:var(--success);}
+.promo-timeline-row .result {margin-left:auto;font-size:11px;color:var(--muted);}
+.promo-timeline-row.active {background:var(--brand-soft);}
+.promo-timeline-row.selected {background:var(--surface);outline:1px dashed var(--brand);outline-offset:-1px;}
+.promo-muted {height:6px;border-radius:4px;background:#9fb6c433;margin-top:14px;max-width:290px;}
+.promo-waiting {margin-top:24px;color:var(--muted);font-size:13px;}
+.promo-question .welcome {opacity:.45;}
+.promo-question .scenario-intro {display:none;}
+.promo-question .input-wrap {border-color:#9db3c2;background:#f8fcffb3;box-shadow:inset 0 1px 0 #fff,0 4px 15px #355c7608;}
+.promo-question .composer {padding-top:18px;}
+.promo-question .input-wrap textarea {font-size:16px;line-height:1.8;height:86px;min-height:86px;}
+.promo-question .composer .button-primary {background:#e6f0f6;}
+.promo-question .execution-pane {opacity:.62;}
+.answer-body > p {font-size:13px;}
+.answer-body > p.selected-summary {background:#e0edf59c;border-radius:8px;padding:8px 10px;margin-left:-10px;margin-right:-10px;}
+.inline-citations button > span {width:26px;}
+.inline-citations button[aria-pressed='true'] > span {background:var(--brand);color:white;}
+.promo-answer .composer, .promo-investigation .composer, .promo-source .composer {display:none;}
+.promo-question .answer-body {display:none;}
+.step-detail .outcome-code, .step-detail .invocation-navigation-heading > button, .step-detail .invocation-navigation > p {display:none;}
+.step-detail > .section-kicker {letter-spacing:0.02em;}
+.step-detail .detail-properties {margin-top:25px;}
+.step-evidence {padding-top:20px;}
+.step-evidence button {font-size:12px;}
+.evidence-text mark {background:#edf7fd;color:var(--text);padding:3px 0;box-decoration-break:clone;-webkit-box-decoration-break:clone;}
+.evidence-detail .section-kicker {font-size:12px;color:var(--brand);font-weight:550;}
+.promo-inspection .answer-body {display:none;}
+.promo-inspection .step-evidence button {opacity:.6;}
+.promo-source .execution-pane {opacity:.72;}
+
+.promo-inspection .composer {display:none;}
+.glacier-wallpaper::before {background-size:1920px 1080px;background-position:center -40px;}
+
+.inline-citations button > span {font-size:13px;}

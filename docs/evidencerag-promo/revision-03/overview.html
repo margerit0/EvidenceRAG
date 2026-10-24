@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face {
+        font-family: Inter;
+        src: url("__INTER_FONT__") format("woff2");
+        font-weight: 100 900;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #e6eff4;
+        color: #263845;
+        font-family: Inter, "Microsoft YaHei", sans-serif;
+        width: 1920px;
+        padding: 46px 48px 42px;
+      }
+      .head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        height: 110px;
+      }
+      .head h1 {
+        font-size: 37px;
+        font-weight: 650;
+        margin: 0;
+        letter-spacing: -0.8px;
+      }
+      .head p {
+        font-size: 20px;
+        color: #536b7c;
+        margin: 13px 0 0;
+      }
+      .phase {
+        border: 1px solid #a9c0d0;
+        padding: 12px 20px;
+        border-radius: 24px;
+        font-size: 20px;
+        color: #415a6c;
+        background: #f5fafd;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+      .tile {
+        background: #f6fbfd;
+        border: 1px solid white;
+        border-radius: 21px;
+        overflow: hidden;
+      }
+      .tile img {
+        display: block;
+        width: 100%;
+        height: auto;
+        aspect-ratio: 16/9;
+      }
+      .caption {
+        padding: 19px 23px 21px;
+      }
+      .title {
+        display: flex;
+        align-items: center;
+        gap: 13px;
+        font-size: 25px;
+        font-weight: 600;
+      }
+      .num {
+        color: #527b96;
+        font: 500 22px Inter;
+      }
+      .time {
+        margin-left: auto;
+        font: 500 20px Inter;
+        color: #415a6c;
+      }
+      .caption p {
+        font-size: 19px;
+        line-height: 1.55;
+        margin: 10px 0 0;
+        color: #536b7c;
+      }
+      .caption p + p {
+        margin-top: 4px;
+      }
+      .notes {
+        padding: 34px 34px 25px;
+        background: #f1f8fb;
+      }
+      .notes h2 {
+        font-size: 29px;
+        font-weight: 600;
+        margin: 0 0 23px;
+      }
+      .spec {
+        display: flex;
+        gap: 12px;
+        font: 500 20px Inter;
+        color: #527b96;
+        padding-bottom: 24px;
+        border-bottom: 1px solid #46628226;
+      }
+      .notes h3 {
+        font-size: 23px;
+        margin: 25px 0 16px;
+        font-weight: 600;
+      }
+      .beat {
+        display: flex;
+        font-size: 20px;
+        gap: 19px;
+        margin: 13px 0;
+        line-height: 1.5;
+      }
+      .beat span {
+        font: 500 19px Inter;
+        min-width: 96px;
+        color: #527b96;
+        padding-top: 4px;
+      }
+      .pending {
+        font-size: 21px;
+        color: #415a6c;
+        border-top: 1px solid #46628226;
+        padding-top: 23px;
+        margin-top: 27px;
+        line-height: 1.6;
+      }
+      .foot {
+        font-size: 18px;
+        color: #536b7c;
+        margin-top: 23px;
+        display: flex;
+        justify-content: space-between;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="head">
+      <div>
+        <h1>EvidenceRAG / 五镜分镜预览</h1>
+        <p>沿用冰川流线界面 · 原创合成演示资料 · 真实 HTML / CSS / SVG 渲染</p>
+      </div>
+      <div class="phase">第一阶段 · 待确认</div>
+    </header>
+    <div class="grid">
+      <article class="tile">
+        <img src="__FRAME_1__" />
+        <div class="caption">
+          <div class="title">
+            <span class="num">01</span>提出问题<span class="time"
+              >1.5 s / 0–2 s</span
+            >
+          </div>
+          <p>动作：预填问题；光标点击「运行演示」。</p>
+          <p>转场：问题进入调查区，执行流程接替视觉中心。</p>
+        </div>
+      </article>
+      <article class="tile">
+        <img src="__FRAME_2__" />
+        <div class="caption">
+          <div class="title">
+            <span class="num">02</span>看见调查过程<span class="time"
+              >3.5 s / 2–5 s</span
+            >
+          </div>
+          <p>动作：补充搜索高亮；已完成节点保留勾选。</p>
+          <p>转场：自动推进；4.5 秒点击读取记录展开检查器。</p>
+        </div>
+      </article>
+      <article class="tile">
+        <img src="__FRAME_3__" />
+        <div class="caption">
+          <div class="title">
+            <span class="num">03</span>生成带引用的答案<span class="time"
+              >6.5 s / 5–7 s</span
+            >
+          </div>
+          <p>动作：展开两条结论，清楚呈现 [1] 与 [2]。</p>
+          <p>转场：三栏保持浏览器原比例，检查器展示单次调用。</p>
+        </div>
+      </article>
+      <article class="tile">
+        <img src="__FRAME_4__" />
+        <div class="caption">
+          <div class="title">
+            <span class="num">04</span>点击引用，查看原文<span class="time"
+              >8.5 s / 7–10 s</span
+            >
+          </div>
+          <p>动作：[2] 保持选中；高亮对应合成原文。</p>
+          <p>转场：检查器切到证据，7.5–10.0 s 稳定阅读。</p>
+        </div>
+      </article>
+      <article class="tile">
+        <img src="__FRAME_5__" />
+        <div class="caption">
+          <div class="title">
+            <span class="num">05</span>品牌收尾<span class="time"
+              >11.5 s / 10–12 s</span
+            >
+          </div>
+          <p>动作：完整产品卡片让出品牌展示区域。</p>
+          <p>转场：10.0 s 开始收拢，11.0–12.0 s 稳定停留。</p>
+        </div>
+      </article>
+      <aside class="tile notes">
+        <h2>后续动画节奏</h2>
+        <div class="spec">
+          1920 × 1080 <span>·</span>30 fps <span>·</span>12 s / 360 帧
+        </div>
+        <h3>120 BPM · 每拍 0.5 秒 / 15 帧</h3>
+        <div class="beat"><span>1.5 s</span>启动点击，按钮轻微下压</div>
+        <div class="beat"><span>2 / 2.5 s</span>搜索文档 → 读取证据</div>
+        <div class="beat"><span>3.5 / 4 s</span>补充搜索 → 读取证据</div>
+        <div class="beat"><span>5 / 5.5 s</span>答案展开，两条结论落位</div>
+        <div class="beat"><span>7 / 7.5 s</span>点击 [2]，原文展开到位</div>
+        <div class="beat"><span>10 / 11 s</span>收拢产品卡片，品牌稳定</div>
+        <div class="pending">
+          确认分镜后，再制作完整动画与配乐。<br />当前五张图片为静态预览，尚未生成视频。
+        </div>
+      </aside>
+    </div>
+    <footer class="foot">
+      <span>引文逐字取自 frontend/src/lib/demo.ts 的原创合成资料</span
+      ><span>关键帧：45 / 105 / 195 / 255 / 345</span>
+    </footer>
+  </body>
+</html>

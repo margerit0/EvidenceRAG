@@ -1,0 +1,231 @@
+{
+  "audio": {
+    "alignment_lag_ms": 0.0,
+    "alignment_lag_samples": 0,
+    "clipped_samples": 0,
+    "integrated_lufs": -17.4,
+    "peak_dbfs": -5.677426851052424,
+    "samples": 576000,
+    "tail_100ms_rms_dbfs": -63.072669982910156,
+    "true_peak_dbfs_4x": -5.677405949212097
+  },
+  "clicks": [
+    {
+      "bounds": {
+        "bottom": 901.294921875,
+        "h": 29.59375,
+        "right": 823.390625,
+        "w": 87,
+        "x": 736.390625,
+        "y": 871.701171875
+      },
+      "frame": 45,
+      "inside": true,
+      "kind": "run",
+      "x": 797.290625,
+      "y": 889.441875
+    },
+    {
+      "bounds": {
+        "bottom": 933.46875,
+        "h": 35,
+        "right": 1781.984375,
+        "w": 890.59375,
+        "x": 891.390625,
+        "y": 898.46875
+      },
+      "frame": 135,
+      "inside": true,
+      "kind": "inspect",
+      "x": 1514.80625,
+      "y": 920.16875
+    },
+    {
+      "bounds": {
+        "bottom": 581.875,
+        "h": 28,
+        "right": 353,
+        "w": 28,
+        "x": 325,
+        "y": 553.875
+      },
+      "frame": 210,
+      "inside": true,
+      "kind": "citation",
+      "x": 344.5999999999999,
+      "y": 571.235
+    }
+  ],
+  "file": "D:\\rag\\docs\\evidencerag-promo\\revision-03\\final-motion\\EvidenceRAG-12s.mp4",
+  "flow_order": [
+    "搜索文档",
+    "读取证据",
+    "补充搜索",
+    "读取证据"
+  ],
+  "frame_delta": {
+    "largest_changes": [
+      {
+        "change": 7.848107814788818,
+        "frame": 302
+      },
+      {
+        "change": 7.459635257720947,
+        "frame": 301
+      },
+      {
+        "change": 5.6723785400390625,
+        "frame": 303
+      },
+      {
+        "change": 3.7501909732818604,
+        "frame": 304
+      },
+      {
+        "change": 2.4010069370269775,
+        "frame": 305
+      },
+      {
+        "change": 1.9995312690734863,
+        "frame": 137
+      },
+      {
+        "change": 1.8810590505599976,
+        "frame": 138
+      },
+      {
+        "change": 1.784913182258606,
+        "frame": 136
+      },
+      {
+        "change": 1.5949305295944214,
+        "frame": 139
+      },
+      {
+        "change": 1.5345138311386108,
+        "frame": 307
+      }
+    ],
+    "max_mean_absolute_gray_change": 7.848107814788818
+  },
+  "frame_times": [
+    1.5,
+    3.5,
+    6.5,
+    8.5,
+    11.5
+  ],
+  "holds": {
+    "brand_frames": [
+      330,
+      359
+    ],
+    "brand_seconds": 1.0,
+    "source_frames": [
+      225,
+      299
+    ],
+    "source_seconds": 2.5
+  },
+  "layout_unexpected_issues": 0,
+  "native_graph_motion": {
+    "encoded_motion": {
+      "signals": {
+        "changed_pixels_over_8": 110,
+        "crop": [
+          1331,
+          496,
+          123,
+          28
+        ],
+        "frames": [
+          84,
+          89
+        ],
+        "maximum_channel_difference": 100
+      },
+      "spinners": {
+        "changed_pixels_over_8": 45,
+        "crop": [
+          1513,
+          529,
+          24,
+          24
+        ],
+        "frames": [
+          84,
+          89
+        ],
+        "maximum_channel_difference": 84
+      }
+    },
+    "native_timing_ms": {
+      "edge_transition": 200,
+      "node_transition": 220,
+      "signal": 1400,
+      "spinner": 1300,
+      "status_enter": 180
+    },
+    "note": "The existing frontend signal path and CSS keyframes are paused and sought from integer frame time; no wall-clock effects are relied on.",
+    "observed_flowing_edges": [
+      "agent-finish",
+      "agent-read",
+      "agent-search",
+      "read-agent"
+    ],
+    "signal_frames": 90,
+    "source_sha256": {
+      "frontend\\src\\components\\ExecutionGraph.tsx": "cfcfc47c7949a5d23a5f493cd5fbb6d1956838ad8e9f3260cfd9f525b32f02be",
+      "frontend\\src\\styles.css": "1edbef5047ec530311f46484a81b51be1998fa87b2bb0d8031ea0572bd341714"
+    },
+    "spinner_frames": 105,
+    "status": "passed"
+  },
+  "playback": {
+    "dropped_frames": 0,
+    "ended": true,
+    "total_frames": 360,
+    "unmuted_audio_active": true,
+    "wall_ms": 12073.099999964237
+  },
+  "probe": {
+    "format": {
+      "duration": "12.000000",
+      "size": "1674958"
+    },
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "avg_frame_rate": "30/1",
+        "codec_name": "h264",
+        "codec_type": "video",
+        "color_space": "bt709",
+        "duration": "12.000000",
+        "height": 1080,
+        "index": 0,
+        "nb_read_frames": "360",
+        "r_frame_rate": "30/1",
+        "start_time": "0.000000",
+        "width": 1920
+      },
+      {
+        "avg_frame_rate": "0/0",
+        "channels": 2,
+        "codec_name": "aac",
+        "codec_type": "audio",
+        "duration": "12.000000",
+        "index": 1,
+        "nb_read_frames": "563",
+        "r_frame_rate": "0/0",
+        "sample_rate": "48000",
+        "start_time": "0.000000"
+      }
+    ]
+  },
+  "pts_max_error_seconds": 3.333333342681044e-07,
+  "sha256": "35c6f78ab15dbeee11b41782d0bce18f1f4c340b1143fd97e29eb149ea66f6c4",
+  "source2_matches_demo": true,
+  "status": "passed",
+  "synthetic_label_every_frame": true
+}
