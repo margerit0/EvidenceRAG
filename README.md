@@ -10,9 +10,11 @@
 
 从问题到带引用的答案，工作台展示每次搜索、证据读取与执行状态。点击引用对照原文，选择流程节点或时间线记录查看单次调用详情。
 
-![模拟调查完成态：左侧展示带引用的答案，中间展示执行流程与时间线，右侧查看单次调用详情](docs/images/workbench-investigation-detail.png)
+[![点击观看产品演示：左侧展示带引用的答案，中间展示执行流程与时间线，右侧查看单次调用详情](docs/images/workbench-investigation-detail.png)](docs/evidencerag-promo/revision-03/final-motion/EvidenceRAG-12s.mp4)
 
-*原创合成演示：展示带引用的答案、执行流程与调用详情；无需密钥，不调用模型。*
+**[▶ 观看产品演示视频（含配乐）](docs/evidencerag-promo/revision-03/final-motion/EvidenceRAG-12s.mp4)** · [视频源码与复现说明](docs/evidencerag-promo/README.md)
+
+*原创合成演示 · 流程已压缩。展示执行流程动效、调用详情与引用原文；无需密钥，不调用模型，不代表真实模型响应速度。*
 
 <details>
 <summary>查看服务连接与模型选择</summary>
