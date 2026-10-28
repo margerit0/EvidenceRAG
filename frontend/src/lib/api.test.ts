@@ -147,3 +147,82 @@ describe('persistent investigations', () => {
     );
   });
 });
+
+describe('control intent across lease claim', () => {
+  it.each(['queued', 'resuming'])('pauses %s after exactly one internal claim', async (status) => {
+    const run = { ...resumableDemo('run', '合成问题').durable!, status, wait_id: null };
+    const claimed = { ...run, status: 'running', version: run.version + 1 };
+    const paused = { ...claimed, status: 'pausing', version: claimed.version + 1 };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ code: 'stale_run_version' }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json(claimed))
+      .mockResolvedValueOnce(Response.json(paused));
+    vi.stubGlobal('fetch', request);
+    expect(await commandRun(run, 'pause', new AbortController().signal)).toEqual(paused);
+    const first = JSON.parse(request.mock.calls[0][1].body);
+    const retry = JSON.parse(request.mock.calls[2][1].body);
+    expect(retry.version).toBe(claimed.version);
+    expect(retry.request_id).not.toBe(first.request_id);
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+  it.each([
+    ['supplement', 'running', 1],
+    ['resume', 'running', 1],
+    ['pause', 'running', 3],
+    ['pause', 'waiting_input', 1],
+    ['pause', 'completed', 1],
+  ])('does not rebase %s onto %s (+%s)', async (action, status, delta) => {
+    const run = { ...resumableDemo('run', '合成问题').durable!, status: 'resuming' };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ code: 'stale_run_version' }, { status: 409 }))
+      .mockResolvedValueOnce(
+        Response.json({ ...run, status, version: run.version + Number(delta) }),
+      );
+    vi.stubGlobal('fetch', request);
+    await expect(
+      commandRun(run, String(action), new AbortController().signal, '旧补充'),
+    ).rejects.toMatchObject({ code: 'stale_run_version' });
+    expect(request.mock.calls.filter((call) => call[1].method === 'POST')).toHaveLength(1);
+  });
+  it('bounds stale retries and preserves the retry key after response loss', async () => {
+    const run = { ...resumableDemo('run', '合成问题').durable!, status: 'queued' };
+    const claimed = { ...run, status: 'running', version: run.version + 1 };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json({ code: 'stale_run_version' }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json(claimed))
+      .mockRejectedValueOnce(new TypeError('response lost'))
+      .mockResolvedValueOnce(Response.json({ code: 'stale_run_version' }, { status: 409 }));
+    vi.stubGlobal('fetch', request);
+    await expect(commandRun(run, 'cancel', new AbortController().signal)).rejects.toMatchObject({
+      code: 'stale_run_version',
+    });
+    expect(request.mock.calls[2][1].body).toBe(request.mock.calls[3][1].body);
+    expect(request).toHaveBeenCalledTimes(4);
+  });
+});
+
+it.each(['wait_id', 'supplements'])('does not rebase control across changed %s', async (field) => {
+  const run = { ...resumableDemo('run', '合成问题').durable!, status: 'resuming' };
+  const current = {
+    ...run,
+    status: 'running',
+    version: run.version + 1,
+    ...(field === 'wait_id'
+      ? { wait_id: 'later-wait' }
+      : {
+          supplements: [{ wait_id: 'later-wait', question: '新问题', text: '新补充' }],
+        }),
+  };
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ code: 'stale_run_version' }, { status: 409 }))
+    .mockResolvedValueOnce(Response.json(current));
+  vi.stubGlobal('fetch', request);
+  await expect(commandRun(run, 'pause', new AbortController().signal)).rejects.toMatchObject({
+    code: 'stale_run_version',
+  });
+  expect(request).toHaveBeenCalledTimes(2);
+});

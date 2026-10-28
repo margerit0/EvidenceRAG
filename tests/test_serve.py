@@ -15,9 +15,12 @@ import pytest
 
 from test_service import FakeRetriever
 from zhrag.ingest import IngestState, write_state
+from zhrag.investigation_executor import InvestigationExecutor
+from zhrag.investigation_store import InvestigationStore
 from zhrag.io_utils import write_json, write_jsonl, write_text
 from zhrag.lexical import build_sparse_index, write_sparse_index
 from zhrag.providers.direct import DIRECT_CONTRACT, DirectTransport
+from zhrag.service.app import _AdmissionGate
 
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = ROOT / "scripts" / "serve.py"
@@ -511,3 +514,67 @@ class TestCli:
         write_artifacts(tmp_path)
         assert serve.main(["--artifacts", str(tmp_path), "--port", str(port)]) == 1
         assert "ValueError" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "setting,value",
+    [
+        ("Embedding_BASE_URL", "https://embedding-changed.invalid"),
+        ("ReRank_BASE_URL", "https://rerank-changed.invalid"),
+        ("ReRank_MODEL_NAME", "synthetic-reranker-changed"),
+    ],
+)
+def test_actual_retrieval_configuration_blocks_resume(tmp_path, setting, value):
+
+    sparse = build_sparse_index({"doc-a": "原创合成资料"}).index
+    published = state(fingerprint=sparse.fingerprint)
+    snapshot = serve._investigation_snapshot(published)
+    env = {
+        "LLM_API_KEY": "synthetic",
+        "LLM_BASE_URL": "https://chat.invalid",
+        "LLM_MODEL_NAME": "chat",
+        "Embedding_API_KEY": "synthetic",
+        "Embedding_BASE_URL": "https://embed.invalid",
+        "Embedding_MODEL_NAME": serve.EMBEDDING_MODEL,
+        "ReRank_API_KEY": "synthetic",
+        "ReRank_BASE_URL": "https://rerank.invalid",
+        "ReRank_MODEL_NAME": "synthetic-reranker",
+    }
+
+    def compose(values):
+        path = tmp_path / "synthetic.env"
+        write_text(path, "".join(f"{key}={value}\n" for key, value in values.items()))
+        args = serve._parse_args(["--enable-agent", "--env", str(path)])
+        retriever, _ = serve._build_retriever(
+            args, state=published, index=sparse, store=FakeStore()
+        )
+        return serve._build_agent(args, retriever, index_identity=snapshot)
+
+    original = compose(env)
+    rotated = compose({**env, "Embedding_API_KEY": "rotated", "ReRank_API_KEY": "rotated"})
+    assert rotated.profile_fingerprint == original.profile_fingerprint
+    changed = compose({**env, setting: value})
+    assert changed.profile_fingerprint != original.profile_fingerprint
+    store = InvestigationStore(tmp_path / "runs.sqlite3")
+    executor = InvestigationExecutor(store, {"chat": original}, snapshot, _AdmissionGate(1))
+    run_id = executor.create("synthetic-create", "原创配置验证", "chat")
+    store.command(run_id, "pause-key", "pause", version=store.get(run_id)["version"])
+    store.command(run_id, "resume-key", "resume", version=store.get(run_id)["version"])
+    assert store.claim(run_id, "replacement", changed.profile_fingerprint, snapshot) is None
+    assert store.get(run_id)["reason"] == "snapshot_or_model_mismatch"
+    assert store.attempts(run_id) == []
+
+
+def test_embedding_model_must_match_published_space_before_any_request(tmp_path):
+    sparse = build_sparse_index({"doc-a": "原创合成资料"}).index
+    path = tmp_path / "synthetic.env"
+    write_text(
+        path,
+        "Embedding_API_KEY=synthetic\nEmbedding_BASE_URL=https://embed.invalid\n"
+        "Embedding_MODEL_NAME=another-embedding-space\n",
+    )
+    args = serve._parse_args(["--enable-agent", "--no-rerank", "--env", str(path)])
+    with pytest.raises(ValueError, match="published embedding profile"):
+        serve._build_retriever(
+            args, state=state(fingerprint=sparse.fingerprint), index=sparse, store=FakeStore()
+        )

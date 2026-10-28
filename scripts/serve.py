@@ -17,7 +17,7 @@ import math
 import os
 import sys
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -261,6 +261,9 @@ def _build_agent(
     from zhrag.providers.embedding import load_env  # noqa: PLC0415
 
     settings = retriever.settings
+    client_identity = getattr(retriever, "configuration_fingerprint", "")
+    if isinstance(retriever, OnlineRetriever) and not client_identity:
+        raise ValueError("agent requires an explicit retrieval client configuration")
     identity = profile_fingerprint(
         profile_name=settings.profile_name,
         embedding_profile=settings.embedding_profile,
@@ -279,7 +282,7 @@ def _build_agent(
                 "output_limit",
             )
         },
-        published_index_identity=f"{index_identity}:{DIRECT_CONTRACT}",
+        published_index_identity=f"{index_identity}:{DIRECT_CONTRACT}:{client_identity}",
     )
     return DocumentAgent(
         retriever,
@@ -475,13 +478,26 @@ def _build_retriever(
     # Provider imports stay below the artifact and Milvus validation boundary so
     # clean module import remains side-effect-free and a broken local publication
     # fails before credentials are read.
-    from zhrag.providers.direct import DirectTransport  # noqa: PLC0415
+    from zhrag.providers.direct import DIRECT_CONTRACT, DirectTransport  # noqa: PLC0415
+    from zhrag.providers.http import (  # noqa: PLC0415
+        MAX_RETRY_AFTER,
+        RETRY_STATUS,
+        backoff_seconds,
+    )
     from zhrag.retrieval.adapters import (  # noqa: PLC0415 - provider boundary
         SparseQueryAdapter,
     )
 
     _verify_store(store, alias=args.alias, state=state)
     cached_query = args.query_cache is not None
+    client_contract: dict[str, Any] = {
+        "contract": "retrieval-clients-v1",
+        "transport": DIRECT_CONTRACT,
+        "retry_status": sorted(RETRY_STATUS),
+        "max_retry_after": MAX_RETRY_AFTER,
+        "embedding": "cached" if cached_query else None,
+        "rerank": "disabled" if args.no_rerank else None,
+    }
     if cached_query:
         fixture = args.query_fixture or args.query_cache.parent / "queries.jsonl"
         embedding: Any = _load_cached_queries(
@@ -501,15 +517,23 @@ def _build_retriever(
         if not args.env.is_file():
             raise ValueError(".env is missing")
         env = load_env(args.env)
-        embedding = DenseQueryAdapter(
-            EmbeddingClient(
-                EmbeddingConfig.from_env(env),
-                transport=DirectTransport(60),
-                log=lambda _message: None,
-            ),
-            prompt=QUERY_PROMPT,
-            dimensions=DENSE_WIDTH,
+        embedding_config = EmbeddingConfig.from_env(env)
+        if embedding_config.model != EMBEDDING_MODEL:
+            raise ValueError("embedding model does not match the published embedding profile")
+        embedding_transport = DirectTransport(60)
+        embedding_client = EmbeddingClient(
+            embedding_config, transport=embedding_transport, log=lambda _message: None
         )
+        embedding = DenseQueryAdapter(embedding_client, prompt=QUERY_PROMPT, dimensions=DENSE_WIDTH)
+        client_contract["embedding"] = {
+            "model": embedding_config.model,
+            "endpoint": embedding_config.url,
+            "prompt": embedding.prompt,
+            "dimensions": embedding.dimensions,
+            "transport": asdict(embedding_transport),
+            "attempts": embedding_client.retries,
+            "backoff": [backoff_seconds(i) for i in range(embedding_client.retries)],
+        }
     settings = _settings(no_rerank=args.no_rerank, cached_query=cached_query)
     reranker: PassageReranker
     if args.no_rerank:
@@ -525,24 +549,31 @@ def _build_retriever(
         )
 
         rerank_config = RerankConfig.from_env(env)
-        reranker = RerankAdapter(
-            RerankClient(
-                rerank_config,
-                JsonClient(
-                    url=rerank_config.endpoint,
-                    key=rerank_config.api_key,
-                    transport=DirectTransport(60),
-                    log=lambda _message: None,
-                ),
-            ),
-            instruction=RERANK_INSTRUCTION,
+        rerank_transport = DirectTransport(60)
+        rerank_http = JsonClient(
+            url=rerank_config.endpoint,
+            key=rerank_config.api_key,
+            transport=rerank_transport,
+            log=lambda _message: None,
         )
+        reranker = RerankAdapter(
+            RerankClient(rerank_config, rerank_http), instruction=RERANK_INSTRUCTION
+        )
+        client_contract["rerank"] = {
+            "model": rerank_config.model,
+            "endpoint": rerank_http.url,
+            "instruction": RERANK_INSTRUCTION,
+            "transport": asdict(rerank_transport),
+            "attempts": rerank_http.retries,
+            "backoff": [backoff_seconds(i) for i in range(rerank_http.retries)],
+        }
     retriever = OnlineRetriever(
         settings=settings,
         dense_encoder=embedding,
         sparse_encoder=SparseQueryAdapter(index),
         store=store,
         reranker=reranker,
+        configuration_fingerprint=fingerprint(client_contract),
     )
     return retriever, ServiceInfo(
         profile_name=settings.profile_name,
@@ -616,7 +647,7 @@ def main(argv: list[str] | None = None) -> int:
                 investigation_db=args.investigation_db,
                 published_index_identity=_investigation_snapshot(state),
             )
-            import uvicorn  # noqa: PLC0415 - optional service dependency
+            from zhrag.service.server import create_server  # noqa: PLC0415
 
             mode = (
                 "cached-no-rerank"
@@ -629,14 +660,14 @@ def main(argv: list[str] | None = None) -> int:
                 f"serving {info.profile_name} ({mode}) at "
                 f"http://{args.host}:{args.port} with one worker"
             )
-            uvicorn.run(
+            create_server(
                 app,
                 host=args.host,
                 port=args.port,
                 workers=1,
                 log_config=None,
                 access_log=False,
-            )
+            ).run()
         finally:
             store.close()
     except (OSError, RuntimeError, ValueError) as exc:

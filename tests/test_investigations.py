@@ -564,6 +564,7 @@ def test_old_worker_cleanup_does_not_remove_new_epoch_heartbeat(tmp_path):
     # its finally block (possible with admission > 1 and immediate resume).
     executor.active[run_id] = (2, threading.current_thread())
     assert executor.admission.try_acquire()
+    executor.admitted.add((run_id, 1))
     executor._work(agent, run_id, 1)
     assert executor.active[run_id][0] == 2
     assert store.get(run_id)["status"] == "queued"
@@ -578,3 +579,120 @@ def test_cancelling_waiting_run_keeps_evidence_but_removes_stale_question(tmp_pa
     assert view["response"]["status"] == "cancelled"
     assert not view["response"]["clarification"]
     assert view["response"]["sources"][0]["citation_id"] == 1
+
+
+@pytest.mark.parametrize("failure", ["construct", "start", "cancel_during_start"])
+def test_worker_start_failure_releases_slot_and_preserves_checkpoint(
+    tmp_path, monkeypatch, failure
+):
+    store, _, generator, executor, run_id, clock = setup(tmp_path, CLARIFY)
+    checkpoint = store.get(run_id)["checkpoint"]
+
+    def fail(*args, **kwargs):
+        if failure == "cancel_during_start":
+            command(store, run_id, "cancel", key="cancel-key")
+        raise RuntimeError("cannot start new thread")
+
+    with monkeypatch.context() as patch:
+        if failure == "construct":
+            patch.setattr(threading, "Thread", fail)
+        else:
+            patch.setattr(threading.Thread, "start", fail)
+        with pytest.raises(RuntimeError, match="cannot start"):
+            executor.tick()
+    row = store.get(run_id)
+    assert row["status"] == ("cancelled" if failure == "cancel_during_start" else "interrupted")
+    assert row["owner"] is None and row["lease_until"] is None
+    assert row["checkpoint"] == checkpoint and not store.attempts(run_id)
+    assert not executor.active and not executor.admitted and executor.admission._active == 0
+    clock.now += 100
+    executor.tick()
+    assert not generator.calls and store.get(run_id)["active_seconds"] == 0
+    # A later task can acquire the sole slot and complete normally.
+    next_id = executor.create("next-create", "另一合成问题", "fake")
+    executor.tick()
+    with executor.lock:
+        workers = list(executor.active.values())
+    for _, worker in workers:
+        worker.join(timeout=2)
+        assert not worker.is_alive()
+    assert store.get(next_id)["status"] == "waiting_input"
+    assert executor.admission._active == 0
+    if failure != "cancel_during_start":
+        command(store, run_id, "cancel", key="later-cancel")
+        assert store.get(run_id)["status"] == "cancelled"
+
+
+def test_dead_worker_is_not_renewed_and_unknown_call_is_not_retried(tmp_path):
+    store, agent, generator, executor, run_id, clock = setup(tmp_path, CLARIFY)
+    epoch = store.claim(run_id, executor.owner, agent.profile_fingerprint, executor.snapshot)
+    cp = store.get(run_id)["checkpoint"]
+    cp["phase"] = "model_call"
+    store.save(run_id, executor.owner, epoch, cp, [], begin="decide")
+    executor.active[run_id] = (epoch, threading.Thread())
+    executor.admitted.add((run_id, epoch))
+    assert executor.admission.try_acquire()
+    lease = store.get(run_id)["lease_until"]
+    clock.now += 10
+    executor.tick()
+    assert store.get(run_id)["lease_until"] == lease
+    assert executor.admission._active == 0 and not executor.active
+    clock.now += 6
+    executor.tick()
+    assert store.get(run_id)["reason"] == "call_outcome_unknown"
+    assert not generator.calls
+
+
+def test_start_failure_cleanup_cannot_overwrite_replacement_epoch(tmp_path, monkeypatch):
+    store, agent, _, executor, run_id, clock = setup(tmp_path, CLARIFY)
+
+    def fail_after_takeover(_thread):
+        clock.now += 16
+        store.recover()
+        command(store, run_id, "resume", key="replacement-resume")
+        store.claim(run_id, "replacement", agent.profile_fingerprint, executor.snapshot)
+        raise RuntimeError("cannot start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", fail_after_takeover)
+    with pytest.raises(RuntimeError):
+        executor.tick()
+    assert store.get(run_id)["owner"] == "replacement"
+    assert store.get(run_id)["status"] == "running"
+    assert not executor.active and executor.admission._active == 0
+
+
+@pytest.mark.parametrize("finish_before_close", [True, False])
+def test_shutdown_preserves_returned_result_and_bounds_blocking_worker(
+    tmp_path, finish_before_close
+):
+    store, _, generator, executor, run_id, _ = setup(tmp_path, CLARIFY)
+    entered, release = threading.Event(), threading.Event()
+    original = generator.generate
+
+    def block(system, user):
+        entered.set()
+        assert release.wait(5)
+        return original(system, user)
+
+    generator.generate = block
+    executor.tick()
+    assert entered.wait(2)
+    worker = executor.active[run_id][1]
+    try:
+        executor.begin_shutdown()
+        if finish_before_close:
+            release.set()
+        executor.close(timeout=2 if finish_before_close else 0)
+        if not finish_before_close:
+            assert worker.is_alive() and executor.admission._active == 1
+        # No dispatch or lease extension after shutdown starts.
+        lease = store.get(run_id)["lease_until"]
+        executor.tick()
+        assert store.get(run_id)["lease_until"] == lease
+    finally:
+        release.set()
+        worker.join(timeout=2)
+    assert not worker.is_alive() and executor.admission._active == 0
+    row = store.get(run_id)
+    assert row["status"] == "paused" and row["reason"] == "service_shutdown"
+    assert row["checkpoint"]["phase"] == "model_result" and len(generator.calls) == 1

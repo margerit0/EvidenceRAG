@@ -7,6 +7,7 @@ without repeating the external call. Uncommitted call outcomes are never retried
 from __future__ import annotations
 
 import threading
+import time
 import uuid
 from collections.abc import Callable, Mapping
 from contextlib import suppress
@@ -317,6 +318,7 @@ class InvestigationExecutor:
         self.stop = threading.Event()
         self.lock = threading.Lock()
         self.active: dict[str, tuple[int, threading.Thread]] = {}
+        self.admitted: set[tuple[str, int]] = set()
         self.thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -324,12 +326,22 @@ class InvestigationExecutor:
             self.thread = threading.Thread(target=self._dispatch, daemon=True)
             self.thread.start()
 
-    def close(self) -> None:
+    def begin_shutdown(self) -> None:
+        # Called before the HTTP server drains SSE, not only during lifespan teardown.
         self.stop.set()
+
+    def close(self, timeout: float = 5.0) -> None:
+        self.begin_shutdown()
+        deadline = time.monotonic() + timeout
         if self.thread:
-            self.thread.join(timeout=2)
-        # Blocking dependencies may still be unwinding. Their lease is no longer
-        # renewed and any later commit after expiry is rejected by the store.
+            self.thread.join(timeout=max(0, deadline - time.monotonic()))
+        with self.lock:
+            workers = [thread for _, thread in self.active.values()]
+        for thread in workers:
+            if thread.ident is not None:
+                thread.join(timeout=max(0, deadline - time.monotonic()))
+        # Unresponsive providers may outlive this deadline. No lease is renewed;
+        # expiry fences late writes and unknown outcomes never auto-retry.
 
     def _dispatch(self) -> None:
         while not self.stop.is_set():
@@ -338,13 +350,20 @@ class InvestigationExecutor:
             self.stop.wait(0.25)
 
     def tick(self) -> None:
+        if self.stop.is_set():
+            return
         self.store.recover()
         with self.lock:
             active = list(self.active.items())
-        for run_id, (active_epoch, _) in active:
+        for run_id, (active_epoch, worker) in active:
+            if not worker.is_alive():
+                self._release(run_id, active_epoch)
+                continue  # Never keep a dead worker's lease alive.
             with suppress(LeaseLost, RunConflict):
                 self.store.heartbeat(run_id, self.owner, active_epoch)
         for run_id in self.store.pending():
+            if self.stop.is_set():
+                break
             row = self.store.get(run_id)
             if row["status"] not in {"queued", "resuming"}:
                 continue
@@ -361,10 +380,45 @@ class InvestigationExecutor:
             if epoch is None or agent is None:
                 self.admission.release()
                 continue
+            self._start_worker(agent, run_id, epoch)
+
+    def _start_worker(self, agent: DocumentAgent, run_id: str, epoch: int) -> None:
+        with self.lock:
+            self.admitted.add((run_id, epoch))
+        thread = None
+        try:
             thread = threading.Thread(target=self._work, args=(agent, run_id, epoch), daemon=True)
+            # Registration and start are indivisible to a concurrent tick.
             with self.lock:
                 self.active[run_id] = (epoch, thread)
-            thread.start()
+                thread.start()
+        except BaseException:
+            if thread is None or thread.ident is None:
+                try:
+                    cp = self.store.get(run_id)["checkpoint"]
+                    self.store.save(
+                        run_id,
+                        self.owner,
+                        epoch,
+                        cp,
+                        [],
+                        status="interrupted",
+                        reason="worker_start_failed",
+                    )
+                except (LeaseLost, RunConflict):
+                    pass
+                finally:
+                    self._release(run_id, epoch)
+            raise
+
+    def _release(self, run_id: str, epoch: int) -> None:
+        with self.lock:
+            if (run_id, epoch) in self.admitted:
+                self.admitted.remove((run_id, epoch))
+                self.admission.release()
+            active = self.active.get(run_id)
+            if active is not None and active[0] == epoch:
+                self.active.pop(run_id)
 
     def _work(self, agent: DocumentAgent, run_id: str, epoch: int) -> None:
         try:
@@ -388,11 +442,7 @@ class InvestigationExecutor:
             except (Exception, SystemExit):
                 pass
         finally:
-            self.admission.release()
-            with self.lock:
-                active = self.active.get(run_id)
-                if active is not None and active[0] == epoch:
-                    self.active.pop(run_id)
+            self._release(run_id, epoch)
 
     def create(self, key: str, query: str, model: str) -> str:
         agent = self.models.get(model)

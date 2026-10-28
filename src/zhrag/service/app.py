@@ -458,7 +458,7 @@ def create_app(  # noqa: PLR0915
             yield
         finally:
             if executor:
-                executor.close()
+                await asyncio.to_thread(executor.close)
 
     app = FastAPI(
         title="zhrag TiDB retrieval service",

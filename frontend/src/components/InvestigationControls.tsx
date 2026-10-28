@@ -12,18 +12,30 @@ export const recoveryMessages: Record<string, string> = {
   executor_failed: '检查点执行失败，记录已保留。请检查本地服务后新建调查。',
   service_interrupted: '服务曾中断。继续时将从已保存边界恢复，沿用证据和剩余预算。',
   service_shutdown: '服务关闭前已保存检查点，可以继续原调查。',
+  worker_start_failed: '执行线程未能启动，已保留原检查点并释放资源。可以继续或取消调查。',
   budget_exhausted: '累计执行预算已耗尽，继续和补充信息不会重置预算。',
 };
-export function InvestigationControls({ run, onRun }: { run: Run; onRun: (run: Run) => void }) {
+export function InvestigationControls({
+  run,
+  onRun,
+  readOnly,
+  onPending,
+}: {
+  run: Run;
+  onRun: (run: Run) => void;
+  readOnly: boolean;
+  onPending: (pending: boolean) => void;
+}) {
   const [text, setText] = useState('');
   const [pending, setPending] = useState(false);
   const guard = useRef(false);
   const [error, setError] = useState('');
   const state = run.durable!;
   async function act(action: string) {
-    if (guard.current) return;
+    if (readOnly || guard.current) return;
     guard.current = true;
     setPending(true);
+    onPending(true);
     setError('');
     const controller = new AbortController();
     try {
@@ -45,6 +57,7 @@ export function InvestigationControls({ run, onRun }: { run: Run; onRun: (run: R
     } finally {
       guard.current = false;
       setPending(false);
+      onPending(false);
     }
   }
   const active = ['queued', 'running', 'resuming'].includes(state.status);
@@ -59,6 +72,7 @@ export function InvestigationControls({ run, onRun }: { run: Run; onRun: (run: R
   ].includes(state.status);
   return (
     <div className="investigation-controls" aria-label="调查控制">
+      {readOnly && <p role="status">当前为真实调查的只读历史。切换到“连接服务”后可继续操作。</p>}
       {run.demo && (
         <p>
           原创合成演示：补充后可暂停、继续。此场景只保留在当前页面；跨进程恢复请运行离线合成后端。
@@ -84,10 +98,10 @@ export function InvestigationControls({ run, onRun }: { run: Run; onRun: (run: R
             maxLength={2000}
             rows={3}
             required
-            disabled={pending}
+            disabled={pending || readOnly}
             placeholder="补充本次调查需要的信息…"
           />
-          <Button type="submit" size="sm" disabled={pending || !text.trim()}>
+          <Button type="submit" size="sm" disabled={pending || readOnly || !text.trim()}>
             提交补充并继续
           </Button>
         </form>
@@ -105,17 +119,27 @@ export function InvestigationControls({ run, onRun }: { run: Run; onRun: (run: R
       )}
       <div className="run-control-buttons">
         {active && (
-          <Button size="sm" variant="outline" disabled={pending} onClick={() => void act('pause')}>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending || readOnly}
+            onClick={() => void act('pause')}
+          >
             暂停调查
           </Button>
         )}
         {['paused', 'interrupted'].includes(state.status) && (
-          <Button size="sm" disabled={pending} onClick={() => void act('resume')}>
+          <Button size="sm" disabled={pending || readOnly} onClick={() => void act('resume')}>
             继续调查
           </Button>
         )}
         {canCancel && (
-          <Button size="sm" variant="ghost" disabled={pending} onClick={() => void act('cancel')}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={pending || readOnly}
+            onClick={() => void act('cancel')}
+          >
             取消调查
           </Button>
         )}

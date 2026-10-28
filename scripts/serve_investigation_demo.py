@@ -6,9 +6,8 @@ import argparse
 import sys
 from pathlib import Path
 
-import uvicorn
-
 from zhrag.service.investigation_demo import create_demo_app
+from zhrag.service.server import create_server
 
 
 def main() -> None:
@@ -21,7 +20,9 @@ def main() -> None:
     args = parser.parse_args()
     if not 0 <= args.delay <= 10:
         parser.error("delay must be in [0, 10]")
-    uvicorn.run(create_demo_app(args.db, delay=args.delay), host="127.0.0.1", port=args.port)
+    create_server(
+        create_demo_app(args.db, delay=args.delay), host="127.0.0.1", port=args.port
+    ).run()
 
 
 if __name__ == "__main__":

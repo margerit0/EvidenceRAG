@@ -59,6 +59,13 @@ test('real backend: refresh, reconnect, supplement, pause, process restart and c
     await page.getByRole('button', { name: '开始调查', exact: true }).click();
     const created = await (await creation).json();
     const runId = created.run_id;
+    // Exercise the same lease-claim window immediately after create and resume.
+    await page.getByRole('button', { name: '暂停调查', exact: true }).click();
+    await expect(page.locator('.answer-status')).toContainText('已暂停');
+    await page.getByRole('button', { name: '继续调查', exact: true }).click();
+    await page.getByRole('button', { name: '暂停调查', exact: true }).click();
+    await expect(page.locator('.answer-status')).toContainText('已暂停');
+    await page.getByRole('button', { name: '继续调查', exact: true }).click();
     await page.reload();
     await expect(page.locator('.submitted-query')).toContainText('星桥集群');
     await expect(page.locator('.answer-status')).toContainText('等待补充信息');

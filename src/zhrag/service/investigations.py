@@ -182,7 +182,7 @@ def install_investigations(
         async def frames() -> AsyncIterator[str]:
             cursor = after
             heartbeat = time.monotonic()
-            while True:
+            while not executor.stop.is_set():
                 # Durable log is the one source for both catch-up and live events;
                 # there is no lossy handoff to an in-memory subscriber queue.
                 batch = await asyncio.to_thread(executor.store.events, run_id, cursor)

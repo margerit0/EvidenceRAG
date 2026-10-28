@@ -200,6 +200,7 @@ class OnlineRetriever:
     store: VectorStore
     reranker: PassageReranker
     clock: Callable[[], float] = time.perf_counter
+    configuration_fingerprint: str = ""
 
     def __post_init__(self) -> None:
         if self.store.dense_dimensions != self.settings.dense_dimensions:

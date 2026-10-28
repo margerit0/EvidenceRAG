@@ -69,17 +69,48 @@ export async function commandRun(
   signal: AbortSignal,
   text?: string,
 ) {
-  const body = {
-    request_id: crypto.randomUUID(),
-    version: run.version,
-    ...(action === 'supplement' ? { wait_id: run.wait_id, text } : {}),
-  };
-  // A network retry uses the exact same command key and expected generation.
+  async function send(expected: DurableRun): Promise<DurableRun> {
+    const body = {
+      request_id: crypto.randomUUID(),
+      version: expected.version,
+      ...(action === 'supplement' ? { wait_id: expected.wait_id, text } : {}),
+    };
+    const request = async () => {
+      const next = durableRunSchema.parse(
+        await runRequest(`/${run.run_id}/${action}`, signal, body),
+      );
+      if (next.run_id !== run.run_id) throw new ApiError('connection_lost', '调查编号不一致');
+      return next;
+    };
+    // Lost command responses may retry only the identical idempotency envelope.
+    try {
+      return await request();
+    } catch (error) {
+      if (error instanceof ApiError || signal.aborted) throw error;
+      return request();
+    }
+  }
   try {
-    return durableRunSchema.parse(await runRequest(`/${run.run_id}/${action}`, signal, body));
+    return await send(run);
   } catch (error) {
-    if (error instanceof ApiError || signal.aborted) throw error;
-    return durableRunSchema.parse(await runRequest(`/${run.run_id}/${action}`, signal, body));
+    if (
+      !(error instanceof ApiError) ||
+      error.code !== 'stale_run_version' ||
+      !['pause', 'cancel'].includes(action)
+    )
+      throw error;
+    const current = await getRun(run.run_id, signal);
+    // Only rebase across the single internal lease-claim transition. A newer
+    // user command, another waiting round, or terminal result needs fresh intent.
+    if (
+      !['queued', 'resuming'].includes(run.status) ||
+      current.status !== 'running' ||
+      current.version !== run.version + 1 ||
+      current.wait_id !== run.wait_id ||
+      JSON.stringify(current.supplements) !== JSON.stringify(run.supplements)
+    )
+      throw error;
+    return send(current); // At most one rebase; the server still checks version.
   }
 }
 

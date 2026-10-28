@@ -144,6 +144,7 @@ export default function App() {
   const starting = useRef(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
+  const [pendingControls, setPendingControls] = useState(0);
   const createRequest = useRef<{ query: string; model?: string; id: string } | undefined>(
     undefined,
   );
@@ -153,8 +154,10 @@ export default function App() {
   const current = runs.find((run) => run.id === selectedRun);
   const busy =
     creating ||
+    pendingControls > 0 ||
     runs.some((run) => !run.persistent && run.state === 'running') ||
     (!!current &&
+      (current.demo || mode === 'live') &&
       ['running', 'queued', 'resuming', 'pausing', 'cancelling'].includes(current.state));
   const selectedModel = caps?.agent_models.find((option) => option.id === model);
   const modelReady = !caps?.agent_models.length || !!selectedModel;
@@ -231,7 +234,12 @@ export default function App() {
                 persistent: true,
               },
           );
-          return [...restored, ...previous.filter((item) => !item.persistent)];
+          // A capped, delayed list is not evidence that a local run was deleted.
+          // Keep full snapshots (and their cursor) from creation, commands or SSE.
+          const listed = new Set(items.map((item) => item.id));
+          return [...restored, ...previous.filter((item) => !listed.has(item.id))].sort(
+            (a, b) => b.started - a.started,
+          );
         });
         let preferred: string | null = null;
         try {
@@ -710,7 +718,11 @@ export default function App() {
                           <InvestigationControls
                             key={`${current.id}:${current.durable.wait_id ?? ''}`}
                             run={current}
+                            readOnly={!current.demo && mode !== 'live'}
                             onRun={acceptPersistent}
+                            onPending={(pending) =>
+                              setPendingControls((count) => count + (pending ? 1 : -1))
+                            }
                           />
                         )}
                         <AnimatePresence mode="wait">
