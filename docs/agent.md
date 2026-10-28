@@ -2,7 +2,8 @@
 
 文档调查在现有检索器之上增加有限步数的动作循环：搜索候选、读取完整段落、补充检索、
 请求必要信息或输出带引用的答案。模型提出结构化 JSON 动作，Python 白名单验证后执行。
-当前工具是文档检索与读取；执行计划解析、日志诊断和持久多轮会话仍在后续计划中。
+当前工具是文档检索与读取。新增围绕同一调查的持久检查点、原地补充与暂停恢复；
+通用聊天记忆和工作流编辑器不在范围内。合同与完整演示见[可恢复调查](resumable-investigations.md)。
 
 实现入口为 `src/zhrag/agent.py`。进度与交接见 [迭代计划](agent-iteration.md)。
 
@@ -54,10 +55,10 @@ LLM 地址和密钥的模型。`GET /api/capabilities` 的 `agent_models` 返回
 - `usage` 中模型决策、搜索、读取次数和累计估算输入 token 数。
 - `total_seconds` 与绑定模型配置、索引身份、提示词和预算的 `agent_profile`。
 
-原静态页面在请求完成后显示执行记录。新增 [React 工作台](frontend.md) 可通过
-`POST /api/investigate/stream` 接收 SSE 实时动作事件；能力接口的 `agent_streaming`
-标识是否可用。该接口与原调查接口共用启用开关和并发预算，不自动重试或恢复运行。
-追问没有保存会话状态；用户需把补充信息与原问题一起重新提交。
+原静态页面在请求完成后显示执行记录。[React 工作台](frontend.md) 在能力接口声明
+`agent_persistence` 时使用 `/api/investigations`：创建与订阅分离，追问保留状态并在原调查继续。
+模型调用、预算、证据与规划/复核检查点均持久化，重启后按可靠边界恢复。
+旧服务仍回退到 `POST /api/investigate/stream`；旧接口保留请求级、断线取消、追问后新建请求的行为。
 
 ## 工具与证据约束
 

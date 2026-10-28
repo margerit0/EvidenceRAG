@@ -1,5 +1,9 @@
 # Agent 后续任务计划
 
+2026-10-28 范围更新：用户优先授权实现“围绕同一调查的暂停、补充与恢复”。本地实现和验证已转到
+`codex/resumable-investigations`，当前合同见[可恢复调查](resumable-investigations.md)，
+交接见[当前开发交接](frontend-next-session.md)。本文下方保留此前计划，不自动启动旧审核或付费评测。
+
 更新：2026-10-20。本文是后续执行计划，不代表相关能力已经交付。
 本计划制定于 `D:\rag` 的 `codex/fix-agent-graph-edges` 分支，基线为 `6dc7bdf`；
 执行前重新核对 Git 状态。最新运行证据见 [开发交接](frontend-next-session.md)。

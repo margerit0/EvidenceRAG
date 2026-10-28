@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -50,6 +51,27 @@ __all__ = [
 ]
 
 ENCODING = "utf-8"
+
+
+@contextmanager
+def sqlite_database(path: str | Path) -> Iterator[sqlite3.Connection]:
+    """Local transactional persistence; SQLite handles its binary file encoding.
+
+    FULL synchronizes committed WAL transactions. This port also owns directory
+    creation, so application modules never open database files themselves.
+    """
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(target, timeout=10, isolation_level=None)
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=FULL")
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute("PRAGMA secure_delete=ON")
+        yield connection
+    finally:
+        connection.close()
 
 
 @contextmanager

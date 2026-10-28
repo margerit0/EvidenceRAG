@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { batchProgress, invocations, progressSchema, resultSchema, safeSourceUrl } from './model';
-import { demoScript, scenarios } from './demo';
+import { demoScript, scenarios, resumableDemo, advanceDemo } from './demo';
 
 describe('execution records', () => {
+  it('keeps demo evidence and supplementation across pause/resume', () => {
+    const waiting = resumableDemo('run', '合成问题');
+    const active = advanceDemo(waiting, 'supplement', '甲版到乙版');
+    const paused = advanceDemo(active, 'pause');
+    expect(paused.state).toBe('paused');
+    expect(paused.progress).toEqual(waiting.progress);
+    expect(paused.result?.sources[0].citation_id).toBe(1);
+    const finished = advanceDemo(advanceDemo(paused, 'resume'), 'finish');
+    expect(finished.state).toBe('answered');
+    expect(finished.durable?.supplements[0].text).toBe('甲版到乙版');
+  });
   it('keeps repeated tool invocations separate and pairs their start/end events', () => {
     const calls = invocations(demoScript('answered', 'run').events);
     const searches = calls.filter((call) => call.action === 'search_docs');

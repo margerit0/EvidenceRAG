@@ -1,6 +1,18 @@
 # 文档调查 Agent 迭代计划与会话交接
 
-更新日期：2026-10-20。Agent 阶段分支：`feat/document-investigation-agent`；
+## 当前交接：可暂停、可恢复调查（2026-10-28）
+
+在 `codex/resumable-investigations` 从 `main` / `37ced74` 实现。新增 SQLite 状态机、执行边界检查点、
+调用尝试、租约代次防重、游标补收；前端支持原地补充、暂停/继续/取消及刷新恢复历史。生产检索固定
+物理集合并检查模型/配置/完整发布快照。旧请求级调查和模拟演示保留兼容。
+
+已完成 Python 全量回归 1,816 项（包含真实子进程强制退出、服务/执行器重建、故障窗口及预算测试），
+前端单测 27 项、工作台浏览器回归 47 项及真实合成后端暂停/断网/重启恢复回归通过；最后门禁记录见
+[开发交接](frontend-next-session.md)。完整行为与限制见[恢复合同](resumable-investigations.md)。
+本轮按用户要求不提交、推送、部署或调用付费模型，不重做 v2 的 79 条审核，不访问冻结 test。
+下方是此前阶段记录；旧“不保存会话”边界仅适用于保留兼容的旧 API。
+
+历史更新日期：2026-10-20。Agent 阶段分支：`feat/document-investigation-agent`；
 前端阶段分支：`feat/frontend-design`，已合入本地 `main`。
 本轮修复来源分支为 `codex/fix-agent-graph-edges`（从 `main` / `6dc7bdf` 创建）。
 
@@ -8,7 +20,7 @@
 `git status --short --branch` 和 `git log -5 --oneline`；代码、测试和真实运行记录优先于文档描述。
 不要在 main 上开发；尚未验证的能力不能写成已完成的项目成果。
 
-## 当前交接：图连线修复收尾（2026-10-20）
+## 历史交接：图连线修复收尾（2026-10-20）
 
 图连线修复与原创合成回归已完成提交前全套验证：Python 1,789 项、前端单测 22 项、
 生产构建浏览器回归 42 项通过，ruff check / format、mypy、Prettier 和空白检查通过。

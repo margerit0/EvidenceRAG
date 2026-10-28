@@ -1,5 +1,38 @@
 # 下一会话开发交接
 
+## 2026-10-28：可恢复调查交接
+
+本轮在 `codex/resumable-investigations` 开发，起点 `main` / `37ced74`，开始时工作区干净。
+按用户要求只完成本地实现和验证，未提交、推送或部署，未运行付费模型、v2 旧审核或冻结 test。
+
+- 后端：`investigation_store.py`、`agent_checkpoint.py`、`investigation_executor.py` 与
+  `service/investigations.py` 实现持久任务、边界检查点、调用尝试和可补收事件。
+- `scripts/serve.py --enable-agent` 默认使用 `indexes/investigations/runs.sqlite3`。
+  生产检索固定到已发布物理集合，模型配置和完整发布清单快照不匹配时阻止恢复。
+- 前端保留原布局、主题、模型入口和检查器；新增持久历史、原地补充、暂停/继续/取消、自动重连和恢复提示。
+- 新增原创合成后端 `scripts/serve_investigation_demo.py` 与独立真实后端浏览器回归
+  `npm --prefix frontend run test:persistence`。完整使用、清理、状态机和保证范围见
+  [可恢复调查](resumable-investigations.md)。旧请求级接口与模拟演示继续兼容。
+- 未提交数据仍在忽略目录：生产/演示数据库 `indexes/investigations/`，测试图像/数据库/trace
+  `frontend/test-results/`，Python 临时库 `.pytest_tmp/`。不要将这些加入 Git。
+
+本轮最终门禁：Python `pytest` 全量 1,816 项通过，ruff check / format、strict mypy（68 个源码文件）
+通过；前端单测 27 项、生产构建、Prettier、工作台浏览器回归 47 项及独立真实后端集成回归 1 项通过。
+已查看等待补充、窄屏暂停、答案/引用与深色页面截图。浏览器初次缺少 Chromium，安装匹配版本后重跑通过；
+沙箱内前端单测曾因临时目录 EPERM 无法运行，获准在沙箱外重跑通过。现存 FastAPI TestClient 的 httpx
+弃用警告与构建依赖的 PURE 注释警告不影响通过；未为本任务更新依赖版本。
+
+四项能力独立验收：订阅重连不创建任务；补充沿用证据；主动暂停消费保存结果；真实子进程退出与测试
+服务重启均读取同一磁盘数据库恢复。未知外部调用结果按不可恢复处理，未宣称 exactly-once。
+
+可用于简历的实际交付表述：为文档调查 Agent 实现基于 SQLite 的持久执行状态机和检查点，支持人工
+补充、合作式暂停、SSE 游标重连及进程重启恢复；通过事务幂等、租约代次、累计预算和模型/索引快照校验
+控制并发恢复与重复调用风险，完成 React 工作台接入和合成故障注入、端到端重启验证。
+
+下方是此前阶段的交接历史；其中“不保存调查”“追问后重新提交”等旧边界仅适用于旧 API。
+
+## 历史交接（2026-10-20）
+
 更新：2026-10-20。工作区 `D:\rag`，本轮修复来源分支为 `codex/fix-agent-graph-edges`；
 实际分支与远端同步状态以 Git 为准。
 `feat/frontend-design` 保留为已完成的阶段分支；此前文档与分支审查使用

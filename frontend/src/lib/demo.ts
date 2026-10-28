@@ -1,4 +1,4 @@
-import type { Decision, Progress, Result } from './model';
+import { persistentRun, type Decision, type Progress, type Result, type Run } from './model';
 
 export const scenarios = [
   {
@@ -31,8 +31,70 @@ export const scenarios = [
     question: '请完整比较示例集群所有版本的升级路径。',
     description: '达到调查边界后安全结束',
   },
+  {
+    id: 'pause_resume',
+    name: '暂停与恢复',
+    question: '示例集群升级前，需要补充哪些信息并核对回退条件？',
+    description: '已读证据 → 原地补充 → 暂停 → 继续（页面内模拟）',
+  },
 ] as const;
 export type ScenarioId = (typeof scenarios)[number]['id'];
+
+export function resumableDemo(id: string, query: string): Run {
+  const script = demoScript('answered', id);
+  const run = persistentRun({
+    schema_version: 1,
+    run_id: id,
+    query,
+    model: '原创合成演示',
+    status: 'waiting_input',
+    reason: '',
+    version: 1,
+    created_at: Date.now() / 1000,
+    active_seconds: 4.3,
+    wait_id: 'demo-question-1',
+    clarification: '请补充示例集群当前版本与目标版本。',
+    cursor: 8,
+    boundary: 'decision',
+    progress: script.events.slice(0, 8),
+    supplements: [],
+    response: {
+      ...script.result,
+      status: 'clarification_needed',
+      blocks: [],
+      sources: script.result.sources.slice(0, 1),
+      clarification: '请补充示例集群当前版本与目标版本。',
+      usage: { model_calls: 3, search_calls: 1, read_calls: 1, prompt_estimated_tokens: 0 },
+      total_seconds: 4.3,
+    },
+  });
+  return { ...run, demo: true, persistent: false, transport: 'demo' };
+}
+export function advanceDemo(run: Run, action: string, text = ''): Run {
+  const state = run.durable!;
+  const next = { ...state, version: state.version + 1, cursor: state.cursor + 1 };
+  if (action === 'pause') next.status = 'paused';
+  if (action === 'resume') next.status = 'running';
+  if (action === 'cancel') next.status = 'cancelled';
+  if (action === 'supplement') {
+    next.supplements = [
+      ...state.supplements,
+      { wait_id: state.wait_id!, question: state.clarification, text },
+    ];
+    next.status = 'running';
+    next.wait_id = null;
+    next.clarification = '';
+  }
+  if (action === 'finish') {
+    const script = demoScript('answered', run.id);
+    next.status = 'completed';
+    next.progress = script.events;
+    next.response = script.result;
+    next.cursor += script.events.length;
+    next.active_seconds = script.result.total_seconds;
+  }
+  return { ...persistentRun(next), demo: true, persistent: false, transport: 'demo' };
+}
 const sources = [
   {
     citation_id: 1,

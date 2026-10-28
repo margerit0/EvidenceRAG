@@ -33,6 +33,9 @@ indexes/
 runs/
 *.duckdb
 *.sqlite
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 
 # M9b generation artifacts: explicit defense-in-depth below the broad indexes/ rule.
 indexes/crud/generation/

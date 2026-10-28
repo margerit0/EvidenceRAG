@@ -13,7 +13,8 @@ import inspect
 import math
 import threading
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
@@ -29,8 +30,11 @@ from starlette.staticfiles import StaticFiles
 from zhrag.agent import AGENT_MESSAGES, DocumentAgent
 from zhrag.agent_progress import AgentProgress
 from zhrag.answering import PUBLIC_MESSAGES, Answerer, AnswerOutcome, AnswerStatus
+from zhrag.investigation_executor import InvestigationExecutor
+from zhrag.investigation_store import InvestigationStore
 from zhrag.retrieval.online import OnlineRetrievalResult, OnlineRetriever, StageTimings
 from zhrag.service.agent_stream import ProgressFeed
+from zhrag.service.investigations import install_investigations
 from zhrag.service.observability import TraceRecorder, TraceSink, profile_fingerprint
 from zhrag.store.base import MetadataValue
 
@@ -145,6 +149,7 @@ class CapabilitiesResponse(BaseModel):
     agent_enabled: bool = False
     agent_profile: str | None = None
     agent_streaming: bool = False
+    agent_persistence: bool = False
     agent_models: list[AgentModelResponse] = Field(default_factory=list)
     default_agent_model: str | None = None
 
@@ -384,6 +389,7 @@ def create_app(  # noqa: PLR0915
     agent_models: Mapping[str, DocumentAgent] | None = None,
     trace_sink: TraceSink | None = None,
     published_index_identity: str | None = None,
+    investigation_db: Path | None = None,
 ) -> FastAPI:
     """Create an app around an already-composed retriever.
 
@@ -442,17 +448,42 @@ def create_app(  # noqa: PLR0915
         rerank_enabled=service_info.rerank_enabled,
     )
 
+    executor: InvestigationExecutor | None = None
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        if executor:
+            executor.start()
+        try:
+            yield
+        finally:
+            if executor:
+                executor.close()
+
     app = FastAPI(
         title="zhrag TiDB retrieval service",
         version="1",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+        lifespan=lifespan,
     )
     app.state.retriever = retriever
     app.state.service_info = service_info
     app.state.max_concurrency = max_concurrency
     app.state.admission = _AdmissionGate(max_concurrency)
+    if investigation_db is not None and agent is not None:
+        if not published_index_identity:
+            raise ValueError("persistent investigations require an immutable index identity")
+        durable_models = models or {"default": agent}
+        executor = InvestigationExecutor(
+            InvestigationStore(investigation_db),
+            durable_models,
+            published_index_identity,
+            app.state.admission,
+        )
+        app.state.investigations = executor
+        install_investigations(app, executor, default_model or "default")
     # Keep shielded work alive when its HTTP caller disconnects.
     pending_asks: set[asyncio.Task[AskResponse | JSONResponse]] = set()
     pending_investigations: set[asyncio.Task[JSONResponse]] = set()
@@ -467,6 +498,7 @@ def create_app(  # noqa: PLR0915
             agent_enabled=agent is not None,
             agent_profile=agent.profile_fingerprint if agent else None,
             agent_streaming=agent is not None,
+            agent_persistence=executor is not None,
             agent_models=[
                 AgentModelResponse(id=name, name=model_labels.get(name.lower(), name))
                 for name in models

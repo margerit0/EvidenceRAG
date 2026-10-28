@@ -56,6 +56,7 @@ export const capabilitiesSchema = z.object({
   agent_enabled: z.boolean(),
   agent_profile: z.string().nullable(),
   agent_streaming: z.boolean().default(false),
+  agent_persistence: z.boolean().default(false),
   agent_models: z.array(z.object({ id: z.string().min(1), name: z.string().min(1) })).default([]),
   default_agent_model: z.string().nullable().default(null),
 });
@@ -64,6 +65,44 @@ export type Source = z.infer<typeof sourceSchema>;
 export type Progress = z.infer<typeof progressSchema>;
 export type Capabilities = z.infer<typeof capabilitiesSchema>;
 export type Decision = z.infer<typeof decisionSchema>;
+export const durableRunSchema = z.object({
+  schema_version: z.literal(1),
+  run_id: z.string(),
+  query: z.string(),
+  model: z.string(),
+  status: z.string(),
+  reason: z.string(),
+  version: z.number().int(),
+  created_at: z.number(),
+  active_seconds: z.number().nonnegative(),
+  wait_id: z.string().nullable(),
+  clarification: z.string(),
+  cursor: z.number().int().nonnegative(),
+  boundary: z.string(),
+  response: resultSchema,
+  progress: z.array(progressSchema),
+  supplements: z.array(z.object({ wait_id: z.string(), question: z.string(), text: z.string() })),
+});
+export type DurableRun = z.infer<typeof durableRunSchema>;
+export function persistentRun(value: DurableRun): Run {
+  return {
+    id: value.run_id,
+    query: value.query,
+    demo: false,
+    model: value.model,
+    modelName: value.model,
+    started: value.created_at * 1000,
+    state:
+      value.status === 'completed' || value.status === 'failed'
+        ? value.response.status
+        : value.status,
+    progress: value.progress,
+    result: value.response,
+    transport: 'stream',
+    durable: value,
+    persistent: true,
+  };
+}
 export type NodeKey = 'agent' | 'search' | 'read' | 'finish';
 export type Run = {
   id: string;
@@ -77,6 +116,9 @@ export type Run = {
   result?: Result;
   error?: string;
   transport: 'demo' | 'stream' | 'batch';
+  durable?: DurableRun;
+  persistent?: boolean;
+  reconnecting?: boolean;
 };
 export type Invocation = {
   id: string;
@@ -93,7 +135,7 @@ export type Invocation = {
 export function nodeFor(action: string): NodeKey {
   if (action === 'search_docs') return 'search';
   if (action === 'read_passage') return 'read';
-  if (['finish', 'answer', 'validate_answer'].includes(action)) return 'finish';
+  if (['finish', 'answer', 'validate_answer', 'wait_for_input'].includes(action)) return 'finish';
   return 'agent';
 }
 export const actionNames: Record<string, string> = {
@@ -106,9 +148,18 @@ export const actionNames: Record<string, string> = {
   validate_answer: '校验答案',
   answer: '准备答案',
   finish: '结束调查',
+  wait_for_input: '等待补充',
 };
 export const statusLabels: Record<string, string> = {
   idle: '尚未开始',
+  queued: '等待执行',
+  waiting_input: '等待补充信息',
+  pausing: '正在暂停',
+  paused: '已暂停',
+  resuming: '正在恢复',
+  interrupted: '服务中断，可恢复',
+  cancelling: '正在取消',
+  unrecoverable: '无法恢复',
   running: '调查进行中',
   answered: '已生成答案',
   clarification_needed: '需要补充信息',
@@ -130,10 +181,15 @@ export const statusLabels: Record<string, string> = {
 };
 export function toneFor(status: string): 'neutral' | 'brand' | 'success' | 'warning' | 'danger' {
   if (status === 'answered' || status === 'ok' || status === 'completed') return 'success';
-  if (status === 'running') return 'brand';
+  if (['running', 'queued', 'resuming'].includes(status)) return 'brand';
   if (
     [
       'clarification_needed',
+      'waiting_input',
+      'pausing',
+      'paused',
+      'interrupted',
+      'cancelling',
       'insufficient_evidence',
       'budget_exhausted',
       'cancel_requested',

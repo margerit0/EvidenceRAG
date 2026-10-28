@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run src",
     "test:e2e": "playwright test",
+    "test:persistence": "playwright test --config playwright.persistence.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

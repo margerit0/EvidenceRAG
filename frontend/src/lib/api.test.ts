@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { investigate, SseDecoder } from './api';
+import { investigate, SseDecoder, RunEventCursor, commandRun, watchRun } from './api';
 import { demoScript } from './demo';
+import { resumableDemo, advanceDemo } from './demo';
 
 afterEach(() => vi.unstubAllGlobals());
 function mockStream(text: string) {
@@ -92,5 +93,57 @@ describe('SSE transport', () => {
     const result = demoScript('generation_timeout', 'run').result;
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(result, { status: 503 })));
     expect(await investigate('q', false, new AbortController().signal, vi.fn())).toEqual(result);
+  });
+});
+
+describe('persistent investigations', () => {
+  it('deduplicates replayed events and refuses gaps', () => {
+    const cursor = new RunEventCursor(12);
+    expect(cursor.accept(12)).toBe(false);
+    expect(cursor.accept(13)).toBe(true);
+    expect(cursor.accept(13)).toBe(false);
+    expect(() => cursor.accept(15)).toThrow('事件序号缺失');
+    expect(cursor.seq).toBe(13);
+  });
+  it('retries a command with the same idempotency key and waiting generation', async () => {
+    const run = resumableDemo('run', '合成问题').durable!;
+    const request = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('network'))
+      .mockResolvedValueOnce(Response.json(run));
+    vi.stubGlobal('fetch', request);
+    await commandRun(run, 'supplement', new AbortController().signal, '甲到乙');
+    expect(request.mock.calls[0][1].body).toBe(request.mock.calls[1][1].body);
+    expect(JSON.parse(request.mock.calls[0][1].body).wait_id).toBe(run.wait_id);
+  });
+  it('subscribes with a cursor, ignores duplicate events and never creates a run', async () => {
+    const initial = resumableDemo('run', '合成问题').durable!;
+    const final = advanceDemo(resumableDemo('run', '合成问题'), 'finish').durable!;
+    const event = {
+      schema_version: 1,
+      run_id: 'run',
+      seq: initial.cursor + 1,
+      kind: 'state',
+      payload: {},
+    };
+    const wire = `event: run_event\ndata: ${JSON.stringify(event)}\n\n`;
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(initial))
+      .mockResolvedValueOnce(
+        new Response(wire + wire, { headers: { 'Content-Type': 'text/event-stream' } }),
+      )
+      .mockResolvedValueOnce(Response.json(final));
+    vi.stubGlobal('fetch', request);
+    const observe = vi.fn();
+    await watchRun('run', new AbortController().signal, observe, vi.fn());
+    expect(observe.mock.calls.map((call) => call[0].status)).toEqual([
+      'waiting_input',
+      'completed',
+    ]);
+    expect(request.mock.calls[1][0]).toContain(`after=${initial.cursor}`);
+    expect(request.mock.calls.every((call) => !call[1].method || call[1].method === 'GET')).toBe(
+      true,
+    );
   });
 });

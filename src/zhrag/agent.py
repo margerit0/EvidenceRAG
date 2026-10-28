@@ -274,6 +274,9 @@ class _Run:
     assessment: DecisionAssessment | None = None
     planning_feedback: str | None = None
     progress: ProgressRecorder | None = None
+    # Durable execution parses/validates a decision before committing its dispatch.
+    defer_actions: bool = False
+    action: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -464,23 +467,28 @@ class DocumentAgent:
         )
 
     def _search(self, state: _Run, query: str) -> None:
-        if state.progress is not None:
-            state.progress.start("search_docs", state.model_calls)
-        normalized = " ".join(query.split()).casefold()
-        if normalized in state.searches:
-            self._event(state, "search_docs", "duplicate_query")
+        if not self._prepare_search(state, query):
             return
-        if state.search_calls >= self.settings.max_searches:
-            self._event(state, "search_docs", "search_limit")
-            return
-        state.search_calls += 1
-        state.searches.add(normalized)
         try:
             result = self.retriever.retrieve(query)
             self._add_candidates(state, result.passages)
             state.successful_searches += 1
         except (Exception, SystemExit):
             self._event(state, "search_docs", "tool_failed")
+
+    def _prepare_search(self, state: _Run, query: str) -> bool:
+        if state.progress is not None:
+            state.progress.start("search_docs", state.model_calls)
+        normalized = " ".join(query.split()).casefold()
+        if normalized in state.searches:
+            self._event(state, "search_docs", "duplicate_query")
+            return False
+        if state.search_calls >= self.settings.max_searches:
+            self._event(state, "search_docs", "search_limit")
+            return False
+        state.search_calls += 1
+        state.searches.add(normalized)
+        return True
 
     def _add_candidates(self, state: _Run, passages: tuple[RankedPassage, ...]) -> None:
         seen = {row.ranked.passage.doc_id for row in state.candidates.values()}
@@ -670,6 +678,9 @@ class DocumentAgent:
     def _dispatch(  # noqa: PLR0911 - terminal actions and validation failures
         self, state: _Run, action: dict[str, object]
     ) -> AgentOutcome | None:
+        if state.defer_actions:
+            state.action = action
+            return None
         name = action["action"]
         if name == "search_docs":
             self._search(state, str(action["query"]))

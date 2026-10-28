@@ -44,9 +44,10 @@ import {
 } from './components/ui';
 import { Inspector } from './components/Inspector';
 import { DecisionDetails } from './components/DecisionDetails';
+import { InvestigationControls } from './components/InvestigationControls';
 import { ExecutionGraph } from './components/ExecutionGraph';
-import { ApiError, capabilities, investigate } from './lib/api';
-import { playDemo, scenarios, type ScenarioId } from './lib/demo';
+import { ApiError, capabilities, investigate, createRun, listRuns, watchRun } from './lib/api';
+import { playDemo, scenarios, resumableDemo, advanceDemo, type ScenarioId } from './lib/demo';
 import {
   actionNames,
   batchProgress,
@@ -56,6 +57,7 @@ import {
   safeSourceUrl,
   statusLabels,
   toneFor,
+  persistentRun,
   type Capabilities,
   type Invocation,
   type Run,
@@ -108,7 +110,13 @@ export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(() =>
     document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
   );
-  const [mode, setMode] = useState('demo');
+  const [mode, setMode] = useState(() => {
+    try {
+      return localStorage.getItem('zhrag-run-mode') ?? 'demo';
+    } catch {
+      return 'demo';
+    }
+  });
   const [model, setModel] = useState(() => {
     try {
       return localStorage.getItem('zhrag-agent-model') ?? '';
@@ -133,11 +141,21 @@ export default function App() {
   const [answerEntering, setAnswerEntering] = useState(false);
   const [, setTick] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
+  const starting = useRef(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const createRequest = useRef<{ query: string; model?: string; id: string } | undefined>(
+    undefined,
+  );
   const formRef = useRef<HTMLFormElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const executionRef = useRef<HTMLElement>(null);
   const current = runs.find((run) => run.id === selectedRun);
-  const busy = runs.some((run) => run.state === 'running');
+  const busy =
+    creating ||
+    runs.some((run) => !run.persistent && run.state === 'running') ||
+    (!!current &&
+      ['running', 'queued', 'resuming', 'pausing', 'cancelling'].includes(current.state));
   const selectedModel = caps?.agent_models.find((option) => option.id === model);
   const modelReady = !caps?.agent_models.length || !!selectedModel;
   const calls = invocations(current?.progress ?? []);
@@ -178,6 +196,78 @@ export default function App() {
     }
   }, [theme]);
   useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => {
+    if (!current?.demo || !current.durable || current.state !== 'running') return;
+    const timer = window.setTimeout(() => acceptPersistent(advanceDemo(current, 'finish')), 6000);
+    return () => window.clearTimeout(timer);
+  }, [current?.id, current?.state, current?.durable?.version]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('zhrag-run-mode', mode);
+    } catch {
+      /* optional preference */
+    }
+  }, [mode]);
+  useEffect(() => {
+    if (mode !== 'live' || !caps?.agent_persistence) return;
+    const controller = new AbortController();
+    listRuns(controller.signal)
+      .then((items) => {
+        if (controller.signal.aborted) return;
+        setRuns((previous) => {
+          const known = new Map(previous.map((item) => [item.id, item]));
+          const restored: Run[] = items.map(
+            (item) =>
+              known.get(item.id) ?? {
+                id: item.id,
+                query: item.query,
+                model: item.model,
+                modelName: item.model,
+                started: item.created_at * 1000,
+                state: item.status,
+                demo: false,
+                progress: [],
+                transport: 'stream',
+                persistent: true,
+              },
+          );
+          return [...restored, ...previous.filter((item) => !item.persistent)];
+        });
+        let preferred: string | null = null;
+        try {
+          preferred = localStorage.getItem('zhrag-current-run');
+        } catch {
+          /* optional preference */
+        }
+        setSelectedRun(
+          (previous) => previous ?? items.find((item) => item.id === preferred)?.id ?? items[0]?.id,
+        );
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCreateError('无法加载调查列表，请检查服务后重新连接。');
+      });
+    return () => controller.abort();
+  }, [mode, caps?.agent_persistence, connectionAttempt]);
+  useEffect(() => {
+    if (mode !== 'live' || !selectedRun || !current?.persistent) return;
+    const controller = new AbortController();
+    try {
+      localStorage.setItem('zhrag-current-run', selectedRun);
+    } catch {
+      /* optional preference */
+    }
+    void watchRun(
+      selectedRun,
+      controller.signal,
+      (value) => {
+        if (!controller.signal.aborted) acceptPersistent(persistentRun(value));
+      },
+      (reconnecting) => {
+        if (!controller.signal.aborted) update(selectedRun, (row) => ({ ...row, reconnecting }));
+      },
+    );
+    return () => controller.abort();
+  }, [selectedRun, current?.persistent, mode]);
   useEffect(() => {
     if (!model) return;
     try {
@@ -221,9 +311,66 @@ export default function App() {
   function update(id: string, fn: (run: Run) => Run) {
     setRuns((previous) => previous.map((run) => (run.id === id ? fn(run) : run)));
   }
+  function acceptPersistent(run: Run) {
+    setRuns((previous) => {
+      const old = previous.find((item) => item.id === run.id);
+      if (old?.durable && run.durable && old.durable.cursor > run.durable.cursor) return previous;
+      return old ? previous.map((item) => (item.id === run.id ? run : item)) : [run, ...previous];
+    });
+  }
   async function start() {
-    if (busy || !query.trim() || (mode === 'live' && (connection !== 'ready' || !modelReady)))
+    if (
+      starting.current ||
+      busy ||
+      !query.trim() ||
+      (mode === 'live' && (connection !== 'ready' || !modelReady))
+    )
       return;
+    if (mode === 'demo' && scenario === 'pause_resume') {
+      const run = resumableDemo(crypto.randomUUID(), query.trim());
+      acceptPersistent(run);
+      setSelectedRun(run.id);
+      setQuery('');
+      setSelectedCall(undefined);
+      return;
+    }
+    if (mode === 'live' && caps?.agent_persistence) {
+      starting.current = true;
+      setCreating(true);
+      setCreateError('');
+      const question = query.trim();
+      if (
+        createRequest.current?.query !== question ||
+        createRequest.current?.model !== selectedModel?.id
+      )
+        createRequest.current = {
+          query: question,
+          model: selectedModel?.id,
+          id: crypto.randomUUID(),
+        };
+      try {
+        const saved = await createRun(
+          question,
+          selectedModel?.id,
+          createRequest.current.id,
+          new AbortController().signal,
+        );
+        acceptPersistent(persistentRun(saved));
+        setSelectedRun(saved.run_id);
+        setSelectedCall(undefined);
+        setSourceId(undefined);
+        setQuery('');
+        createRequest.current = undefined;
+      } catch {
+        setCreateError(
+          '创建结果未确认。可以重试同一问题，重试会沿用创建编号；也可刷新查看调查列表。',
+        );
+      } finally {
+        starting.current = false;
+        setCreating(false);
+      }
+      return;
+    }
     const id = crypto.randomUUID();
     const abort = new AbortController();
     abortRef.current = abort;
@@ -369,8 +516,12 @@ export default function App() {
                 </Button>
               </Tip>
               <Dialog
-                title="本次会话"
-                description="保留最近 10 次运行。记录只存在当前页面内，刷新后清空。"
+                title="调查历史"
+                description={
+                  caps?.agent_persistence
+                    ? '服务端保留调查与引用；选择后加载历史并重新连接进度。列表展示最近 100 次调查。'
+                    : '保留最近 10 次运行。模拟记录只存在当前页面内，刷新后清空。'
+                }
                 trigger={
                   <Button variant="ghost" size="icon" aria-label="运行历史">
                     <History size={19} />
@@ -383,7 +534,7 @@ export default function App() {
                       <DialogClose key={run.id} asChild>
                         <button
                           className={`history-item ${current?.id === run.id ? 'selected' : ''}`}
-                          disabled={busy}
+                          disabled={busy && !current?.persistent}
                           onClick={() => {
                             setSelectedRun(run.id);
                             setSelectedCall(undefined);
@@ -555,6 +706,13 @@ export default function App() {
                         <div className="answer-status" aria-live="polite">
                           <Status state={current.state} />
                         </div>
+                        {current.durable && (
+                          <InvestigationControls
+                            key={`${current.id}:${current.durable.wait_id ?? ''}`}
+                            run={current}
+                            onRun={acceptPersistent}
+                          />
+                        )}
                         <AnimatePresence mode="wait">
                           <motion.div
                             key={current.result ? 'result' : current.state}
@@ -597,12 +755,27 @@ export default function App() {
                                   引用可追溯，结论仍需结合原文核对。
                                 </p>
                               </div>
-                            ) : current.result ? (
+                            ) : current.result &&
+                              (!current.durable ||
+                                ![
+                                  'running',
+                                  'queued',
+                                  'resuming',
+                                  'paused',
+                                  'pausing',
+                                  'waiting_input',
+                                  'interrupted',
+                                  'cancelling',
+                                  'unrecoverable',
+                                ].includes(current.state)) ? (
                               <div className="outcome-copy">
                                 <p>{current.result.clarification || current.result.message}</p>
-                                {current.result.status === 'clarification_needed' && (
-                                  <p className="muted">将补充信息与原问题一起提交，发起新调查。</p>
-                                )}
+                                {!current.durable &&
+                                  current.result.status === 'clarification_needed' && (
+                                    <p className="muted">
+                                      将补充信息与原问题一起提交，发起新调查。
+                                    </p>
+                                  )}
                               </div>
                             ) : current.state === 'running' ? (
                               <div className="working-copy">
@@ -747,7 +920,7 @@ export default function App() {
                             />
                           </div>
                         )}
-                        {busy ? (
+                        {busy && !current?.durable ? (
                           <Button
                             variant="outline"
                             size="sm"
@@ -765,6 +938,7 @@ export default function App() {
                             size="sm"
                             disabled={
                               !query.trim() ||
+                              busy ||
                               (mode === 'live' && (connection !== 'ready' || !modelReady))
                             }
                           >
@@ -781,6 +955,11 @@ export default function App() {
                           ? `使用 ${selectedModel.name} 调查，切换仅对新运行生效。`
                           : '发起后将使用已配置的模型与检索服务。'}
                     </p>
+                    {createError && (
+                      <p className="outcome-copy" role="alert">
+                        {createError}
+                      </p>
+                    )}
                   </form>
                 </section>
                 <section

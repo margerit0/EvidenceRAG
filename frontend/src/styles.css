@@ -2428,3 +2428,49 @@ main {
 .inspector-drawer .inspector-outcome {
   flex-shrink: 0;
 }
+/* Durable investigation controls reuse the workbench's typography and surfaces. */
+.investigation-controls {
+  margin: 12px 0 20px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.investigation-controls p {
+  margin: 0 0 10px;
+  overflow-wrap: anywhere;
+}
+.investigation-controls label {
+  display: block;
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+.investigation-controls textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+.run-control-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+.investigation-controls small {
+  opacity: 0.65;
+  overflow-wrap: anywhere;
+}
+.supplement-history {
+  margin: 12px 0;
+}
+.supplement-history summary {
+  cursor: pointer;
+}

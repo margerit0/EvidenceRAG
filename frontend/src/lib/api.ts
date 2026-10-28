@@ -3,6 +3,8 @@ import {
   capabilitiesSchema,
   progressSchema,
   resultSchema,
+  durableRunSchema,
+  type DurableRun,
   type Capabilities,
   type Progress,
   type Result,
@@ -14,6 +16,177 @@ export class ApiError extends Error {
     message: string,
   ) {
     super(message);
+  }
+}
+
+async function runRequest(path: string, signal: AbortSignal, body?: unknown): Promise<unknown> {
+  const response = await fetch(`/api/investigations${path}`, {
+    method: body ? 'POST' : 'GET',
+    signal,
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+  const value = await response.json();
+  if (!response.ok)
+    throw new ApiError(value.code ?? 'connection_lost', '调查操作未完成，请查看当前状态后重试。');
+  return value;
+}
+export async function createRun(
+  query: string,
+  model: string | undefined,
+  requestId: string,
+  signal: AbortSignal,
+) {
+  return durableRunSchema.parse(
+    await runRequest('', signal, { query, model, request_id: requestId }),
+  );
+}
+export async function getRun(id: string, signal: AbortSignal) {
+  const run = durableRunSchema.parse(await runRequest(`/${id}`, signal));
+  if (run.run_id !== id) throw new ApiError('connection_lost', '调查编号不一致');
+  return run;
+}
+const runListSchema = z.object({
+  runs: z.array(
+    z.object({
+      id: z.string(),
+      query: z.string(),
+      model: z.string(),
+      status: z.string(),
+      created_at: z.number(),
+      version: z.number(),
+      reason: z.string(),
+    }),
+  ),
+});
+export async function listRuns(signal: AbortSignal) {
+  return runListSchema.parse(await runRequest('', signal)).runs;
+}
+export async function commandRun(
+  run: DurableRun,
+  action: string,
+  signal: AbortSignal,
+  text?: string,
+) {
+  const body = {
+    request_id: crypto.randomUUID(),
+    version: run.version,
+    ...(action === 'supplement' ? { wait_id: run.wait_id, text } : {}),
+  };
+  // A network retry uses the exact same command key and expected generation.
+  try {
+    return durableRunSchema.parse(await runRequest(`/${run.run_id}/${action}`, signal, body));
+  } catch (error) {
+    if (error instanceof ApiError || signal.aborted) throw error;
+    return durableRunSchema.parse(await runRequest(`/${run.run_id}/${action}`, signal, body));
+  }
+}
+
+export class RunEventCursor {
+  constructor(public seq = 0) {}
+  accept(seq: number): boolean {
+    if (seq <= this.seq) return false;
+    if (seq !== this.seq + 1) throw new ApiError('connection_lost', '事件序号缺失，正在重新同步');
+    this.seq = seq;
+    return true;
+  }
+}
+
+const runEventSchema = z.object({
+  schema_version: z.literal(1),
+  run_id: z.string(),
+  seq: z.number().int().positive(),
+  kind: z.string(),
+  payload: z.unknown(),
+});
+const endedRuns = new Set([
+  'completed',
+  'failed',
+  'cancelled',
+  'budget_exhausted',
+  'unrecoverable',
+]);
+
+export async function watchRun(
+  id: string,
+  signal: AbortSignal,
+  receive: (run: DurableRun) => void,
+  connection: (reconnecting: boolean) => void,
+) {
+  while (!signal.aborted) {
+    const transport = new AbortController();
+    const disconnect = () => transport.abort();
+    let stall = globalThis.setTimeout(disconnect, 25_000);
+    const alive = () => {
+      clearTimeout(stall);
+      stall = globalThis.setTimeout(disconnect, 25_000);
+    };
+    signal.addEventListener('abort', disconnect, { once: true });
+    if (typeof window !== 'undefined') window.addEventListener('offline', disconnect);
+    try {
+      const initial = await getRun(id, transport.signal);
+      alive();
+      receive(initial);
+      connection(false);
+      if (endedRuns.has(initial.status)) return;
+      const cursor = new RunEventCursor(initial.cursor);
+      const response = await fetch(`/api/investigations/${id}/stream?after=${cursor.seq}`, {
+        signal: transport.signal,
+        cache: 'no-store',
+      });
+      if (
+        !response.ok ||
+        !response.body ||
+        !response.headers.get('content-type')?.includes('text/event-stream')
+      )
+        throw new ApiError('connection_lost', '进度连接中断');
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8', { fatal: true });
+      const parser = new SseDecoder();
+      try {
+        while (!signal.aborted) {
+          const { value, done } = await reader.read();
+          alive();
+          const frames = parser.push(
+            done ? decoder.decode() : decoder.decode(value, { stream: true }),
+          );
+          let changed = false;
+          for (const frame of frames) {
+            if (frame.event !== 'run_event') continue;
+            const event = runEventSchema.parse(frame.data);
+            if (event.run_id !== id) throw new ApiError('connection_lost', '调查编号不一致');
+            changed = cursor.accept(event.seq) || changed;
+          }
+          if (changed || done) {
+            const current = await getRun(id, transport.signal);
+            receive(current);
+            cursor.seq = Math.max(cursor.seq, current.cursor);
+            if (endedRuns.has(current.status)) return;
+          }
+          if (done) throw new ApiError('connection_lost', '正在重新连接进度');
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
+    } catch {
+      if (signal.aborted) return;
+      connection(true);
+      await new Promise<void>((resolve) => {
+        const finish = () => {
+          clearTimeout(timer);
+          signal.removeEventListener('abort', finish);
+          resolve();
+        };
+        const timer = window.setTimeout(finish, 1500);
+        signal.addEventListener('abort', finish, { once: true });
+      });
+    } finally {
+      clearTimeout(stall);
+      signal.removeEventListener('abort', disconnect);
+      if (typeof window !== 'undefined') window.removeEventListener('offline', disconnect);
+    }
   }
 }
 export async function capabilities(signal: AbortSignal): Promise<Capabilities> {

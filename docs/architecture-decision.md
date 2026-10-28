@@ -1,5 +1,18 @@
 # zhrag 架构决策与验证记录
 
+## 2026-10-28 决策：同一调查的持久恢复
+
+采用本地 SQLite 保存任务、最新检查点、事件和调用尝试，暂不引入消息中间件或工作流引擎。
+事务同时提交状态、预算、检查点和事件；owner/epoch/租约限制同一任务只有一个有效执行者。
+保留 `DocumentAgent` 的动作、证据、规划和答案校验逻辑，通过显式“模型结果已保存 / 动作已验证 /
+检索结果已保存”边界恢复，避免仅回放进度或每次从头调用模型。
+
+外部成功与本地提交之间无法做原子事务，因此结果未知的调用保留记录并终止恢复，不自动重复调用；
+这是保守的首版产品选择。暂停等待调用边界，取消是终态，浏览器断线只影响订阅。累计预算不重置，
+模型/关键配置/文档清单快照不匹配时禁止恢复。运行中的检索固定已发布物理集合，避免别名漂移。
+首次使用仍是本机单用户服务，不扩展账户体系或通用聊天记忆。完整合同、保证范围与验证入口见
+[可恢复调查](resumable-investigations.md)。以下保留此前架构决策与验证记录。
+
 > 初版规划日期为 2026-08-17，本文随后持续更新。历史调研中的版本、价格和供应商限制并非全部经过本项目实测；重新部署时应核对当前官方文档。当前实现以代码、认证报告和 §13 的验证状态为准，未完成项不代表已交付能力。
 
 > **数字勘误说明**：本报告综合时使用的分块统计来自早期原型（固定 1.15 字符/token）。
@@ -42,7 +55,7 @@
 | **分块** | 已建成的两阶段：header split → 掩码 code fence/table → target=400 合并小块/拆大块 | 实测 n=1,832，p50 371，p90 734，欠长块 5.0%，代码块破损 0；M7 已完成 256/400/800 source-level known-item sweep | 400 保留为 canonical reference；M7 两个相对 400 的主终点比较经 Holm 均未显著，不能声称 400 全局最优、等价或无损 |
 | **检索管线** | dense-4096（COSINE）+ sparse（char-bigram BM25，**IP**）两臂检索 → 客户端 exact RRF → 客户端 Qwen3-Reranker-8B 重排 top-50（请求窗口 top-100） | 三段式，每段可单独消融；top-50 由 top-100 未检出额外收益的实测决定 | `compare_dense_bm25.py` 实测的是**客户端加权 RRF**：0.3/0.7 相对 dense 单臂 16 胜 4 负，Holm p=0.047；不能作为 Milvus `WeightedRanker` 分数融合的实测证据。后者若比较，须独立冻结配置和运行；客户端 RRF 的 k 对照也不能直接归于服务端 `RRFRanker` |
 | **词法检索** | **客户端算 char-bigram BM25 权重，作为 SPARSE_FLOAT_VECTOR 推给 DB** | `run_lexical_sweep.py` 的客户端词法实验中，jieba 搜索模式 R@1 73.4%，char bigram 75.9%；属于描述性比较。数据库内置 `chinese` 使用 jieba 搜索模式及过滤器是实现配置依据，并非数据库端到端质量实测 | 保持客户端 BM25 可复现合同，避免数据库分词、过滤器与 IDF 范围同时改变；服务端 analyzer 的质量需另做对照 |
-| **服务层** | FastAPI + 线程池中的同步 provider 调用；在线生成使用直连传输与独立重试策略；调查另提供请求级 SSE 进度接口 | 多模型共享检索器与有限并发 admission，错误脱敏；进度观察不进入模型输入，供应商流式与网页 SSE 独立 | 取消为合作式，阻塞调用仍受自身 timeout 约束；不承诺即时停止计费、严格墙钟截止或断线恢复 |
+| **服务层** | FastAPI + 同步 provider；新增 SQLite 持久调查、检查点与独立 SSE 订阅，旧请求级接口兼容 | 多模型共享检索器及 admission；有序事件、命令幂等、租约代次保护执行边界，进度观察不进入模型输入 | 合作式暂停/取消；恢复仅覆盖已保存边界，调用结果未知时终止恢复，不承诺外部 exactly-once 或即时停止计费 |
 | **前端** | React + TypeScript + Vite；React Flow 流程图、Radix 交互组件与 Motion 动效；构建后由 FastAPI 挂载 `/workbench/`，原 `/` 静态页保留 | 用户选择 React 后，以逐次调用、证据阅读和异常终态支撑调查检查；默认原创合成演示可独立生产预览，无需后端与密钥 | 保持现有冰川流线和模型入口，不扩展为通用工作流编辑器；持久会话、跨会话历史和公网部署另行设计 |
 | **评估** | 检索侧：**已建成**（R@k / MRR / nDCG / ALL-gold / bootstrap CI / paired bootstrap）。生成侧：**M9a 已冻结独立指标合同**（逐样本 BLEU/ROUGE-L、可选真实 BERTScore、RAGQuestEval 评分语义），真实生成实验留给 M9b | 不安装或移植无授权的 CRUD_RAG 代码；Table 8 只保留 aggregate-only 来源证据 | RAGAS 只作为「我知道这个框架」的一行说明。**不要当主力**：最后一次 commit 2026-02-24，559 open issues，而竞品当天都在发版 |
 | **可观测性** | **provider-free retrieval trace contract**：默认 no-op sink，测试用 in-memory sink；可选 sink 只接收脱敏 span lifecycle、profile fingerprint、候选/输出计数与八阶段耗时 | 不把 Phoenix/OTEL 运行时或外部 UI 当作已验证交付；HTTP 检索 trace 不覆盖生成，生成状态固定为 `not_evaluated` | Phoenix / OpenTelemetry 可作为后续 exporter，但必须单独验证部署、许可与数据边界 |
@@ -564,7 +577,7 @@ zhrag/
 | **不提交任何语料字节（含「小样本」）** | CRUD_RAG **根本没有 LICENSE 文件**（Apache badge 只是 README 里的 shields.io 图片，GitHub API 报 `license: None`），8 万篇新闻无出处无授权声明；TiDB 文档是 CC BY-SA 3.0，你的 chunk 输出属于 Adaptation |
 | **不用 Docker（本阶段）** | 本机没装；Milvus Lite 纯 Python；M11 只交付 provider-free trace contract 与离线归因，不把 Phoenix UI 作为已验证依赖。真需要 Standalone 时进 WSL2 |
 | **不做多租户 / RBAC / 审计** | 没有任何编排框架白送这些，它们来自数据库和应用层；且 Dify 的许可证明确禁止未授权的多租户运营 |
-| **不做原生移动应用、通用工作流编辑器或持久多轮会话** | 已交付响应式 React 工作台及窄屏阅读交互；继续聚焦调查、逐次调用与证据检查，跨会话存储和可编辑编排不在本版范围 |
+| **不做原生移动应用、通用工作流编辑器或通用聊天记忆** | 已交付响应式 React 工作台；2026-10-28 将边界扩展为同一调查的持久暂停、补充与恢复，仍不引入可编辑编排或跨调查聊天记忆 |
 
 ---
 

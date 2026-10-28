@@ -25,6 +25,7 @@ from zhrag.agent import AgentSettings, DocumentAgent
 from zhrag.answering import Answerer, AnswerSettings
 from zhrag.embedding_contract import validate_embedding_cache
 from zhrag.ingest import IngestState, read_state
+from zhrag.investigation_store import fingerprint
 from zhrag.io_utils import read_jsonl
 from zhrag.lexical import SparseIndex, read_sparse_index
 from zhrag.retrieval.online import OnlineRetriever, OnlineSettings, PassageReranker
@@ -142,6 +143,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="enable paid bounded document investigation; requires LLM_* configuration",
     )
     parser.add_argument("--agent-max-steps", type=int, default=10)
+    parser.add_argument(
+        "--investigation-db",
+        type=Path,
+        default=Path("indexes/investigations/runs.sqlite3"),
+        help="local durable investigation database (contains user data and evidence)",
+    )
     parser.add_argument(
         "--agent-model",
         dest="agent_models",
@@ -443,6 +450,21 @@ def _verify_store(
         raise ValueError("Milvus row count does not match the published state")
 
 
+def _investigation_snapshot(state: IngestState) -> str:
+    """Bind checkpoints to the complete published document/config manifest."""
+    return fingerprint(
+        {
+            "contract": "investigation-index-snapshot-v1",
+            "collection": state.collection_name,
+            "scope": state.scope,
+            "chunker": state.chunker_fingerprint,
+            "embedding": state.embedding_profile,
+            "sparse": state.sparse_fingerprint,
+            "documents": {key: dict(value) for key, value in state.documents.items()},
+        }
+    )
+
+
 def _build_retriever(
     args: argparse.Namespace,
     *,
@@ -568,7 +590,7 @@ def main(argv: list[str] | None = None) -> int:
         store = MilvusStore(
             MilvusConfig(
                 uri=args.uri,
-                collection_name=args.alias,
+                collection_name=state.collection_name,
                 dense_dimensions=DENSE_WIDTH,
             )
         )
@@ -582,7 +604,7 @@ def main(argv: list[str] | None = None) -> int:
             models = _build_agent_models(
                 args,
                 retriever,
-                index_identity=f"{state.collection_name}:{state.sparse_fingerprint}",
+                index_identity=_investigation_snapshot(state),
             )
             app = create_app(
                 retriever,
@@ -591,7 +613,8 @@ def main(argv: list[str] | None = None) -> int:
                 answerer=_build_answerer(args),
                 agent=next(iter(models.values()), None),
                 agent_models=models,
-                published_index_identity=(f"{state.collection_name}:{state.sparse_fingerprint}"),
+                investigation_db=args.investigation_db,
+                published_index_identity=_investigation_snapshot(state),
             )
             import uvicorn  # noqa: PLC0415 - optional service dependency
 
