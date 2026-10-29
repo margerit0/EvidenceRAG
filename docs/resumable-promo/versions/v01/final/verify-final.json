@@ -1,0 +1,2369 @@
+{
+  "planSha256": "4075604c0d597dd041836a4cd29e0da1e24f25c11aeea63a7ffb01091dade6f6",
+  "videoSha256": "21210c048016742c6788bdd0d1f92ebb7d9515a487a406e6d8dba1bd85a7a1e6",
+  "render": {
+    "beatGrid": {
+      "framesPerBeat": 15,
+      "offBeat": []
+    },
+    "clicks": [
+      {
+        "id": "open-mode",
+        "frame": 90,
+        "planned": 90,
+        "hit": true,
+        "disabled": false,
+        "top": "button.select-trigger"
+      },
+      {
+        "id": "pick-live",
+        "frame": 120,
+        "planned": 120,
+        "hit": true,
+        "disabled": false,
+        "top": "span."
+      },
+      {
+        "id": "focus-query",
+        "frame": 195,
+        "planned": 195,
+        "hit": true,
+        "disabled": false,
+        "top": "textarea."
+      },
+      {
+        "id": "start-run",
+        "frame": 255,
+        "planned": 255,
+        "hit": true,
+        "disabled": false,
+        "top": "button.button button-primary button-sm"
+      },
+      {
+        "id": "focus-supplement",
+        "frame": 450,
+        "planned": 450,
+        "hit": true,
+        "disabled": false,
+        "top": "textarea."
+      },
+      {
+        "id": "submit-supplement",
+        "frame": 495,
+        "planned": 495,
+        "hit": true,
+        "disabled": false,
+        "top": "button.button button-primary button-sm"
+      },
+      {
+        "id": "pause",
+        "frame": 555,
+        "planned": 555,
+        "hit": true,
+        "disabled": false,
+        "top": "button.button button-outline button-sm"
+      },
+      {
+        "id": "resume-1",
+        "frame": 705,
+        "planned": 705,
+        "hit": true,
+        "disabled": false,
+        "top": "button.button button-primary button-sm"
+      },
+      {
+        "id": "resume-2",
+        "frame": 945,
+        "planned": 945,
+        "hit": true,
+        "disabled": false,
+        "top": "button.button button-primary button-sm"
+      },
+      {
+        "id": "open-citation",
+        "frame": 1095,
+        "planned": 1095,
+        "hit": true,
+        "disabled": false,
+        "top": "span."
+      }
+    ],
+    "checks": [
+      {
+        "id": "open-mode",
+        "frame": 96,
+        "selector": "[role=\"option\"]",
+        "text": "连接服务",
+        "ok": true
+      },
+      {
+        "id": "pick-live",
+        "frame": 132,
+        "selector": ".connection-note",
+        "text": "服务已连接",
+        "ok": true
+      },
+      {
+        "id": "start-run",
+        "frame": 261,
+        "selector": ".submitted-query",
+        "text": "星桥集群是否可以升级？",
+        "ok": true
+      },
+      {
+        "id": "submit-supplement",
+        "frame": 501,
+        "selector": ".supplement-history summary",
+        "text": "已提交的补充信息（1）",
+        "ok": true
+      },
+      {
+        "id": "pause",
+        "frame": 561,
+        "selector": ".answer-status",
+        "text": "正在暂停",
+        "ok": true
+      },
+      {
+        "id": "resume-1",
+        "frame": 709,
+        "selector": ".answer-status",
+        "text": "正在恢复",
+        "ok": true
+      },
+      {
+        "id": "resume-2",
+        "frame": 949,
+        "selector": ".answer-status",
+        "text": "正在恢复",
+        "ok": true
+      },
+      {
+        "id": "open-citation",
+        "frame": 1115,
+        "selector": ".evidence-detail h3",
+        "text": "回退演练",
+        "ok": true
+      }
+    ],
+    "pageErrors": [],
+    "console": [],
+    "edgeCuts": {
+      "framesWithCuts": 96,
+      "duringCameraMoves": 96,
+      "stillFramesWithCuts": [],
+      "cameraMoves": [
+        [
+          75,
+          90
+        ],
+        [
+          135,
+          159
+        ],
+        [
+          180,
+          198
+        ],
+        [
+          285,
+          306
+        ],
+        [
+          360,
+          384
+        ],
+        [
+          435,
+          453
+        ],
+        [
+          540,
+          555
+        ],
+        [
+          720,
+          750
+        ],
+        [
+          783,
+          807
+        ],
+        [
+          960,
+          984
+        ],
+        [
+          1008,
+          1029
+        ],
+        [
+          1095,
+          1110
+        ]
+      ]
+    },
+    "framing": [
+      {
+        "frame": 0,
+        "region": "full",
+        "fittedY": 0,
+        "chosen": {
+          "x": 0,
+          "y": 0,
+          "width": 1776
+        },
+        "grow": null,
+        "fittedCuts": 0,
+        "cuts": []
+      },
+      {
+        "frame": 75,
+        "region": "mode",
+        "fittedY": 0,
+        "chosen": {
+          "x": 816,
+          "y": 0,
+          "width": 960
+        },
+        "grow": 1,
+        "fittedCuts": 0,
+        "cuts": []
+      },
+      {
+        "frame": 135,
+        "region": "full",
+        "fittedY": 0,
+        "chosen": {
+          "x": 0,
+          "y": 0,
+          "width": 1776
+        },
+        "grow": null,
+        "fittedCuts": 0,
+        "cuts": []
+      },
+      {
+        "frame": 180,
+        "region": "conversation",
+        "fittedY": 215.96,
+        "chosen": {
+          "x": 0,
+          "y": 216.85,
+          "width": 1293
+        },
+        "grow": 1.02,
+        "fittedCuts": 4,
+        "cuts": []
+      },
+      {
+        "frame": 285,
+        "region": "execution",
+        "fittedY": 215.96,
+        "chosen": {
+          "x": 507.86,
+          "y": 212.65,
+          "width": 1268
+        },
+        "grow": 1,
+        "fittedCuts": 2,
+        "cuts": []
+      },
+      {
+        "frame": 360,
+        "region": "conversation",
+        "fittedY": 215.96,
+        "chosen": {
+          "x": 0,
+          "y": 216.85,
+          "width": 1293
+        },
+        "grow": 1.02,
+        "fittedCuts": 4,
+        "cuts": []
+      },
+      {
+        "frame": 435,
+        "region": "controls",
+        "fittedY": 272,
+        "chosen": {
+          "x": 0.53,
+          "y": 280.2,
+          "width": 1017
+        },
+        "grow": 1.06,
+        "fittedCuts": 7,
+        "cuts": []
+      },
+      {
+        "frame": 540,
+        "region": "controls",
+        "fittedY": 206.5,
+        "chosen": {
+          "x": 0.51,
+          "y": 193.05,
+          "width": 978
+        },
+        "grow": 1.02,
+        "fittedCuts": 3,
+        "cuts": []
+      },
+      {
+        "frame": 690,
+        "region": "controls",
+        "fittedY": 206.5,
+        "chosen": {
+          "x": 0.51,
+          "y": 193.05,
+          "width": 978
+        },
+        "grow": 1.02,
+        "fittedCuts": 3,
+        "cuts": []
+      },
+      {
+        "frame": 720,
+        "region": "work",
+        "fittedY": 99.87,
+        "chosen": {
+          "x": 107.37,
+          "y": 99.87,
+          "width": 1598
+        },
+        "grow": 1,
+        "fittedCuts": 0,
+        "cuts": []
+      },
+      {
+        "frame": 765,
+        "region": "work",
+        "fittedY": 99.87,
+        "chosen": {
+          "x": 107.37,
+          "y": 99.87,
+          "width": 1598
+        },
+        "grow": 1,
+        "fittedCuts": 0,
+        "cuts": []
+      },
+      {
+        "frame": 783,
+        "region": "controls",
+        "fittedY": 217.5,
+        "chosen": {
+          "x": 0.51,
+          "y": 193.05,
+          "width": 978
+        },
+        "grow": 1.02,
+        "fittedCuts": 2,
+        "cuts": []
+      },
+      {
+        "frame": 930,
+        "region": "controls",
+        "fittedY": 217.5,
+        "chosen": {
+          "x": 0.51,
+          "y": 193.05,
+          "width": 978
+        },
+        "grow": 1.02,
+        "fittedCuts": 2,
+        "cuts": []
+      },
+      {
+        "frame": 960,
+        "region": "work",
+        "fittedY": 99.87,
+        "chosen": {
+          "x": 107.37,
+          "y": 99.87,
+          "width": 1598
+        },
+        "grow": 1,
+        "fittedCuts": 0,
+        "cuts": []
+      },
+      {
+        "frame": 1008,
+        "region": "conversation",
+        "fittedY": 215.96,
+        "chosen": {
+          "x": 0,
+          "y": 216.85,
+          "width": 1293
+        },
+        "grow": 1.02,
+        "fittedCuts": 4,
+        "cuts": []
+      },
+      {
+        "frame": 1080,
+        "region": "conversation",
+        "fittedY": 215.96,
+        "chosen": {
+          "x": 0,
+          "y": 216.85,
+          "width": 1293
+        },
+        "grow": 1.02,
+        "fittedCuts": 4,
+        "cuts": []
+      },
+      {
+        "frame": 1095,
+        "region": "full",
+        "fittedY": 0,
+        "chosen": {
+          "x": 0,
+          "y": 0,
+          "width": 1776
+        },
+        "grow": null,
+        "fittedCuts": 0,
+        "cuts": []
+      },
+      {
+        "frame": 1200,
+        "region": "full",
+        "fittedY": 0,
+        "chosen": {
+          "x": 0,
+          "y": 0,
+          "width": 1776
+        },
+        "grow": null,
+        "fittedCuts": 0,
+        "cuts": []
+      }
+    ],
+    "caret": [
+      {
+        "start": 195,
+        "end": 230,
+        "visible": true
+      },
+      {
+        "start": 231,
+        "end": 245,
+        "visible": false
+      },
+      {
+        "start": 246,
+        "end": 254,
+        "visible": true
+      },
+      {
+        "start": 450,
+        "end": 477,
+        "visible": true
+      },
+      {
+        "start": 478,
+        "end": 492,
+        "visible": false
+      },
+      {
+        "start": 493,
+        "end": 494,
+        "visible": true
+      }
+    ],
+    "cursorOverText": {
+      "runs": [
+        {
+          "start": 78,
+          "end": 78,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:已完成"
+          ]
+        },
+        {
+          "start": 81,
+          "end": 82,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:原创合成数据 · 无 API 调用"
+          ]
+        },
+        {
+          "start": 106,
+          "end": 112,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:原创合成数据 · 无 API 调用",
+            "text:模拟演示",
+            "text:连接服务"
+          ]
+        },
+        {
+          "start": 113,
+          "end": 124,
+          "kind": "clickTarget",
+          "inHold": false,
+          "text": [
+            "text:连接服务"
+          ]
+        },
+        {
+          "start": 180,
+          "end": 180,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:Agent graph"
+          ]
+        },
+        {
+          "start": 187,
+          "end": 188,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "field:描述你想调查的问题…"
+          ]
+        },
+        {
+          "start": 238,
+          "end": 242,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "field:星桥集群是否可以升级？"
+          ]
+        },
+        {
+          "start": 246,
+          "end": 248,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:开始调查"
+          ]
+        },
+        {
+          "start": 249,
+          "end": 262,
+          "kind": "clickTarget",
+          "inHold": false,
+          "text": [
+            "icon:lucide lucide-square",
+            "text:停止",
+            "text:开始调查"
+          ]
+        },
+        {
+          "start": 263,
+          "end": 267,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "icon:lucide lucide-chevron-down selec",
+            "text:开始调查"
+          ]
+        },
+        {
+          "start": 432,
+          "end": 434,
+          "kind": "moving",
+          "inHold": true,
+          "text": [
+            "field:描述你想调查的问题…"
+          ]
+        },
+        {
+          "start": 485,
+          "end": 487,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:提交补充并继续"
+          ]
+        },
+        {
+          "start": 488,
+          "end": 497,
+          "kind": "clickTarget",
+          "inHold": false,
+          "text": [
+            "text:提交补充并继续"
+          ]
+        },
+        {
+          "start": 546,
+          "end": 548,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:暂停调查"
+          ]
+        },
+        {
+          "start": 549,
+          "end": 557,
+          "kind": "clickTarget",
+          "inHold": false,
+          "text": [
+            "text:暂停调查"
+          ]
+        },
+        {
+          "start": 564,
+          "end": 564,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:取消调查"
+          ]
+        },
+        {
+          "start": 696,
+          "end": 698,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:继续调查"
+          ]
+        },
+        {
+          "start": 699,
+          "end": 707,
+          "kind": "clickTarget",
+          "inHold": false,
+          "text": [
+            "text:继续调查"
+          ]
+        },
+        {
+          "start": 714,
+          "end": 714,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:暂停调查"
+          ]
+        },
+        {
+          "start": 716,
+          "end": 716,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:取消调查"
+          ]
+        },
+        {
+          "start": 934,
+          "end": 934,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:取消调查"
+          ]
+        },
+        {
+          "start": 936,
+          "end": 938,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:继续调查"
+          ]
+        },
+        {
+          "start": 939,
+          "end": 952,
+          "kind": "clickTarget",
+          "inHold": false,
+          "text": [
+            "text:暂停调查",
+            "text:继续调查"
+          ]
+        },
+        {
+          "start": 953,
+          "end": 954,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:暂停调查"
+          ]
+        },
+        {
+          "start": 1084,
+          "end": 1086,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:保存配置快照并演练回退；兼容性检查或",
+            "text:星桥从甲版升级到乙版前，应先在隔离环"
+          ]
+        },
+        {
+          "start": 1089,
+          "end": 1102,
+          "kind": "clickTarget",
+          "inHold": false,
+          "text": [
+            "text:2",
+            "text:保存配置快照并演练回退；兼容性检查或"
+          ]
+        },
+        {
+          "start": 1103,
+          "end": 1105,
+          "kind": "moving",
+          "inHold": false,
+          "text": [
+            "text:保存配置快照并演练回退；兼容性检查或"
+          ]
+        }
+      ],
+      "flagged": [],
+      "reviewInHold": [
+        {
+          "start": 432,
+          "end": 434,
+          "kind": "moving",
+          "inHold": true,
+          "text": [
+            "field:描述你想调查的问题…"
+          ]
+        }
+      ],
+      "ok": true
+    },
+    "ok": true
+  },
+  "copy": {
+    "frames": {
+      "171": {
+        "caption": {
+          "shown": [
+            "切换到“连接服务”：调查保存在本地服务端"
+          ],
+          "expected": [
+            "切换到“连接服务”：调查保存在本地服务端"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "connection": {
+          "shown": [
+            "服务已连接"
+          ],
+          "expected": [
+            "服务已连接"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "label": {
+          "shown": [
+            "合成演示 · 流程已压缩"
+          ],
+          "expected": [
+            "合成演示 · 流程已压缩"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "mode": {
+          "shown": [
+            "连接服务"
+          ],
+          "expected": [
+            "连接服务"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        }
+      },
+      "240": {
+        "caption": {
+          "shown": [
+            "提出问题，Agent 开始搜索与读取"
+          ],
+          "expected": [
+            "提出问题，Agent 开始搜索与读取"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "label": {
+          "shown": [
+            "合成演示 · 流程已压缩"
+          ],
+          "expected": [
+            "合成演示 · 流程已压缩"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "query": {
+          "shown": [
+            "星桥集群是否可以升级？"
+          ],
+          "expected": [
+            "星桥集群是否可以升级？"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        }
+      },
+      "405": {
+        "caption": {
+          "shown": [
+            "信息不足时先追问，已读证据保留在调查里"
+          ],
+          "expected": [
+            "信息不足时先追问，已读证据保留在调查里"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "label": {
+          "shown": [
+            "合成演示 · 流程已压缩"
+          ],
+          "expected": [
+            "合成演示 · 流程已压缩"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "placeholder": {
+          "shown": [
+            "补充本次调查需要的信息…"
+          ],
+          "expected": [
+            "补充本次调查需要的信息…"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "question": {
+          "shown": [
+            "请补充星桥集群的当前版本与目标版本（演示可填：甲版升级到乙版）。"
+          ],
+          "expected": [
+            "请补充星桥集群的当前版本与目标版本（演示可填：甲版升级到乙版）。"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "status": {
+          "shown": [
+            "等待补充信息"
+          ],
+          "expected": [
+            "等待补充信息"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        }
+      },
+      "480": {
+        "caption": {
+          "shown": [
+            "原地补充，沿用已读证据继续"
+          ],
+          "expected": [
+            "原地补充，沿用已读证据继续"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "label": {
+          "shown": [
+            "合成演示 · 流程已压缩"
+          ],
+          "expected": [
+            "合成演示 · 流程已压缩"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "supplement": {
+          "shown": [
+            "甲版升级到乙版"
+          ],
+          "expected": [
+            "甲版升级到乙版"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        }
+      },
+      "585": {
+        "caption": {
+          "shown": [
+            "暂停：等当前调用返回、结果保存后才停下"
+          ],
+          "expected": [
+            "暂停：等当前调用返回、结果保存后才停下"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "controls": {
+          "shown": [
+            "等待当前调用返回并保存结果后暂停。"
+          ],
+          "expected": [
+            "等待当前调用返回并保存结果后暂停。"
+          ],
+          "notPainted": [
+            "请补充星桥集群的当前版本与目标版本（演示可填：甲版升级到乙版）。",
+            "你：甲版升级到乙版"
+          ],
+          "expectedNotPainted": [
+            "请补充星桥集群的当前版本与目标版本（演示可填：甲版升级到乙版）。",
+            "你：甲版升级到乙版"
+          ],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "history": {
+          "shown": [
+            "已提交的补充信息（1）"
+          ],
+          "expected": [
+            "已提交的补充信息（1）"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "label": {
+          "shown": [
+            "合成演示 · 流程已压缩"
+          ],
+          "expected": [
+            "合成演示 · 流程已压缩"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "status": {
+          "shown": [
+            "正在暂停"
+          ],
+          "expected": [
+            "正在暂停"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        }
+      },
+      "660": {
+        "buttons": {
+          "shown": [
+            "继续调查",
+            "取消调查"
+          ],
+          "expected": [
+            "继续调查",
+            "取消调查"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "caption": {
+          "shown": [
+            "暂停：等当前调用返回、结果保存后才停下"
+          ],
+          "expected": [
+            "暂停：等当前调用返回、结果保存后才停下"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "history": {
+          "shown": [
+            "已提交的补充信息（1）"
+          ],
+          "expected": [
+            "已提交的补充信息（1）"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "label": {
+          "shown": [
+            "合成演示 · 流程已压缩"
+          ],
+          "expected": [
+            "合成演示 · 流程已压缩"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "status": {
+          "shown": [
+            "已暂停"
+          ],
+          "expected": [
+            "已暂停"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        }
+      },
+      "819": {
+        "caption": {
+          "shown": [
+            "服务关闭并重启：前端自动重连，进度留在服务端"
+          ],
+          "expected": [
+            "服务关闭并重启：前端自动重连，进度留在服务端"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "controls": {
+          "shown": [
+            "进度连接已断开，正在重连。调查保留在服务端。"
+          ],
+          "expected": [
+            "进度连接已断开，正在重连。调查保留在服务端。"
+          ],
+          "notPainted": [
+            "请补充星桥集群的当前版本与目标版本（演示可填：甲版升级到乙版）。",
+            "你：甲版升级到乙版"
+          ],
+          "expectedNotPainted": [
+            "请补充星桥集群的当前版本与目标版本（演示可填：甲版升级到乙版）。",
+            "你：甲版升级到乙版"
+          ],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "history": {
+          "shown": [
+            "已提交的补充信息（1）"
+          ],
+          "expected": [
+            "已提交的补充信息（1）"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "label": {
+          "shown": [
+            "合成演示 · 流程已压缩"
+          ],
+          "expected": [
+            "合成演示 · 流程已压缩"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "status": {
+          "shown": [
+            "调查进行中"
+          ],
+          "expected": [
+            "调查进行中"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        }
+      },
+      "903": {
+        "caption": {
+          "shown": [
+            "服务关闭并重启：前端自动重连，进度留在服务端"
+          ],
+          "expected": [
+            "服务关闭并重启：前端自动重连，进度留在服务端"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "controls": {
+          "shown": [
+            "服务关闭前已保存检查点，可以继续原调查。"
+          ],
+          "expected": [
+            "服务关闭前已保存检查点，可以继续原调查。"
+          ],
+          "notPainted": [
+            "请补充星桥集群的当前版本与目标版本（演示可填：甲版升级到乙版）。",
+            "你：甲版升级到乙版"
+          ],
+          "expectedNotPainted": [
+            "请补充星桥集群的当前版本与目标版本（演示可填：甲版升级到乙版）。",
+            "你：甲版升级到乙版"
+          ],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "history": {
+          "shown": [
+            "已提交的补充信息（1）"
+          ],
+          "expected": [
+            "已提交的补充信息（1）"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "label": {
+          "shown": [
+            "合成演示 · 流程已压缩"
+          ],
+          "expected": [
+            "合成演示 · 流程已压缩"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "status": {
+          "shown": [
+            "已暂停"
+          ],
+          "expected": [
+            "已暂停"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        }
+      },
+      "1059": {
+        "answer": {
+          "shown": [
+            "星桥从甲版升级到乙版前，应先在隔离环境验证兼容性。",
+            "保存配置快照并演练回退；兼容性检查或回退演练失败时暂停升级并补齐验证。示例文档不承诺无停机。"
+          ],
+          "expected": [
+            "星桥从甲版升级到乙版前，应先在隔离环境验证兼容性。",
+            "保存配置快照并演练回退；兼容性检查或回退演练失败时暂停升级并补齐验证。示例文档不承诺无停机。"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "caption": {
+          "shown": [
+            "已保存的调用结果不重发，补完剩余步骤"
+          ],
+          "expected": [
+            "已保存的调用结果不重发，补完剩余步骤"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "citations": {
+          "shown": [
+            "查看引用 1",
+            "查看引用 2"
+          ],
+          "expected": [
+            "查看引用 1",
+            "查看引用 2"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "label": {
+          "shown": [
+            "合成演示 · 流程已压缩"
+          ],
+          "expected": [
+            "合成演示 · 流程已压缩"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "status": {
+          "shown": [
+            "已生成答案"
+          ],
+          "expected": [
+            "已生成答案"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        }
+      },
+      "1170": {
+        "answer": {
+          "shown": [
+            "星桥从甲版升级到乙版前，应先在隔离环境验证兼容性。",
+            "保存配置快照并演练回退；兼容性检查或回退演练失败时暂停升级并补齐验证。示例文档不承诺无停机。"
+          ],
+          "expected": [
+            "星桥从甲版升级到乙版前，应先在隔离环境验证兼容性。",
+            "保存配置快照并演练回退；兼容性检查或回退演练失败时暂停升级并补齐验证。示例文档不承诺无停机。"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "caption": {
+          "shown": [
+            "点击引用，核对完整原文"
+          ],
+          "expected": [
+            "点击引用，核对完整原文"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "caution": {
+          "shown": [
+            "引用可追溯，结论仍需结合原文核对。"
+          ],
+          "expected": [
+            "引用可追溯，结论仍需结合原文核对。"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "citations": {
+          "shown": [
+            "查看引用 1",
+            "查看引用 2"
+          ],
+          "expected": [
+            "查看引用 1",
+            "查看引用 2"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "evidenceKicker": {
+          "shown": [
+            "证据 02"
+          ],
+          "expected": [
+            "证据 02"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "evidenceText": {
+          "shown": [
+            "【原创合成文档】星桥从甲版升级到乙版时，应保存配置快照并演练回退。兼容性检查或回退演练失败时，应暂停升级并补齐验证。本示例不承诺无停机。"
+          ],
+          "expected": [
+            "【原创合成文档】星桥从甲版升级到乙版时，应保存配置快照并演练回退。兼容性检查或回退演练失败时，应暂停升级并补齐验证。本示例不承诺无停机。"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "evidenceTitle": {
+          "shown": [
+            "回退演练"
+          ],
+          "expected": [
+            "回退演练"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "label": {
+          "shown": [
+            "合成演示 · 流程已压缩"
+          ],
+          "expected": [
+            "合成演示 · 流程已压缩"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "pressed": {
+          "shown": [
+            "查看引用 2"
+          ],
+          "expected": [
+            "查看引用 2"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "query": {
+          "shown": [
+            "星桥集群是否可以升级？"
+          ],
+          "expected": [
+            "星桥集群是否可以升级？"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        }
+      },
+      "1272": {
+        "brandName": {
+          "shown": [
+            "EvidenceRAG"
+          ],
+          "expected": [
+            "EvidenceRAG"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "caption": {
+          "shown": [],
+          "expected": [],
+          "notPainted": [
+            ""
+          ],
+          "expectedNotPainted": [
+            ""
+          ],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "label": {
+          "shown": [
+            "合成演示 · 流程已压缩"
+          ],
+          "expected": [
+            "合成演示 · 流程已压缩"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        },
+        "tagline": {
+          "shown": [
+            "停下来，也能接着查。"
+          ],
+          "expected": [
+            "停下来，也能接着查。"
+          ],
+          "notPainted": [],
+          "expectedNotPainted": [],
+          "outsideCamera": [],
+          "ok": true
+        }
+      }
+    },
+    "provenance": {
+      "连接服务": {
+        "file": "frontend/src/App.tsx",
+        "found": true
+      },
+      "服务已连接": {
+        "file": "frontend/src/App.tsx",
+        "found": true
+      },
+      "等待补充信息": {
+        "file": "frontend/src/lib/model.ts",
+        "found": true
+      },
+      "正在暂停": {
+        "file": "frontend/src/lib/model.ts",
+        "found": true
+      },
+      "已暂停": {
+        "file": "frontend/src/lib/model.ts",
+        "found": true
+      },
+      "调查进行中": {
+        "file": "frontend/src/lib/model.ts",
+        "found": true
+      },
+      "已生成答案": {
+        "file": "frontend/src/lib/model.ts",
+        "found": true
+      },
+      "补充本次调查需要的信息…": {
+        "file": "frontend/src/components/InvestigationControls.tsx",
+        "found": true
+      },
+      "等待当前调用返回并保存结果后暂停。": {
+        "file": "frontend/src/components/InvestigationControls.tsx",
+        "found": true
+      },
+      "进度连接已断开，正在重连。调查保留在服务端。": {
+        "file": "frontend/src/components/InvestigationControls.tsx",
+        "found": true
+      },
+      "服务关闭前已保存检查点，可以继续原调查。": {
+        "file": "frontend/src/components/InvestigationControls.tsx",
+        "found": true
+      },
+      "已提交的补充信息（": {
+        "file": "frontend/src/components/InvestigationControls.tsx",
+        "found": true
+      },
+      "继续调查": {
+        "file": "frontend/src/components/InvestigationControls.tsx",
+        "found": true
+      },
+      "取消调查": {
+        "file": "frontend/src/components/InvestigationControls.tsx",
+        "found": true
+      },
+      "引用可追溯，结论仍需结合原文核对。": {
+        "file": "frontend/src/App.tsx",
+        "found": true
+      },
+      "查看引用 ": {
+        "file": "frontend/src/App.tsx",
+        "found": true
+      },
+      "证据 ": {
+        "file": "frontend/src/App.tsx",
+        "found": true
+      }
+    },
+    "clickedCitation": 2,
+    "demoSource": {
+      "file": "src/zhrag/service/investigation_demo.py",
+      "missing": []
+    },
+    "ok": true
+  },
+  "pngs": {
+    "determinism": [
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 45,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 171,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 200,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 240,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 336,
+        "ok": true
+      },
+      {
+        "changedPixels": 12,
+        "changedPixelsOver15": 0,
+        "maxDelta": 4,
+        "bbox": [
+          844,
+          440,
+          852,
+          447
+        ],
+        "frame": 348,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 405,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 480,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 493,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 585,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 660,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 700,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 759,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 819,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 903,
+        "ok": true
+      },
+      {
+        "changedPixels": 6,
+        "changedPixelsOver15": 0,
+        "maxDelta": 1,
+        "bbox": [
+          1283,
+          350,
+          1285,
+          614
+        ],
+        "frame": 988,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 1000,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 1024,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 1059,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 1110,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 1170,
+        "ok": true
+      },
+      {
+        "changedPixels": 0,
+        "changedPixelsOver15": 0,
+        "maxDelta": 0,
+        "bbox": null,
+        "frame": 1272,
+        "ok": true
+      }
+    ],
+    "motion": [
+      {
+        "changedPixels": 125283,
+        "changedPixelsOver15": 13055,
+        "maxDelta": 153,
+        "bbox": [
+          456,
+          155,
+          1761,
+          1014
+        ],
+        "label": "运行中：Agent 决策第 3 次（执行流程取景静止）",
+        "frames": [
+          336,
+          348
+        ],
+        "sameCamera": true,
+        "ok": true
+      },
+      {
+        "changedPixels": 2895,
+        "changedPixelsOver15": 2529,
+        "maxDelta": 158,
+        "bbox": [
+          50,
+          271,
+          1626,
+          940
+        ],
+        "label": "运行中：Agent 决策第 6 次（两栏取景静止）",
+        "frames": [
+          988,
+          1000
+        ],
+        "sameCamera": true,
+        "ok": true
+      }
+    ],
+    "holds": [
+      {
+        "shot": "overview",
+        "label": "全貌稳定停留（光标随后起步）",
+        "frames": [
+          0,
+          68
+        ],
+        "seconds": 2.3,
+        "stable": [
+          12,
+          68
+        ],
+        "stableFrames": 57,
+        "stableSeconds": 1.9,
+        "stableMaxDelta": 0,
+        "minStableFrames": null,
+        "captionFade": [
+          [
+            6,
+            11
+          ]
+        ],
+        "native": [
+          [
+            0,
+            5
+          ]
+        ],
+        "unexpected": [],
+        "ok": true
+      },
+      {
+        "shot": "connect",
+        "label": "连接状态与模型可读",
+        "frames": [
+          159,
+          179
+        ],
+        "seconds": 0.7,
+        "stable": [
+          159,
+          173
+        ],
+        "stableFrames": 15,
+        "stableSeconds": 0.5,
+        "stableMaxDelta": 0,
+        "minStableFrames": null,
+        "captionFade": [
+          [
+            174,
+            179
+          ]
+        ],
+        "native": [],
+        "unexpected": [],
+        "ok": true
+      },
+      {
+        "shot": "clarify",
+        "label": "阅读追问",
+        "frames": [
+          384,
+          434
+        ],
+        "seconds": 1.7,
+        "stable": [
+          384,
+          428
+        ],
+        "stableFrames": 45,
+        "stableSeconds": 1.5,
+        "stableMaxDelta": 0,
+        "minStableFrames": null,
+        "captionFade": [
+          [
+            429,
+            434
+          ]
+        ],
+        "native": [],
+        "unexpected": [],
+        "ok": true
+      },
+      {
+        "shot": "pause",
+        "label": "暂停状态可读",
+        "frames": [
+          630,
+          689
+        ],
+        "seconds": 2.0,
+        "stable": [
+          630,
+          683
+        ],
+        "stableFrames": 54,
+        "stableSeconds": 1.8,
+        "stableMaxDelta": 0,
+        "minStableFrames": null,
+        "captionFade": [
+          [
+            684,
+            689
+          ]
+        ],
+        "native": [],
+        "unexpected": [],
+        "ok": true
+      },
+      {
+        "shot": "restart",
+        "label": "恢复说明可读",
+        "frames": [
+          882,
+          929
+        ],
+        "seconds": 1.6,
+        "stable": [
+          882,
+          923
+        ],
+        "stableFrames": 42,
+        "stableSeconds": 1.4,
+        "stableMaxDelta": 0,
+        "minStableFrames": null,
+        "captionFade": [
+          [
+            924,
+            929
+          ]
+        ],
+        "native": [],
+        "unexpected": [],
+        "ok": true
+      },
+      {
+        "shot": "complete",
+        "label": "答案可读",
+        "frames": [
+          1035,
+          1079
+        ],
+        "seconds": 1.5,
+        "stable": [
+          1035,
+          1073
+        ],
+        "stableFrames": 39,
+        "stableSeconds": 1.3,
+        "stableMaxDelta": 0,
+        "minStableFrames": null,
+        "captionFade": [
+          [
+            1074,
+            1079
+          ]
+        ],
+        "native": [],
+        "unexpected": [],
+        "ok": true
+      },
+      {
+        "shot": "evidence",
+        "label": "原文落位后阅读",
+        "frames": [
+          1125,
+          1199
+        ],
+        "seconds": 2.5,
+        "stable": [
+          1125,
+          1193
+        ],
+        "stableFrames": 69,
+        "stableSeconds": 2.3,
+        "stableMaxDelta": 0,
+        "minStableFrames": 45,
+        "captionFade": [
+          [
+            1194,
+            1199
+          ]
+        ],
+        "native": [],
+        "unexpected": [],
+        "ok": true
+      },
+      {
+        "shot": "brand",
+        "label": "品牌稳定",
+        "frames": [
+          1245,
+          1289
+        ],
+        "seconds": 1.5,
+        "stable": [
+          1245,
+          1289
+        ],
+        "stableFrames": 45,
+        "stableSeconds": 1.5,
+        "stableMaxDelta": 0,
+        "minStableFrames": 30,
+        "captionFade": [],
+        "native": [],
+        "unexpected": [],
+        "ok": true
+      }
+    ],
+    "captionBand": [
+      654,
+      15,
+      1266,
+      152
+    ],
+    "ok": true
+  },
+  "video": {
+    "decodedFrames": 1290,
+    "psnrAgainstOwnPng": {
+      "min": 40.18,
+      "mean": 43.8,
+      "minFrame": 795,
+      "identicalFrames": 0
+    },
+    "misalignedFrames": [],
+    "label": {
+      "crop": [
+        1727,
+        3,
+        1902,
+        36
+      ],
+      "probeSpreadPx": [
+        0.0
+      ],
+      "textPixels": 403,
+      "failures": []
+    },
+    "motion": [
+      {
+        "changedPixels": 183277,
+        "changedPixelsOver15": 13575,
+        "maxDelta": 148,
+        "bbox": [
+          10,
+          16,
+          1888,
+          1079
+        ],
+        "label": "运行中：Agent 决策第 3 次（执行流程取景静止）",
+        "frames": [
+          336,
+          348
+        ],
+        "ok": true
+      },
+      {
+        "changedPixels": 57336,
+        "changedPixelsOver15": 2526,
+        "maxDelta": 127,
+        "bbox": [
+          0,
+          0,
+          1920,
+          1080
+        ],
+        "label": "运行中：Agent 决策第 6 次（两栏取景静止）",
+        "frames": [
+          988,
+          1000
+        ],
+        "ok": true
+      }
+    ],
+    "holds": [
+      {
+        "shot": "overview",
+        "stable": [
+          12,
+          68
+        ],
+        "maxDelta": 47,
+        "framesOver15": [
+          [
+            13,
+            9
+          ],
+          [
+            14,
+            9
+          ],
+          [
+            15,
+            9
+          ],
+          [
+            16,
+            9
+          ],
+          [
+            17,
+            9
+          ],
+          [
+            18,
+            9
+          ],
+          [
+            19,
+            9
+          ],
+          [
+            20,
+            9
+          ],
+          [
+            21,
+            9
+          ],
+          [
+            22,
+            9
+          ],
+          [
+            23,
+            9
+          ],
+          [
+            24,
+            9
+          ],
+          [
+            25,
+            9
+          ],
+          [
+            26,
+            9
+          ],
+          [
+            27,
+            9
+          ],
+          [
+            28,
+            9
+          ],
+          [
+            29,
+            9
+          ],
+          [
+            30,
+            9
+          ],
+          [
+            31,
+            9
+          ],
+          [
+            32,
+            9
+          ],
+          [
+            33,
+            9
+          ],
+          [
+            34,
+            9
+          ],
+          [
+            35,
+            9
+          ],
+          [
+            36,
+            9
+          ],
+          [
+            37,
+            9
+          ],
+          [
+            38,
+            9
+          ],
+          [
+            39,
+            9
+          ],
+          [
+            40,
+            9
+          ],
+          [
+            41,
+            9
+          ],
+          [
+            42,
+            9
+          ],
+          [
+            43,
+            9
+          ],
+          [
+            44,
+            9
+          ],
+          [
+            45,
+            9
+          ],
+          [
+            46,
+            9
+          ],
+          [
+            47,
+            9
+          ],
+          [
+            48,
+            9
+          ],
+          [
+            49,
+            9
+          ],
+          [
+            50,
+            9
+          ],
+          [
+            51,
+            9
+          ],
+          [
+            52,
+            9
+          ],
+          [
+            53,
+            9
+          ],
+          [
+            54,
+            9
+          ],
+          [
+            55,
+            9
+          ],
+          [
+            56,
+            9
+          ],
+          [
+            57,
+            9
+          ],
+          [
+            58,
+            9
+          ],
+          [
+            59,
+            9
+          ],
+          [
+            60,
+            9
+          ],
+          [
+            61,
+            9
+          ],
+          [
+            62,
+            9
+          ],
+          [
+            63,
+            9
+          ],
+          [
+            64,
+            9
+          ],
+          [
+            65,
+            9
+          ],
+          [
+            66,
+            9
+          ],
+          [
+            67,
+            9
+          ],
+          [
+            68,
+            9
+          ]
+        ],
+        "largestOver15": 9,
+        "ok": true
+      },
+      {
+        "shot": "connect",
+        "stable": [
+          159,
+          173
+        ],
+        "maxDelta": 41,
+        "framesOver15": [
+          [
+            166,
+            8
+          ]
+        ],
+        "largestOver15": 8,
+        "ok": true
+      },
+      {
+        "shot": "clarify",
+        "stable": [
+          384,
+          428
+        ],
+        "maxDelta": 12,
+        "framesOver15": [],
+        "largestOver15": 0,
+        "ok": true
+      },
+      {
+        "shot": "pause",
+        "stable": [
+          630,
+          683
+        ],
+        "maxDelta": 8,
+        "framesOver15": [],
+        "largestOver15": 0,
+        "ok": true
+      },
+      {
+        "shot": "restart",
+        "stable": [
+          882,
+          923
+        ],
+        "maxDelta": 6,
+        "framesOver15": [],
+        "largestOver15": 0,
+        "ok": true
+      },
+      {
+        "shot": "complete",
+        "stable": [
+          1035,
+          1073
+        ],
+        "maxDelta": 9,
+        "framesOver15": [],
+        "largestOver15": 0,
+        "ok": true
+      },
+      {
+        "shot": "evidence",
+        "stable": [
+          1125,
+          1193
+        ],
+        "maxDelta": 10,
+        "framesOver15": [],
+        "largestOver15": 0,
+        "ok": true
+      },
+      {
+        "shot": "brand",
+        "stable": [
+          1245,
+          1289
+        ],
+        "maxDelta": 7,
+        "framesOver15": [],
+        "largestOver15": 0,
+        "ok": true
+      }
+    ],
+    "sheet": {
+      "path": ".research_tmp\\resumable-promo\\v01\\transitions.png",
+      "frames": [
+        82,
+        147,
+        189,
+        295,
+        372,
+        444,
+        547,
+        735,
+        795,
+        972,
+        1018,
+        1102,
+        1204,
+        1210,
+        1218,
+        1230
+      ]
+    },
+    "ok": true
+  },
+  "passed": true
+}

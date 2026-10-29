@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "current": "v01",
+  "state": "成片已生成（未经人工完整观看与听音）",
+  "updated": "2026-10-30",
+  "versions": [
+    {
+      "id": "v01",
+      "stage": "final",
+      "state": "final",
+      "entry": "versions/v01/README.md",
+      "timelineSha256": "15eddbec556f49938a8aab56a7a8011c2923f709b920f10effce297bfa9e78f8",
+      "planSha256": "4075604c0d597dd041836a4cd29e0da1e24f25c11aeea63a7ffb01091dade6f6",
+      "video": {
+        "path": "versions/v01/final/evidencerag-resumable-v01.mp4",
+        "sha256": "21210c048016742c6788bdd0d1f92ebb7d9515a487a406e6d8dba1bd85a7a1e6",
+        "bytes": 8749342,
+        "seconds": 43.0,
+        "frames": 1290,
+        "format": "1920×1080，30 fps 恒定帧率，H.264 High + AAC-LC 48 kHz 立体声"
+      },
+      "confirmation": {
+        "at": "2026-10-29T11:04:33Z",
+        "session": "9b985e4c-fa86-4fa9-9b30-445eb9390802",
+        "quote": "读取 cb0dc5a2-af2a-44a7-8c83-b80738103483 会话的内容，继续任务，当前的分镜不错可以继续生成视频，",
+        "covers": "v01 分镜预览：内容覆盖与省略项、推荐时长约 43 秒、11 个镜头安排与字幕",
+        "tagline": "停下来，也能接着查。（未另选，沿用预览关键帧中的第一条候选）"
+      },
+      "preview": {
+        "state": "archived",
+        "overview": "versions/v01/preview/overview.jpg",
+        "localOnly": "预览页、关键帧、无声小样与预览检查记录不入库（本目录 .gitignore）"
+      },
+      "inScopeFixes": [
+        "局部取景上下边避开文字（cameraClearance，18 处取景中 10 处调整）",
+        "第二次继续后光标停到状态行右端，不再盖住答案正文",
+        "输入时的插入符按片内时钟 500 ms 闪烁",
+        "检查脚本只统计实际绘制的文字（checkVisibility，不改画面）"
+      ],
+      "verification": {
+        "records": [
+          "versions/v01/final/verify-media.json",
+          "versions/v01/final/verify-final.json",
+          "versions/v01/final/verify-audio.json",
+          "versions/v01/final/playback.json"
+        ],
+        "automated": "通过：规格与帧时间戳、渲染与点击、文案逐字、跨进程确定性、停顿、成片逐帧比对、音效落点、响度与削波",
+        "programmaticPlayback": "Chrome 156 无头模式 1 倍速：1290 帧丢帧 0，音频包络 0 ms 对齐；色彩相对渲染帧 PSNR 43.0–45.8 dB（码流无色彩标注）",
+        "visual": "检查拼图与转场拼图、局部放大、Chrome 解码帧与渲染帧并排；引用与结论人工对读"
+      },
+      "notVerified": [
+        "在真实显示器上完整观看",
+        "主观听音：节奏、音量平衡",
+        "Chrome 以外播放器的色彩"
+      ]
+    }
+  ]
+}

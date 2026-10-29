@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "product": {
+    "name": "EvidenceRAG",
+    "nameSource": "README.md 标题“EvidenceRAG：中文技术文档 RAG 与可追溯 Agent 工作台”",
+    "audience": "评估或使用中文技术文档 RAG 的开发者；看 GitHub 作品集的非 AI 专业工程师",
+    "audienceStatus": "推断；确认分镜时未单独确认",
+    "valueLine": "文档调查可以暂停、断线重连或在服务重启后从保存点继续，已读证据和引用仍可核对",
+    "valueSource": "docs/resumable-investigations.md 四项能力；README.md 第 75–77 行"
+  },
+  "tagline": {
+    "status": "已随 v01 分镜确认（2026-10-29）",
+    "chosen": "停下来，也能接着查。",
+    "chosenBasis": "用户确认“当前的分镜”，没有另选标语；沿用预览关键帧中的第一条候选",
+    "candidates": [
+      "停下来，也能接着查。",
+      "暂停或重启之后，从保存点继续。",
+      "断线不丢进度，重启接着调查。"
+    ],
+    "existingProductCopy": [
+      "让每一步调查，都有据可查（关于对话框）",
+      "让答案有依据，让过程可解释。（页脚）",
+      "每一步，都看得见。（页面标题）"
+    ]
+  },
+  "scenario": {
+    "source": "src/zhrag/service/investigation_demo.py（原创合成后端，无密钥、无语料、无付费调用）",
+    "launchDoc": "docs/resumable-investigations.md#启动与完整演示（步骤 1–7）",
+    "question": "星桥集群是否可以升级？",
+    "questionSource": "docs/resumable-investigations.md 第 2 步",
+    "clarification": "请补充星桥集群的当前版本与目标版本（演示可填：甲版升级到乙版）。",
+    "supplement": "甲版升级到乙版",
+    "supplementSource": "docs/resumable-investigations.md 第 4 步",
+    "model": "synthetic-demo",
+    "modelDelaySeconds": 2.0,
+    "recording": "versions/v01/source/api-recording.json（record_backend.py 对真实合成后端逐次录制的快照、事件与命令响应）",
+    "notReasoning": "合成模型按持久化提示词中是否已有证据/补充选择固定动作，不代表真实模型推理或质量"
+  },
+  "results": {
+    "answerBlocks": [
+      {
+        "text": "星桥从甲版升级到乙版前，应先在隔离环境验证兼容性。",
+        "citations": [
+          1
+        ]
+      },
+      {
+        "text": "保存配置快照并演练回退；兼容性检查或回退演练失败时暂停升级并补齐验证。示例文档不承诺无停机。",
+        "citations": [
+          2
+        ]
+      }
+    ],
+    "answerSource": "investigation_demo.py DemoGenerator（逐字显示，不另写摘要）",
+    "sources": [
+      {
+        "citation": 1,
+        "title": "版本准备",
+        "text": "【原创合成文档】星桥是虚构系统。升级前须确认当前版本与目标版本。甲版到乙版须先在隔离环境验证兼容性，不能直接操作生产环境。"
+      },
+      {
+        "citation": 2,
+        "title": "回退演练",
+        "text": "【原创合成文档】星桥从甲版升级到乙版时，应保存配置快照并演练回退。兼容性检查或回退演练失败时，应暂停升级并补齐验证。本示例不承诺无停机。"
+      }
+    ],
+    "sourcesSource": "investigation_demo.py DOCUMENTS；片中文字取自录制的接口响应",
+    "caveat": "引用可追溯只表示能对照本次证据，不等于结论通过独立质量评测；原文由产品检查器原样显示，产品没有句子高亮功能，片中不添加"
+  },
+  "ui": {
+    "build": "frontend/ 在提交 e794086 的生产构建（vite build 输出到 Git 忽略的缓存目录），不改产品源码",
+    "viewportCss": "1776 × 999，deviceScaleFactor 1；按 16:9 相机裁切，以 1920 / 裁切宽度 的比例直接渲染为 1920 × 1080（不用 1600 × 900 的原因见 layoutMeasurement.viewport）",
+    "theme": "浅色 A · 冰川流线（frontend/src/glacier.css）",
+    "components": {
+      "controls": "frontend/src/components/InvestigationControls.tsx（暂停/继续/取消、补充表单、恢复说明、重连提示）",
+      "graph": "frontend/src/components/ExecutionGraph.tsx（节点状态、入边信号流 1.4s 循环）",
+      "inspector": "frontend/src/components/Inspector.tsx（桌面 420ms 展开）",
+      "select": "frontend/src/components/ui.tsx Select（240ms 展开 / 160ms 收起）",
+      "app": "frontend/src/App.tsx"
+    },
+    "nativeMotion": {
+      "spin": "styles.css .spin 1.3s linear infinite",
+      "graphSignal": "styles.css .graph-edge-signal 1.4s linear infinite",
+      "workingRule": "styles.css .working-rule 2.8s",
+      "nodeStatusEnter": "styles.css node-status-enter 180ms",
+      "inspector": "styles.css grid-template-columns / transform 420ms cubic-bezier(0.22,1,0.36,1)",
+      "answerEnter": "App.tsx motion.div opacity/y 0.16s"
+    },
+    "layoutMeasurement": {
+      "source": ".research_tmp/resumable-promo/v01/frames-final4/render-log.json（渲染时 getBoundingClientRect 实测，CSS 像素；与预览渲染的测量逐帧一致）",
+      "viewport": "1776 × 999；1600 × 900 时产品的矮视口规则把执行时间线压到约一行，故改用 999 高度（时间线 129px，可见三行调用）",
+      "inspectorCollapsed": {
+        "workbench": [
+          125,
+          238,
+          1594,
+          669
+        ],
+        "conversation": [
+          125,
+          238,
+          663,
+          669
+        ],
+        "execution": [
+          804,
+          238,
+          883,
+          669
+        ],
+        "graphCanvas": [
+          805,
+          351,
+          881,
+          350
+        ],
+        "timeline": [
+          815,
+          770,
+          861,
+          129
+        ]
+      },
+      "inspectorOpen": {
+        "conversation": [
+          125,
+          238,
+          457,
+          669
+        ],
+        "execution": [
+          598,
+          238,
+          615,
+          669
+        ],
+        "inspector": [
+          1246,
+          238,
+          473,
+          669
+        ],
+        "answerBody": [
+          149,
+          597,
+          409,
+          188
+        ],
+        "evidenceDetail": [
+          1264,
+          498,
+          437,
+          171
+        ]
+      },
+      "fonts": "Inter Variable（产品打包的拉丁字体）+ 系统 Microsoft YaHei（中文）；正文 13px。完整画面输出比例 1920/1776 ≈ 1.081；局部取景 1.20–2.00 倍（运行模式菜单 2.00；调查控制区 1.89–1.96，成片中因上下边避让文字略放宽）",
+      "camera": "Chromium 截图裁切把宽高截成整数 CSS 像素后四舍五入缩放；取景宽度取最近的、能精确输出 1920×1080 的整数，偏移按输出像素对齐"
+    }
+  },
+  "coverage": {
+    "status": "随 v01 分镜确认（2026-10-29）；确认时没有要求加入省略项",
+    "overview": {
+      "decision": "show",
+      "evidence": "完整工作台：顶栏、左侧导航、问题与答案、执行流程图与时间线、检查器入口",
+      "shotIds": [
+        "overview"
+      ],
+      "reason": "先建立工作区上下文，再进入局部"
+    },
+    "configuration": {
+      "decision": "show",
+      "evidence": "页面右上“运行模式”下拉：模拟演示 → 连接服务；连接后输入框出现模型选择 synthetic-demo",
+      "shotIds": [
+        "connect"
+      ],
+      "reason": "持久保存与恢复只在“连接服务”模式生效；模型只有 synthetic-demo 一项，展示已选状态，不打开模型菜单。产品没有 Skills / 模板选择"
+    },
+    "coreOperation": {
+      "decision": "show",
+      "evidence": "输入问题 → 开始调查 → 执行图/时间线自动推进 → 追问 → 原地补充 → 暂停 → 继续 → 服务关闭并重启（自动重连）→ 继续至完成",
+      "shotIds": [
+        "ask",
+        "clarify",
+        "supplement",
+        "pause",
+        "resume",
+        "restart",
+        "complete"
+      ],
+      "reason": "恢复功能是本片主题；系统自动推进的步骤不由光标点击"
+    },
+    "result": {
+      "decision": "show",
+      "evidence": "带引用 [1][2] 的答案；点击引用 2 打开检查器“证据”页，显示“回退演练”完整合成原文；品牌收尾",
+      "shotIds": [
+        "complete",
+        "evidence",
+        "brand"
+      ],
+      "reason": "恢复后答案仍可回到原文核对"
+    },
+    "omitted": [
+      {
+        "item": "运行历史对话框",
+        "reason": "服务端持久化已通过重启后重连同一调查体现；如需强调可在确认时加入"
+      },
+      {
+        "item": "页面刷新",
+        "reason": "与自动重连重复，且整页刷新画面跳变较大"
+      },
+      {
+        "item": "深色主题、窄屏抽屉、取消调查",
+        "reason": "与恢复主线无关"
+      },
+      {
+        "item": "服务硬崩溃导致的“服务中断，可恢复 / 无法恢复”",
+        "reason": "演示后端的正常关闭路径是“已暂停 · 服务关闭前已保存检查点”；硬崩溃落在调用中会按设计判为不可恢复，不作为宣传主线"
+      }
+    ]
+  },
+  "spec": {
+    "output": "1920 × 1080，30 fps，H.264 + AAC MP4",
+    "bpm": 120,
+    "recommendedSeconds": 43,
+    "durationReason": "需依次展示配置、输入、自动执行与追问、补充、暂停、继续、服务重启重连、完成与原文核对；每处状态留 1.5 秒以上阅读，按 12 秒压缩会挤掉暂停/重启的状态文字",
+    "label": "合成演示 · 流程已压缩（全程显示）",
+    "outputDir": "docs/resumable-promo/versions/v01",
+    "cacheDir": ".research_tmp/resumable-promo/v01（Git 忽略：构建、帧、日志）"
+  }
+}

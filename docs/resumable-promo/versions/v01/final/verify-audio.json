@@ -1,0 +1,418 @@
+{
+  "planSha256": "4075604c0d597dd041836a4cd29e0da1e24f25c11aeea63a7ffb01091dade6f6",
+  "videoSha256": "21210c048016742c6788bdd0d1f92ebb7d9515a487a406e6d8dba1bd85a7a1e6",
+  "wavSha256": "b4badb40ff4fb8fa6b4b149a7e14eeb6d1568c37480d47eab5a98e85424eb781",
+  "sidecarMatches": true,
+  "sampleRate": 48000,
+  "sourceSamples": 2064000,
+  "decodedSamples": 2064384,
+  "cuePlacement": {
+    "checked": 36,
+    "byKind": {
+      "click": 10,
+      "key": 18,
+      "swell-end": 1,
+      "chime": 4,
+      "power-down": 1,
+      "swoosh": 1,
+      "brand": 1
+    },
+    "wrong": []
+  },
+  "alignment": {
+    "lagSamples": 0,
+    "lagMs": 0.0,
+    "correlation": 0.998136,
+    "codingNoiseDb": -24.5
+  },
+  "levels": {
+    "decodedPeakDbfs": -3.11,
+    "sourcePeakDbfs": -3.0,
+    "clippedSamples": 0,
+    "paddingSamples": 384
+  },
+  "cueOnsets": {
+    "byKind": {
+      "click": {
+        "cues": 10,
+        "measured": 10,
+        "wavOnsetMs": [
+          0.083,
+          0.271
+        ],
+        "maxAbsDifferenceMs": 0.125
+      },
+      "key": {
+        "cues": 18,
+        "measured": 18,
+        "wavOnsetMs": [
+          -0.167,
+          0.125
+        ],
+        "maxAbsDifferenceMs": 0.042
+      },
+      "chime": {
+        "cues": 4,
+        "measured": 4,
+        "wavOnsetMs": [
+          1.271,
+          2.125
+        ],
+        "maxAbsDifferenceMs": 0.0
+      },
+      "power-down": {
+        "cues": 1,
+        "measured": 1,
+        "wavOnsetMs": [
+          -12.188,
+          -12.188
+        ],
+        "maxAbsDifferenceMs": 0.0
+      },
+      "brand": {
+        "cues": 1,
+        "measured": 1,
+        "wavOnsetMs": [
+          2.062,
+          2.062
+        ],
+        "maxAbsDifferenceMs": 0.0
+      }
+    },
+    "cues": [
+      {
+        "kind": "click",
+        "id": "open-mode",
+        "frame": 90,
+        "sample": 144000,
+        "onsetWavMs": 0.083,
+        "onsetMp4Ms": 0.083,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "click",
+        "id": "pick-live",
+        "frame": 120,
+        "sample": 192000,
+        "onsetWavMs": 0.125,
+        "onsetMp4Ms": 0.25,
+        "differenceMs": 0.125
+      },
+      {
+        "kind": "click",
+        "id": "focus-query",
+        "frame": 195,
+        "sample": 312000,
+        "onsetWavMs": 0.271,
+        "onsetMp4Ms": 0.292,
+        "differenceMs": 0.021
+      },
+      {
+        "kind": "key",
+        "id": "type-query",
+        "frame": 196,
+        "sample": 313600,
+        "onsetWavMs": 0.042,
+        "onsetMp4Ms": 0.042,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "key",
+        "id": "type-query",
+        "frame": 198,
+        "sample": 316800,
+        "onsetWavMs": 0.021,
+        "onsetMp4Ms": 0.021,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "key",
+        "id": "type-query",
+        "frame": 200,
+        "sample": 320000,
+        "onsetWavMs": 0.021,
+        "onsetMp4Ms": 0.042,
+        "differenceMs": 0.021
+      },
+      {
+        "kind": "key",
+        "id": "type-query",
+        "frame": 202,
+        "sample": 323200,
+        "onsetWavMs": -0.167,
+        "onsetMp4Ms": -0.188,
+        "differenceMs": -0.021
+      },
+      {
+        "kind": "key",
+        "id": "type-query",
+        "frame": 204,
+        "sample": 326400,
+        "onsetWavMs": 0.021,
+        "onsetMp4Ms": -0.021,
+        "differenceMs": -0.042
+      },
+      {
+        "kind": "key",
+        "id": "type-query",
+        "frame": 206,
+        "sample": 329600,
+        "onsetWavMs": 0.125,
+        "onsetMp4Ms": 0.104,
+        "differenceMs": -0.021
+      },
+      {
+        "kind": "key",
+        "id": "type-query",
+        "frame": 208,
+        "sample": 332800,
+        "onsetWavMs": 0.021,
+        "onsetMp4Ms": 0.021,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "key",
+        "id": "type-query",
+        "frame": 210,
+        "sample": 336000,
+        "onsetWavMs": 0.104,
+        "onsetMp4Ms": 0.083,
+        "differenceMs": -0.021
+      },
+      {
+        "kind": "key",
+        "id": "type-query",
+        "frame": 212,
+        "sample": 339200,
+        "onsetWavMs": -0.042,
+        "onsetMp4Ms": -0.021,
+        "differenceMs": 0.021
+      },
+      {
+        "kind": "key",
+        "id": "type-query",
+        "frame": 214,
+        "sample": 342400,
+        "onsetWavMs": 0.021,
+        "onsetMp4Ms": 0.021,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "key",
+        "id": "type-query",
+        "frame": 216,
+        "sample": 345600,
+        "onsetWavMs": 0.062,
+        "onsetMp4Ms": 0.062,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "click",
+        "id": "start-run",
+        "frame": 255,
+        "sample": 408000,
+        "onsetWavMs": 0.208,
+        "onsetMp4Ms": 0.208,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "chime",
+        "id": "waiting-input",
+        "frame": 360,
+        "sample": 576000,
+        "onsetWavMs": 1.625,
+        "onsetMp4Ms": 1.625,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "click",
+        "id": "focus-supplement",
+        "frame": 450,
+        "sample": 720000,
+        "onsetWavMs": 0.104,
+        "onsetMp4Ms": 0.083,
+        "differenceMs": -0.021
+      },
+      {
+        "kind": "key",
+        "id": "type-supplement",
+        "frame": 451,
+        "sample": 721600,
+        "onsetWavMs": 0.0,
+        "onsetMp4Ms": 0.0,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "key",
+        "id": "type-supplement",
+        "frame": 453,
+        "sample": 724800,
+        "onsetWavMs": 0.042,
+        "onsetMp4Ms": 0.042,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "key",
+        "id": "type-supplement",
+        "frame": 455,
+        "sample": 728000,
+        "onsetWavMs": -0.062,
+        "onsetMp4Ms": -0.062,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "key",
+        "id": "type-supplement",
+        "frame": 457,
+        "sample": 731200,
+        "onsetWavMs": 0.104,
+        "onsetMp4Ms": 0.104,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "key",
+        "id": "type-supplement",
+        "frame": 459,
+        "sample": 734400,
+        "onsetWavMs": 0.104,
+        "onsetMp4Ms": 0.062,
+        "differenceMs": -0.042
+      },
+      {
+        "kind": "key",
+        "id": "type-supplement",
+        "frame": 461,
+        "sample": 737600,
+        "onsetWavMs": 0.042,
+        "onsetMp4Ms": 0.042,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "key",
+        "id": "type-supplement",
+        "frame": 463,
+        "sample": 740800,
+        "onsetWavMs": 0.062,
+        "onsetMp4Ms": 0.062,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "click",
+        "id": "submit-supplement",
+        "frame": 495,
+        "sample": 792000,
+        "onsetWavMs": 0.125,
+        "onsetMp4Ms": 0.104,
+        "differenceMs": -0.021
+      },
+      {
+        "kind": "click",
+        "id": "pause",
+        "frame": 555,
+        "sample": 888000,
+        "onsetWavMs": 0.104,
+        "onsetMp4Ms": 0.104,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "chime",
+        "id": "paused",
+        "frame": 615,
+        "sample": 984000,
+        "onsetWavMs": 2.125,
+        "onsetMp4Ms": 2.125,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "click",
+        "id": "resume-1",
+        "frame": 705,
+        "sample": 1128000,
+        "onsetWavMs": 0.188,
+        "onsetMp4Ms": 0.125,
+        "differenceMs": -0.063
+      },
+      {
+        "kind": "power-down",
+        "id": "service-stop",
+        "frame": 780,
+        "sample": 1248000,
+        "onsetWavMs": -12.188,
+        "onsetMp4Ms": -12.188,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "chime",
+        "id": "reconnected",
+        "frame": 870,
+        "sample": 1392000,
+        "onsetWavMs": 1.271,
+        "onsetMp4Ms": 1.271,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "click",
+        "id": "resume-2",
+        "frame": 945,
+        "sample": 1512000,
+        "onsetWavMs": 0.229,
+        "onsetMp4Ms": 0.292,
+        "differenceMs": 0.063
+      },
+      {
+        "kind": "chime",
+        "id": "answered",
+        "frame": 1020,
+        "sample": 1632000,
+        "onsetWavMs": 1.979,
+        "onsetMp4Ms": 1.979,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "click",
+        "id": "open-citation",
+        "frame": 1095,
+        "sample": 1752000,
+        "onsetWavMs": 0.25,
+        "onsetMp4Ms": 0.25,
+        "differenceMs": 0.0
+      },
+      {
+        "kind": "brand",
+        "id": "brand",
+        "frame": 1200,
+        "sample": 1920000,
+        "onsetWavMs": 2.062,
+        "onsetMp4Ms": 2.062,
+        "differenceMs": 0.0
+      }
+    ]
+  },
+  "loudness": {
+    "integratedLufs": -17.8,
+    "loudnessRangeLu": 3.2,
+    "truePeakDbtp": -3.1,
+    "momentaryByStateLufs": {
+      "intro": -18.1,
+      "connected": -18.5,
+      "running": -16.9,
+      "waiting": -18.1,
+      "pausing": -19.3,
+      "paused": -19.5,
+      "outage": -21.3,
+      "answered": -16.6,
+      "brand": -17.0
+    }
+  },
+  "checks": {
+    "sidecar": true,
+    "cuesOnPlannedSamples": true,
+    "noOffset": true,
+    "matchesSource": true,
+    "sampleCount": true,
+    "noClipping": true,
+    "truePeakBelow1Dbtp": true,
+    "cueOnsetsUnchanged": true
+  },
+  "passed": true
+}

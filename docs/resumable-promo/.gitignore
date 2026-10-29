@@ -1,0 +1,6 @@
+# Git keeps the final video, its source, the timeline and the checks the
+# README cites. Preview pages, keyframes and silent clips stay local; only the
+# approved storyboard overview is kept.
+__pycache__/
+/versions/*/preview/*
+!/versions/*/preview/overview.jpg

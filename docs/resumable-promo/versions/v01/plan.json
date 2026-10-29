@@ -1,0 +1,1241 @@
+{
+  "schemaVersion": 1,
+  "title": "EvidenceRAG · 可暂停、可恢复的文档调查（v01 预览）",
+  "timelineSha256": "15eddbec556f49938a8aab56a7a8011c2923f709b920f10effce297bfa9e78f8",
+  "video": {
+    "width": 1920,
+    "height": 1080,
+    "fps": "30",
+    "totalFrames": 1290,
+    "durationSeconds": 43.0
+  },
+  "audio": {
+    "bpm": 120.0,
+    "sampleRate": 48000,
+    "sampleCount": 2064000
+  },
+  "shots": [
+    {
+      "id": "overview",
+      "label": "产品全貌",
+      "startFrame": 0,
+      "endFrameExclusive": 75,
+      "frameCount": 75,
+      "startSeconds": 0.0,
+      "durationSeconds": 2.5,
+      "data": {
+        "caption": "EvidenceRAG · 中文文档调查工作台",
+        "camera": [
+          [
+            0,
+            "full"
+          ]
+        ]
+      }
+    },
+    {
+      "id": "connect",
+      "label": "关键配置：连接服务",
+      "startFrame": 75,
+      "endFrameExclusive": 180,
+      "frameCount": 105,
+      "startSeconds": 2.5,
+      "durationSeconds": 3.5,
+      "data": {
+        "caption": "切换到“连接服务”：调查保存在本地服务端",
+        "camera": [
+          [
+            0,
+            "mode",
+            15
+          ],
+          [
+            2.0,
+            "full",
+            24
+          ]
+        ]
+      }
+    },
+    {
+      "id": "ask",
+      "label": "输入问题并开始",
+      "startFrame": 180,
+      "endFrameExclusive": 285,
+      "frameCount": 105,
+      "startSeconds": 6.0,
+      "durationSeconds": 3.5,
+      "data": {
+        "caption": "提出问题，Agent 开始搜索与读取",
+        "camera": [
+          [
+            0,
+            "conversation",
+            18
+          ]
+        ]
+      }
+    },
+    {
+      "id": "clarify",
+      "label": "执行与追问",
+      "startFrame": 285,
+      "endFrameExclusive": 435,
+      "frameCount": 150,
+      "startSeconds": 9.5,
+      "durationSeconds": 5.0,
+      "data": {
+        "caption": "信息不足时先追问，已读证据保留在调查里",
+        "camera": [
+          [
+            0,
+            "execution",
+            21
+          ],
+          [
+            2.5,
+            "conversation",
+            24
+          ]
+        ]
+      }
+    },
+    {
+      "id": "supplement",
+      "label": "原地补充并继续",
+      "startFrame": 435,
+      "endFrameExclusive": 540,
+      "frameCount": 105,
+      "startSeconds": 14.5,
+      "durationSeconds": 3.5,
+      "data": {
+        "caption": "原地补充，沿用已读证据继续",
+        "camera": [
+          [
+            0,
+            "controls",
+            18
+          ]
+        ]
+      }
+    },
+    {
+      "id": "pause",
+      "label": "主动暂停",
+      "startFrame": 540,
+      "endFrameExclusive": 690,
+      "frameCount": 150,
+      "startSeconds": 18.0,
+      "durationSeconds": 5.0,
+      "data": {
+        "caption": "暂停：等当前调用返回、结果保存后才停下",
+        "camera": [
+          [
+            0,
+            "controls",
+            15
+          ]
+        ]
+      }
+    },
+    {
+      "id": "resume",
+      "label": "继续调查",
+      "startFrame": 690,
+      "endFrameExclusive": 765,
+      "frameCount": 75,
+      "startSeconds": 23.0,
+      "durationSeconds": 2.5,
+      "data": {
+        "caption": "继续：从保存点接着执行",
+        "camera": [
+          [
+            0,
+            "controls"
+          ],
+          [
+            1.0,
+            "work",
+            30
+          ]
+        ]
+      }
+    },
+    {
+      "id": "restart",
+      "label": "服务重启与重连",
+      "startFrame": 765,
+      "endFrameExclusive": 930,
+      "frameCount": 165,
+      "startSeconds": 25.5,
+      "durationSeconds": 5.5,
+      "data": {
+        "caption": "服务关闭并重启：前端自动重连，进度留在服务端",
+        "camera": [
+          [
+            0,
+            "work"
+          ],
+          [
+            0.6,
+            "controls",
+            24
+          ]
+        ]
+      }
+    },
+    {
+      "id": "complete",
+      "label": "继续并完成",
+      "startFrame": 930,
+      "endFrameExclusive": 1080,
+      "frameCount": 150,
+      "startSeconds": 31.0,
+      "durationSeconds": 5.0,
+      "data": {
+        "caption": "已保存的调用结果不重发，补完剩余步骤",
+        "camera": [
+          [
+            0,
+            "controls"
+          ],
+          [
+            1.0,
+            "work",
+            24
+          ],
+          [
+            2.6,
+            "conversation",
+            21
+          ]
+        ]
+      }
+    },
+    {
+      "id": "evidence",
+      "label": "引用核对",
+      "startFrame": 1080,
+      "endFrameExclusive": 1200,
+      "frameCount": 120,
+      "startSeconds": 36.0,
+      "durationSeconds": 4.0,
+      "data": {
+        "caption": "点击引用，核对完整原文",
+        "camera": [
+          [
+            0,
+            "conversation"
+          ],
+          [
+            0.5,
+            "full",
+            15
+          ]
+        ]
+      }
+    },
+    {
+      "id": "brand",
+      "label": "品牌收尾",
+      "startFrame": 1200,
+      "endFrameExclusive": 1290,
+      "frameCount": 90,
+      "startSeconds": 40.0,
+      "durationSeconds": 3.0,
+      "data": {
+        "camera": [
+          [
+            0,
+            "full"
+          ]
+        ]
+      }
+    }
+  ],
+  "events": [
+    {
+      "id": "open-mode",
+      "atSeconds": 0.5,
+      "action": "click",
+      "target": "mode-trigger",
+      "shot": "connect",
+      "frame": 90,
+      "beatIndex": 6,
+      "seconds": 3.0,
+      "sample": 144000
+    },
+    {
+      "id": "pick-live",
+      "atSeconds": 1.5,
+      "action": "click",
+      "target": "mode-live",
+      "shot": "connect",
+      "frame": 120,
+      "beatIndex": 8,
+      "seconds": 4.0,
+      "sample": 192000
+    },
+    {
+      "id": "focus-query",
+      "atSeconds": 0.5,
+      "action": "click",
+      "target": "query",
+      "shot": "ask",
+      "frame": 195,
+      "beatIndex": 13,
+      "seconds": 6.5,
+      "sample": 312000
+    },
+    {
+      "id": "type-query",
+      "atSeconds": 0.5,
+      "action": "type",
+      "target": "query",
+      "text": "星桥集群是否可以升级？",
+      "everyFrames": 2,
+      "shot": "ask",
+      "frame": 195,
+      "beatIndex": 13,
+      "seconds": 6.5,
+      "sample": 312000
+    },
+    {
+      "id": "start-run",
+      "atSeconds": 2.5,
+      "action": "click",
+      "target": "start",
+      "shot": "ask",
+      "frame": 255,
+      "beatIndex": 17,
+      "seconds": 8.5,
+      "sample": 408000
+    },
+    {
+      "id": "waiting-input",
+      "atSeconds": 2.5,
+      "action": "system",
+      "target": "waiting_input",
+      "shot": "clarify",
+      "frame": 360,
+      "beatIndex": 24,
+      "seconds": 12.0,
+      "sample": 576000
+    },
+    {
+      "id": "focus-supplement",
+      "atSeconds": 0.5,
+      "action": "click",
+      "target": "supplement",
+      "shot": "supplement",
+      "frame": 450,
+      "beatIndex": 30,
+      "seconds": 15.0,
+      "sample": 720000
+    },
+    {
+      "id": "type-supplement",
+      "atSeconds": 0.5,
+      "action": "type",
+      "target": "supplement",
+      "text": "甲版升级到乙版",
+      "everyFrames": 2,
+      "shot": "supplement",
+      "frame": 450,
+      "beatIndex": 30,
+      "seconds": 15.0,
+      "sample": 720000
+    },
+    {
+      "id": "submit-supplement",
+      "atSeconds": 2.0,
+      "action": "click",
+      "target": "submit-supplement",
+      "shot": "supplement",
+      "frame": 495,
+      "beatIndex": 33,
+      "seconds": 16.5,
+      "sample": 792000
+    },
+    {
+      "id": "pause",
+      "atSeconds": 0.5,
+      "action": "click",
+      "target": "pause",
+      "shot": "pause",
+      "frame": 555,
+      "beatIndex": 37,
+      "seconds": 18.5,
+      "sample": 888000
+    },
+    {
+      "id": "paused",
+      "atSeconds": 2.5,
+      "action": "system",
+      "target": "paused",
+      "shot": "pause",
+      "frame": 615,
+      "beatIndex": 41,
+      "seconds": 20.5,
+      "sample": 984000
+    },
+    {
+      "id": "resume-1",
+      "atSeconds": 0.5,
+      "action": "click",
+      "target": "resume",
+      "shot": "resume",
+      "frame": 705,
+      "beatIndex": 47,
+      "seconds": 23.5,
+      "sample": 1128000
+    },
+    {
+      "id": "service-stop",
+      "atSeconds": 0.5,
+      "action": "system",
+      "target": "outage-start",
+      "shot": "restart",
+      "frame": 780,
+      "beatIndex": 52,
+      "seconds": 26.0,
+      "sample": 1248000
+    },
+    {
+      "id": "reconnected",
+      "atSeconds": 3.5,
+      "action": "system",
+      "target": "reconnected",
+      "shot": "restart",
+      "frame": 870,
+      "beatIndex": 58,
+      "seconds": 29.0,
+      "sample": 1392000
+    },
+    {
+      "id": "resume-2",
+      "atSeconds": 0.5,
+      "action": "click",
+      "target": "resume",
+      "shot": "complete",
+      "frame": 945,
+      "beatIndex": 63,
+      "seconds": 31.5,
+      "sample": 1512000
+    },
+    {
+      "id": "answered",
+      "atSeconds": 3.0,
+      "action": "system",
+      "target": "completed",
+      "shot": "complete",
+      "frame": 1020,
+      "beatIndex": 68,
+      "seconds": 34.0,
+      "sample": 1632000
+    },
+    {
+      "id": "open-citation",
+      "atSeconds": 0.5,
+      "action": "click",
+      "target": "citation-2",
+      "shot": "evidence",
+      "frame": 1095,
+      "beatIndex": 73,
+      "seconds": 36.5,
+      "sample": 1752000
+    }
+  ],
+  "beats": [
+    {
+      "index": 0,
+      "frame": 0,
+      "seconds": 0.0,
+      "idealSeconds": 0.0,
+      "sample": 0
+    },
+    {
+      "index": 1,
+      "frame": 15,
+      "seconds": 0.5,
+      "idealSeconds": 0.5,
+      "sample": 24000
+    },
+    {
+      "index": 2,
+      "frame": 30,
+      "seconds": 1.0,
+      "idealSeconds": 1.0,
+      "sample": 48000
+    },
+    {
+      "index": 3,
+      "frame": 45,
+      "seconds": 1.5,
+      "idealSeconds": 1.5,
+      "sample": 72000
+    },
+    {
+      "index": 4,
+      "frame": 60,
+      "seconds": 2.0,
+      "idealSeconds": 2.0,
+      "sample": 96000
+    },
+    {
+      "index": 5,
+      "frame": 75,
+      "seconds": 2.5,
+      "idealSeconds": 2.5,
+      "sample": 120000
+    },
+    {
+      "index": 6,
+      "frame": 90,
+      "seconds": 3.0,
+      "idealSeconds": 3.0,
+      "sample": 144000
+    },
+    {
+      "index": 7,
+      "frame": 105,
+      "seconds": 3.5,
+      "idealSeconds": 3.5,
+      "sample": 168000
+    },
+    {
+      "index": 8,
+      "frame": 120,
+      "seconds": 4.0,
+      "idealSeconds": 4.0,
+      "sample": 192000
+    },
+    {
+      "index": 9,
+      "frame": 135,
+      "seconds": 4.5,
+      "idealSeconds": 4.5,
+      "sample": 216000
+    },
+    {
+      "index": 10,
+      "frame": 150,
+      "seconds": 5.0,
+      "idealSeconds": 5.0,
+      "sample": 240000
+    },
+    {
+      "index": 11,
+      "frame": 165,
+      "seconds": 5.5,
+      "idealSeconds": 5.5,
+      "sample": 264000
+    },
+    {
+      "index": 12,
+      "frame": 180,
+      "seconds": 6.0,
+      "idealSeconds": 6.0,
+      "sample": 288000
+    },
+    {
+      "index": 13,
+      "frame": 195,
+      "seconds": 6.5,
+      "idealSeconds": 6.5,
+      "sample": 312000
+    },
+    {
+      "index": 14,
+      "frame": 210,
+      "seconds": 7.0,
+      "idealSeconds": 7.0,
+      "sample": 336000
+    },
+    {
+      "index": 15,
+      "frame": 225,
+      "seconds": 7.5,
+      "idealSeconds": 7.5,
+      "sample": 360000
+    },
+    {
+      "index": 16,
+      "frame": 240,
+      "seconds": 8.0,
+      "idealSeconds": 8.0,
+      "sample": 384000
+    },
+    {
+      "index": 17,
+      "frame": 255,
+      "seconds": 8.5,
+      "idealSeconds": 8.5,
+      "sample": 408000
+    },
+    {
+      "index": 18,
+      "frame": 270,
+      "seconds": 9.0,
+      "idealSeconds": 9.0,
+      "sample": 432000
+    },
+    {
+      "index": 19,
+      "frame": 285,
+      "seconds": 9.5,
+      "idealSeconds": 9.5,
+      "sample": 456000
+    },
+    {
+      "index": 20,
+      "frame": 300,
+      "seconds": 10.0,
+      "idealSeconds": 10.0,
+      "sample": 480000
+    },
+    {
+      "index": 21,
+      "frame": 315,
+      "seconds": 10.5,
+      "idealSeconds": 10.5,
+      "sample": 504000
+    },
+    {
+      "index": 22,
+      "frame": 330,
+      "seconds": 11.0,
+      "idealSeconds": 11.0,
+      "sample": 528000
+    },
+    {
+      "index": 23,
+      "frame": 345,
+      "seconds": 11.5,
+      "idealSeconds": 11.5,
+      "sample": 552000
+    },
+    {
+      "index": 24,
+      "frame": 360,
+      "seconds": 12.0,
+      "idealSeconds": 12.0,
+      "sample": 576000
+    },
+    {
+      "index": 25,
+      "frame": 375,
+      "seconds": 12.5,
+      "idealSeconds": 12.5,
+      "sample": 600000
+    },
+    {
+      "index": 26,
+      "frame": 390,
+      "seconds": 13.0,
+      "idealSeconds": 13.0,
+      "sample": 624000
+    },
+    {
+      "index": 27,
+      "frame": 405,
+      "seconds": 13.5,
+      "idealSeconds": 13.5,
+      "sample": 648000
+    },
+    {
+      "index": 28,
+      "frame": 420,
+      "seconds": 14.0,
+      "idealSeconds": 14.0,
+      "sample": 672000
+    },
+    {
+      "index": 29,
+      "frame": 435,
+      "seconds": 14.5,
+      "idealSeconds": 14.5,
+      "sample": 696000
+    },
+    {
+      "index": 30,
+      "frame": 450,
+      "seconds": 15.0,
+      "idealSeconds": 15.0,
+      "sample": 720000
+    },
+    {
+      "index": 31,
+      "frame": 465,
+      "seconds": 15.5,
+      "idealSeconds": 15.5,
+      "sample": 744000
+    },
+    {
+      "index": 32,
+      "frame": 480,
+      "seconds": 16.0,
+      "idealSeconds": 16.0,
+      "sample": 768000
+    },
+    {
+      "index": 33,
+      "frame": 495,
+      "seconds": 16.5,
+      "idealSeconds": 16.5,
+      "sample": 792000
+    },
+    {
+      "index": 34,
+      "frame": 510,
+      "seconds": 17.0,
+      "idealSeconds": 17.0,
+      "sample": 816000
+    },
+    {
+      "index": 35,
+      "frame": 525,
+      "seconds": 17.5,
+      "idealSeconds": 17.5,
+      "sample": 840000
+    },
+    {
+      "index": 36,
+      "frame": 540,
+      "seconds": 18.0,
+      "idealSeconds": 18.0,
+      "sample": 864000
+    },
+    {
+      "index": 37,
+      "frame": 555,
+      "seconds": 18.5,
+      "idealSeconds": 18.5,
+      "sample": 888000
+    },
+    {
+      "index": 38,
+      "frame": 570,
+      "seconds": 19.0,
+      "idealSeconds": 19.0,
+      "sample": 912000
+    },
+    {
+      "index": 39,
+      "frame": 585,
+      "seconds": 19.5,
+      "idealSeconds": 19.5,
+      "sample": 936000
+    },
+    {
+      "index": 40,
+      "frame": 600,
+      "seconds": 20.0,
+      "idealSeconds": 20.0,
+      "sample": 960000
+    },
+    {
+      "index": 41,
+      "frame": 615,
+      "seconds": 20.5,
+      "idealSeconds": 20.5,
+      "sample": 984000
+    },
+    {
+      "index": 42,
+      "frame": 630,
+      "seconds": 21.0,
+      "idealSeconds": 21.0,
+      "sample": 1008000
+    },
+    {
+      "index": 43,
+      "frame": 645,
+      "seconds": 21.5,
+      "idealSeconds": 21.5,
+      "sample": 1032000
+    },
+    {
+      "index": 44,
+      "frame": 660,
+      "seconds": 22.0,
+      "idealSeconds": 22.0,
+      "sample": 1056000
+    },
+    {
+      "index": 45,
+      "frame": 675,
+      "seconds": 22.5,
+      "idealSeconds": 22.5,
+      "sample": 1080000
+    },
+    {
+      "index": 46,
+      "frame": 690,
+      "seconds": 23.0,
+      "idealSeconds": 23.0,
+      "sample": 1104000
+    },
+    {
+      "index": 47,
+      "frame": 705,
+      "seconds": 23.5,
+      "idealSeconds": 23.5,
+      "sample": 1128000
+    },
+    {
+      "index": 48,
+      "frame": 720,
+      "seconds": 24.0,
+      "idealSeconds": 24.0,
+      "sample": 1152000
+    },
+    {
+      "index": 49,
+      "frame": 735,
+      "seconds": 24.5,
+      "idealSeconds": 24.5,
+      "sample": 1176000
+    },
+    {
+      "index": 50,
+      "frame": 750,
+      "seconds": 25.0,
+      "idealSeconds": 25.0,
+      "sample": 1200000
+    },
+    {
+      "index": 51,
+      "frame": 765,
+      "seconds": 25.5,
+      "idealSeconds": 25.5,
+      "sample": 1224000
+    },
+    {
+      "index": 52,
+      "frame": 780,
+      "seconds": 26.0,
+      "idealSeconds": 26.0,
+      "sample": 1248000
+    },
+    {
+      "index": 53,
+      "frame": 795,
+      "seconds": 26.5,
+      "idealSeconds": 26.5,
+      "sample": 1272000
+    },
+    {
+      "index": 54,
+      "frame": 810,
+      "seconds": 27.0,
+      "idealSeconds": 27.0,
+      "sample": 1296000
+    },
+    {
+      "index": 55,
+      "frame": 825,
+      "seconds": 27.5,
+      "idealSeconds": 27.5,
+      "sample": 1320000
+    },
+    {
+      "index": 56,
+      "frame": 840,
+      "seconds": 28.0,
+      "idealSeconds": 28.0,
+      "sample": 1344000
+    },
+    {
+      "index": 57,
+      "frame": 855,
+      "seconds": 28.5,
+      "idealSeconds": 28.5,
+      "sample": 1368000
+    },
+    {
+      "index": 58,
+      "frame": 870,
+      "seconds": 29.0,
+      "idealSeconds": 29.0,
+      "sample": 1392000
+    },
+    {
+      "index": 59,
+      "frame": 885,
+      "seconds": 29.5,
+      "idealSeconds": 29.5,
+      "sample": 1416000
+    },
+    {
+      "index": 60,
+      "frame": 900,
+      "seconds": 30.0,
+      "idealSeconds": 30.0,
+      "sample": 1440000
+    },
+    {
+      "index": 61,
+      "frame": 915,
+      "seconds": 30.5,
+      "idealSeconds": 30.5,
+      "sample": 1464000
+    },
+    {
+      "index": 62,
+      "frame": 930,
+      "seconds": 31.0,
+      "idealSeconds": 31.0,
+      "sample": 1488000
+    },
+    {
+      "index": 63,
+      "frame": 945,
+      "seconds": 31.5,
+      "idealSeconds": 31.5,
+      "sample": 1512000
+    },
+    {
+      "index": 64,
+      "frame": 960,
+      "seconds": 32.0,
+      "idealSeconds": 32.0,
+      "sample": 1536000
+    },
+    {
+      "index": 65,
+      "frame": 975,
+      "seconds": 32.5,
+      "idealSeconds": 32.5,
+      "sample": 1560000
+    },
+    {
+      "index": 66,
+      "frame": 990,
+      "seconds": 33.0,
+      "idealSeconds": 33.0,
+      "sample": 1584000
+    },
+    {
+      "index": 67,
+      "frame": 1005,
+      "seconds": 33.5,
+      "idealSeconds": 33.5,
+      "sample": 1608000
+    },
+    {
+      "index": 68,
+      "frame": 1020,
+      "seconds": 34.0,
+      "idealSeconds": 34.0,
+      "sample": 1632000
+    },
+    {
+      "index": 69,
+      "frame": 1035,
+      "seconds": 34.5,
+      "idealSeconds": 34.5,
+      "sample": 1656000
+    },
+    {
+      "index": 70,
+      "frame": 1050,
+      "seconds": 35.0,
+      "idealSeconds": 35.0,
+      "sample": 1680000
+    },
+    {
+      "index": 71,
+      "frame": 1065,
+      "seconds": 35.5,
+      "idealSeconds": 35.5,
+      "sample": 1704000
+    },
+    {
+      "index": 72,
+      "frame": 1080,
+      "seconds": 36.0,
+      "idealSeconds": 36.0,
+      "sample": 1728000
+    },
+    {
+      "index": 73,
+      "frame": 1095,
+      "seconds": 36.5,
+      "idealSeconds": 36.5,
+      "sample": 1752000
+    },
+    {
+      "index": 74,
+      "frame": 1110,
+      "seconds": 37.0,
+      "idealSeconds": 37.0,
+      "sample": 1776000
+    },
+    {
+      "index": 75,
+      "frame": 1125,
+      "seconds": 37.5,
+      "idealSeconds": 37.5,
+      "sample": 1800000
+    },
+    {
+      "index": 76,
+      "frame": 1140,
+      "seconds": 38.0,
+      "idealSeconds": 38.0,
+      "sample": 1824000
+    },
+    {
+      "index": 77,
+      "frame": 1155,
+      "seconds": 38.5,
+      "idealSeconds": 38.5,
+      "sample": 1848000
+    },
+    {
+      "index": 78,
+      "frame": 1170,
+      "seconds": 39.0,
+      "idealSeconds": 39.0,
+      "sample": 1872000
+    },
+    {
+      "index": 79,
+      "frame": 1185,
+      "seconds": 39.5,
+      "idealSeconds": 39.5,
+      "sample": 1896000
+    },
+    {
+      "index": 80,
+      "frame": 1200,
+      "seconds": 40.0,
+      "idealSeconds": 40.0,
+      "sample": 1920000
+    },
+    {
+      "index": 81,
+      "frame": 1215,
+      "seconds": 40.5,
+      "idealSeconds": 40.5,
+      "sample": 1944000
+    },
+    {
+      "index": 82,
+      "frame": 1230,
+      "seconds": 41.0,
+      "idealSeconds": 41.0,
+      "sample": 1968000
+    },
+    {
+      "index": 83,
+      "frame": 1245,
+      "seconds": 41.5,
+      "idealSeconds": 41.5,
+      "sample": 1992000
+    },
+    {
+      "index": 84,
+      "frame": 1260,
+      "seconds": 42.0,
+      "idealSeconds": 42.0,
+      "sample": 2016000
+    },
+    {
+      "index": 85,
+      "frame": 1275,
+      "seconds": 42.5,
+      "idealSeconds": 42.5,
+      "sample": 2040000
+    }
+  ],
+  "holds": [
+    {
+      "shot": "overview",
+      "label": "全貌稳定停留（光标随后起步）",
+      "startFrame": 0,
+      "endFrameExclusive": 69,
+      "durationSeconds": 2.3
+    },
+    {
+      "shot": "connect",
+      "label": "连接状态与模型可读",
+      "startFrame": 159,
+      "endFrameExclusive": 180,
+      "durationSeconds": 0.7
+    },
+    {
+      "shot": "clarify",
+      "label": "阅读追问",
+      "startFrame": 384,
+      "endFrameExclusive": 435,
+      "durationSeconds": 1.7
+    },
+    {
+      "shot": "pause",
+      "label": "暂停状态可读",
+      "startFrame": 630,
+      "endFrameExclusive": 690,
+      "durationSeconds": 2.0
+    },
+    {
+      "shot": "restart",
+      "label": "恢复说明可读",
+      "startFrame": 882,
+      "endFrameExclusive": 930,
+      "durationSeconds": 1.6
+    },
+    {
+      "shot": "complete",
+      "label": "答案可读",
+      "startFrame": 1035,
+      "endFrameExclusive": 1080,
+      "durationSeconds": 1.5
+    },
+    {
+      "shot": "evidence",
+      "label": "原文落位后阅读",
+      "startFrame": 1125,
+      "endFrameExclusive": 1200,
+      "durationSeconds": 2.5
+    },
+    {
+      "shot": "brand",
+      "label": "品牌稳定",
+      "startFrame": 1245,
+      "endFrameExclusive": 1290,
+      "durationSeconds": 1.5
+    }
+  ],
+  "keyframes": [
+    {
+      "shot": "overview",
+      "frame": 45,
+      "label": "完整工作台（模拟演示模式）"
+    },
+    {
+      "shot": "connect",
+      "frame": 105,
+      "label": "运行模式菜单打开"
+    },
+    {
+      "shot": "connect",
+      "frame": 171,
+      "label": "服务已连接 · synthetic-demo"
+    },
+    {
+      "shot": "ask",
+      "frame": 240,
+      "label": "贯穿全片的问题"
+    },
+    {
+      "shot": "ask",
+      "frame": 276,
+      "label": "调查已创建"
+    },
+    {
+      "shot": "clarify",
+      "frame": 321,
+      "label": "执行中：图与时间线"
+    },
+    {
+      "shot": "clarify",
+      "frame": 405,
+      "label": "等待补充信息"
+    },
+    {
+      "shot": "supplement",
+      "frame": 480,
+      "label": "填写补充信息"
+    },
+    {
+      "shot": "supplement",
+      "frame": 525,
+      "label": "补充已提交，恢复执行"
+    },
+    {
+      "shot": "pause",
+      "frame": 585,
+      "label": "正在暂停"
+    },
+    {
+      "shot": "pause",
+      "frame": 660,
+      "label": "已暂停"
+    },
+    {
+      "shot": "resume",
+      "frame": 759,
+      "label": "恢复执行：第二次搜索"
+    },
+    {
+      "shot": "restart",
+      "frame": 819,
+      "label": "进度连接已断开，正在重连"
+    },
+    {
+      "shot": "restart",
+      "frame": 903,
+      "label": "重连后：已暂停，可继续"
+    },
+    {
+      "shot": "complete",
+      "frame": 984,
+      "label": "从保存点继续"
+    },
+    {
+      "shot": "complete",
+      "frame": 1059,
+      "label": "已生成答案"
+    },
+    {
+      "shot": "evidence",
+      "frame": 1170,
+      "label": "答案、引用 2 与原文"
+    },
+    {
+      "shot": "brand",
+      "frame": 1272,
+      "label": "品牌与标语"
+    }
+  ],
+  "previewClips": [
+    {
+      "id": "connect",
+      "startFrame": 75,
+      "endFrameExclusive": 180,
+      "frameCount": 105,
+      "durationSeconds": 3.5
+    },
+    {
+      "id": "run",
+      "startFrame": 240,
+      "endFrameExclusive": 435,
+      "frameCount": 195,
+      "durationSeconds": 6.5
+    },
+    {
+      "id": "pause-resume",
+      "startFrame": 540,
+      "endFrameExclusive": 765,
+      "frameCount": 225,
+      "durationSeconds": 7.5
+    },
+    {
+      "id": "restart",
+      "startFrame": 765,
+      "endFrameExclusive": 1080,
+      "frameCount": 315,
+      "durationSeconds": 10.5
+    },
+    {
+      "id": "citation",
+      "startFrame": 1080,
+      "endFrameExclusive": 1290,
+      "frameCount": 210,
+      "durationSeconds": 7.0
+    }
+  ],
+  "planSha256": "4075604c0d597dd041836a4cd29e0da1e24f25c11aeea63a7ffb01091dade6f6"
+}
