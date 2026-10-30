@@ -1,0 +1,21 @@
+{
+  "planSha256": "e017c1b068b20cbefaf80b8d07023c3531427d9d49941948d126b851e32b9dc5",
+  "sampleRate": 48000,
+  "sampleCount": 2472000,
+  "channels": 2,
+  "audioSha256": "6236624b6e5f2a0b8ba38dbaea680f4cf52b1b7fc660811262c93b220585f64e",
+  "seed": 20261029,
+  "numpy": "2.5.2",
+  "peakBeforeNormalize": 0.46321029089632304,
+  "normalizedPeakDbfs": -3.0,
+  "layerRms": {
+    "pad": -26.42,
+    "bass": -23.17,
+    "kick": -20.6,
+    "hat": -30.45,
+    "arp": -26.44,
+    "bell": -28.27,
+    "pulse": -20.42
+  },
+  "sfxPeakDbfs": -10.75
+}

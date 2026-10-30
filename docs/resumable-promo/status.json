@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "current": "v01",
-  "state": "成片已生成（未经人工完整观看与听音）",
+  "current": "v02",
+  "state": "v02 成片已生成（未经人工完整观看与听音）",
   "updated": "2026-10-30",
   "versions": [
     {
@@ -47,6 +47,70 @@
         "automated": "通过：规格与帧时间戳、渲染与点击、文案逐字、跨进程确定性、停顿、成片逐帧比对、音效落点、响度与削波",
         "programmaticPlayback": "Chrome 156 无头模式 1 倍速：1290 帧丢帧 0，音频包络 0 ms 对齐；色彩相对渲染帧 PSNR 43.0–45.8 dB（码流无色彩标注）",
         "visual": "检查拼图与转场拼图、局部放大、Chrome 解码帧与渲染帧并排；引用与结论人工对读"
+      },
+      "notVerified": [
+        "在真实显示器上完整观看",
+        "主观听音：节奏、音量平衡",
+        "Chrome 以外播放器的色彩"
+      ]
+    },
+    {
+      "id": "v02",
+      "stage": "final",
+      "state": "final",
+      "basedOn": "v01",
+      "entry": "versions/v02/README.md",
+      "timelineSha256": "a2f8eb76dceaf4b4d74915a632368192987cc16be0de594339c0ac523c444989",
+      "planSha256": "e017c1b068b20cbefaf80b8d07023c3531427d9d49941948d126b851e32b9dc5",
+      "recommendedSeconds": 51.5,
+      "request": "用户 2026-10-30：README 视频对检查器的介绍少了一点；选定含运行页签的约 51.5 秒方案",
+      "changes": [
+        "0–36 秒沿用 v01 镜头与录制",
+        "新增步骤检查器（36.0–40.0s）：点击流程图“读取证据”节点",
+        "新增同类调用切换（40.0–42.5s）：上一次 → 第 1 / 2 次",
+        "证据页原文（42.5–46.5s）：改由“证据”页签进入并选择证据 2",
+        "新增运行概览（46.5–48.5s）",
+        "品牌收尾移到 48.5–51.5s；检查器镜头字幕居中于执行流程栏，不遮挡检查器标题"
+      ],
+      "preview": {
+        "overview": "versions/v02/preview/overview.jpg",
+        "clips": [
+          "connect",
+          "run",
+          "pause-resume",
+          "restart",
+          "inspector",
+          "brand"
+        ],
+        "verify": "versions/v02/preview/verify-preview.json：确定性 23 帧差 0；连续动效 2 组；8 个停顿静止",
+        "state": "archived"
+      },
+      "video": {
+        "path": "versions/v02/final/evidencerag-resumable-v02.mp4",
+        "sha256": "c1b0d444cd0e6c1bf9265435cdd07caeff2292074a310049414576eeec216e6d",
+        "bytes": 10037316,
+        "seconds": 51.5,
+        "frames": 1545,
+        "format": "1920×1080，30 fps 恒定帧率，H.264 High + AAC-LC 48 kHz 立体声"
+      },
+      "confirmation": {
+        "at": "2026-10-30",
+        "quote": "The v02 preview is confirmed; make the full video and soundtrack",
+        "covers": "v02 分镜预览：14 个镜头、51.5 秒、检查器段四个镜头"
+      },
+      "inScopeFixes": [
+        "“证据”页签点击点移到页签空白处，光标不再停在“证据 2”字样上",
+        "同类调用与运行概览的停顿从镜头内 1.2 秒开始，避开光标让位"
+      ],
+      "verification": {
+        "records": [
+          "versions/v02/final/verify-media.json",
+          "versions/v02/final/verify-final.json",
+          "versions/v02/final/verify-audio.json",
+          "versions/v02/final/playback.json"
+        ],
+        "automated": "通过：规格、14 次点击与 12 项界面断言、文案逐字、26 帧跨进程确定性、11 个停顿、成片逐帧 PSNR ≥ 40.18 dB、音效落点、响度与削波",
+        "programmaticPlayback": "Chrome 156 无头模式 1 倍速：1545 帧丢帧 0，音频包络 0 ms 对齐（r = 0.9996）"
       },
       "notVerified": [
         "在真实显示器上完整观看",

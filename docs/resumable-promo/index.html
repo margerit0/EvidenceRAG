@@ -24,19 +24,24 @@
   <body>
     <main>
       <h1>EvidenceRAG · 可暂停、可恢复的文档调查</h1>
-      <p><span class="status" id="status">v01 · 成片已生成（未经人工完整观看与听音）</span></p>
+      <p><span class="status" id="status">v02 · 成片已生成（未经人工完整观看与听音）</span></p>
       <p class="muted">画面全部来自 frontend 生产构建（提交 e794086）与原创合成后端的录制回放，未调用模型、未用真实语料。“合成演示 · 流程已压缩”全程显示，片中耗时不代表产品速度。</p>
 
       <section>
-        <h2>成片 v01</h2>
-        <video src="versions/v01/final/evidencerag-resumable-v01.mp4" controls playsinline preload="metadata"></video>
-        <p class="muted">43.0 秒 · 1920×1080 · 30 fps 恒定帧率（1290 帧）· H.264 High + AAC-LC 48 kHz 立体声 · 8,749,342 字节<br />
-          SHA-256 <code>21210c048016742c6788bdd0d1f92ebb7d9515a487a406e6d8dba1bd85a7a1e6</code></p>
+        <h2>成片 v02</h2>
+        <video src="versions/v02/final/evidencerag-resumable-v02.mp4" controls playsinline preload="metadata"></video>
+        <p class="muted">51.5 秒 · 1920×1080 · 30 fps 恒定帧率（1545 帧）· H.264 High + AAC-LC 48 kHz 立体声 · 10,037,316 字节<br />
+          SHA-256 <code>c1b0d444cd0e6c1bf9265435cdd07caeff2292074a310049414576eeec216e6d</code></p>
         <ul>
-          <li><a href="versions/v01/README.md">制作说明、验证记录与复现命令</a></li>
-          <li>检查拼图（解码自成片）：<a href="versions/v01/final/check-sheet.png">18 个关键帧</a>、<a href="versions/v01/final/transitions.png">运镜中点与品牌转场</a></li>
-          <li>已确认的分镜总览（2026-10-29）：<a href="versions/v01/preview/overview.jpg">overview.jpg</a>（预览页与无声小样只在本地保留）</li>
+          <li><a href="versions/v02/README.md">制作说明、相对 v01 的变化、验证记录与复现命令</a></li>
+          <li>检查拼图（解码自成片）：<a href="versions/v02/final/check-sheet.png">21 个关键帧</a>、<a href="versions/v02/final/transitions.png">运镜中点与品牌转场</a></li>
+          <li>已确认的分镜总览（2026-10-30）：<a href="versions/v02/preview/overview.jpg">overview.jpg</a></li>
         </ul>
+      </section>
+
+      <section>
+        <h2>归档 · v01</h2>
+        <p class="muted">43.0 秒，没有检查器段：<a href="versions/v01/final/evidencerag-resumable-v01.mp4">成片</a> · <a href="versions/v01/README.md">制作说明</a></p>
       </section>
 
       <section>
@@ -44,8 +49,8 @@
         <table>
           <tr><th>类别</th><th>结果</th></tr>
           <tr><td>自动检查</td><td>通过：规格与帧时间戳、渲染与点击、文案逐字、跨进程确定性、停顿、成片逐帧比对、音效落点、响度与削波</td></tr>
-          <tr><td>程序播放</td><td>Chrome 156 无头模式 1 倍速：1290 帧丢帧 0，音频包络 0 ms 对齐；色彩相对渲染帧 PSNR 43.0–45.8 dB（码流无色彩标注，见制作说明）</td></tr>
-          <tr><td>目视</td><td>检查拼图、转场拼图、局部放大、Chrome 解码帧与渲染帧并排；引用与结论人工对读</td></tr>
+          <tr><td>程序播放</td><td>Chrome 156 无头模式 1 倍速：1545 帧丢帧 0，音频包络 0 ms 对齐；色彩相对渲染帧 PSNR 43.0–45.8 dB（码流无色彩标注，见制作说明）</td></tr>
+          <tr><td>目视</td><td>检查拼图、检查器段预览帧；v01 部分沿用其局部放大与人工对读</td></tr>
           <tr><td>未做</td><td>在真实显示器上完整观看与主观听音；Chrome 以外播放器的色彩</td></tr>
         </table>
       </section>

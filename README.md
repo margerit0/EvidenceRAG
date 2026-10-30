@@ -12,9 +12,9 @@
 
 https://github.com/user-attachments/assets/8afd2785-7fbe-4a3e-b068-bd405b58951f
 
-[下载演示视频（含配乐）](docs/evidencerag-promo/revision-03/final-motion/EvidenceRAG-12s.mp4) · [视频源码与复现说明](docs/evidencerag-promo/README.md)
+[下载演示视频（51.5 秒，含配乐）](docs/resumable-promo/versions/v02/final/evidencerag-resumable-v02.mp4) · [视频源码与复现说明](docs/resumable-promo/README.md)
 
-*原创合成演示 · 流程已压缩。展示执行流程动效、调用详情与引用原文；无需密钥，不调用模型，不代表真实模型响应速度。*
+*原创合成演示 · 流程已压缩。展示连接服务、追问与补充、暂停与继续、服务重启后重连，以及检查器的步骤详情、同类调用切换、证据原文与运行概览；无需密钥，不调用模型，不代表真实模型响应速度。*
 
 <details>
 <summary>查看服务连接与模型选择</summary>

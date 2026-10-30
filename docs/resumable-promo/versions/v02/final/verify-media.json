@@ -1,0 +1,90 @@
+{
+  "planSha256": "e017c1b068b20cbefaf80b8d07023c3531427d9d49941948d126b851e32b9dc5",
+  "videoSha256": "c1b0d444cd0e6c1bf9265435cdd07caeff2292074a310049414576eeec216e6d",
+  "expected": {
+    "width": 1920,
+    "height": 1080,
+    "fps": "30",
+    "totalFrames": 1545,
+    "durationSeconds": 51.5
+  },
+  "checks": {
+    "streamCount": true,
+    "videoCodec": true,
+    "pixelFormat": true,
+    "dimensions": true,
+    "fps": true,
+    "decodedFrames": true,
+    "videoDuration": true,
+    "presentationTimestamps": true,
+    "containerDuration": true,
+    "audioCodec": true,
+    "sampleRate": true,
+    "audioSampleCount": true,
+    "audioFinite": true,
+    "audioHeadroom": true,
+    "audioSignal": true,
+    "trackStartSync": true
+  },
+  "commands": [
+    [
+      "ffprobe",
+      "-v",
+      "error",
+      "-count_frames",
+      "-show_streams",
+      "-show_format",
+      "-of",
+      "json",
+      "docs/resumable-promo/versions/v02/final/evidencerag-resumable-v02.mp4"
+    ],
+    [
+      "ffprobe",
+      "-v",
+      "error",
+      "-select_streams",
+      "v:0",
+      "-show_frames",
+      "-show_entries",
+      "frame=best_effort_timestamp_time",
+      "-of",
+      "json",
+      "docs/resumable-promo/versions/v02/final/evidencerag-resumable-v02.mp4"
+    ],
+    [
+      "ffmpeg",
+      "-v",
+      "error",
+      "-i",
+      "docs/resumable-promo/versions/v02/final/evidencerag-resumable-v02.mp4",
+      "-map",
+      "0:a:0",
+      "-f",
+      "f32le",
+      "-acodec",
+      "pcm_f32le",
+      "-"
+    ]
+  ],
+  "manual": {
+    "programmaticPlayback": "not_run",
+    "visual": "not_run",
+    "listening": "not_run",
+    "nativeInteraction": "not_run",
+    "actionSoundSync": "not_run"
+  },
+  "video": {
+    "decodedFrames": "1545",
+    "ptsCount": 1545,
+    "firstPTS": 0.0,
+    "lastPTS": 51.466667
+  },
+  "audio": {
+    "decodedSampleFrames": 2472960,
+    "peak": 0.7076694965362549,
+    "clippedSamples": 0,
+    "channels": 2,
+    "paddingToleranceSamples": 1024
+  },
+  "passed": true
+}

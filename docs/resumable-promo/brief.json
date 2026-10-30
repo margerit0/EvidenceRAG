@@ -158,7 +158,7 @@
     }
   },
   "coverage": {
-    "status": "随 v01 分镜确认（2026-10-29）；确认时没有要求加入省略项",
+    "status": "v01 随分镜确认（2026-10-29）；v02 检查器段随分镜确认（2026-10-30）",
     "overview": {
       "decision": "show",
       "evidence": "完整工作台：顶栏、左侧导航、问题与答案、执行流程图与时间线、检查器入口",
@@ -191,13 +191,16 @@
     },
     "result": {
       "decision": "show",
-      "evidence": "带引用 [1][2] 的答案；点击引用 2 打开检查器“证据”页，显示“回退演练”完整合成原文；品牌收尾",
+      "evidence": "带引用 [1][2] 的答案；点击流程图“读取证据”节点打开检查器“步骤”页（第 2 次读取：调用 ID、调用状态、模型轮次、耗时、返回码）→“上一次”切到第 1 / 2 次（图中“正在查看第 1 次”同步）→“证据 2”页列出 2 份已读取段落，选“回退演练”显示完整原文 →“运行”页（模型调用 6、搜索 / 读取 2 / 2、总耗时）；品牌收尾",
       "shotIds": [
         "complete",
+        "inspector-step",
+        "inspector-browse",
         "evidence",
+        "inspector-run",
         "brand"
       ],
-      "reason": "恢复后答案仍可回到原文核对"
+      "reason": "用户要求加强检查器介绍：展示其三个页签与同类调用导航；读取调用没有决策内容，Agent 决策的“决策内容”区未单独展示"
     },
     "omitted": [
       {
@@ -221,10 +224,10 @@
   "spec": {
     "output": "1920 × 1080，30 fps，H.264 + AAC MP4",
     "bpm": 120,
-    "recommendedSeconds": 43,
-    "durationReason": "需依次展示配置、输入、自动执行与追问、补充、暂停、继续、服务重启重连、完成与原文核对；每处状态留 1.5 秒以上阅读，按 12 秒压缩会挤掉暂停/重启的状态文字",
+    "recommendedSeconds": 51.5,
+    "durationReason": "v01 的 43 秒主线不变（配置、输入、追问、补充、暂停、继续、服务重启重连、完成）；v02 在其后加 8.5 秒检查器段：步骤详情、同类调用切换、证据页原文、运行概览，每页留 1 秒以上阅读",
     "label": "合成演示 · 流程已压缩（全程显示）",
-    "outputDir": "docs/resumable-promo/versions/v01",
-    "cacheDir": ".research_tmp/resumable-promo/v01（Git 忽略：构建、帧、日志）"
+    "outputDir": "docs/resumable-promo/versions/v02",
+    "cacheDir": ".research_tmp/resumable-promo/v02（Git 忽略：构建、帧、日志）"
   }
 }
