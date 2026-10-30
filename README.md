@@ -10,7 +10,7 @@
 
 从问题到带引用的答案，工作台展示每次搜索、证据读取与执行状态。点击引用对照原文，选择流程节点或时间线记录查看单次调用详情。
 
-https://github.com/user-attachments/assets/8afd2785-7fbe-4a3e-b068-bd405b58951f
+https://github.com/user-attachments/assets/e1843ec2-c3ca-41f5-a6b0-4ac07b9a07d5
 
 [下载演示视频（51.5 秒，含配乐）](docs/resumable-promo/versions/v02/final/evidencerag-resumable-v02.mp4) · [视频源码与复现说明](docs/resumable-promo/README.md)
 
